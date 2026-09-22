@@ -14,6 +14,11 @@ import productRoutes from "./modules/products/product.routes.js";
 import competitorRoutes from "./modules/competitors/competitor.routes.js";
 import surveyRoutes from "./modules/surveys/survey.routes.js";
 import biRoutes from "./modules/bi/bi.routes.js";
+import auditRoutes from "./modules/audits/audit.routes.js";
+import observationRoutes from "./modules/observations/observation.routes.js";
+import queensPriceRoutes from "./modules/queens-prices/queens-price.routes.js";
+import priceAnalysisRoutes from "./modules/price-analyses/price-analysis.routes.js";
+import alertRoutes from "./modules/alerts/alert.routes.js";
 
 const app = express();
 
@@ -62,6 +67,11 @@ app.use("/api/v1/products", productRoutes);
 app.use("/api/v1/competitors", competitorRoutes);
 app.use("/api/v1/surveys", surveyRoutes);
 app.use("/api/v1/bi", biRoutes);
+app.use("/api/v1/audits", auditRoutes);
+app.use("/api/v1", observationRoutes);
+app.use("/api/v1", queensPriceRoutes);
+app.use("/api/v1/price-analyses", priceAnalysisRoutes);
+app.use("/api/v1/alerts", alertRoutes);
 
 // ==========================================
 // 404 CATCH-ALL (Express 4 & 5 Compatible)

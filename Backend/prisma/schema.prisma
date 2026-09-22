@@ -360,10 +360,6 @@ model PriceObservation {
   observedUnit String?
   packageSize  String?
 
-  latitude       Decimal? @db.Decimal(10, 7)
-  longitude      Decimal? @db.Decimal(10, 7)
-  accuracyMeters Decimal? @db.Decimal(8, 2)
-
   capturedAt DateTime
 
   syncStatus SyncStatus @default(PENDING)
