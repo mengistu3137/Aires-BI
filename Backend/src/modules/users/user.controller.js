@@ -21,7 +21,7 @@ export const getById = async (req, res, next) => {
 export const create = async (req, res, next) => {
   try {
     const user = await userService.create(req.body);
-    res.status(201).json({ status: "success", message: "User registered", data: { user } });
+    res.status(201).json({ status: "success", message: "User created successfully", data: { user } });
   } catch (error) {
     next(error);
   }
@@ -30,7 +30,16 @@ export const create = async (req, res, next) => {
 export const update = async (req, res, next) => {
   try {
     const user = await userService.update(req.params.id, req.body);
-    res.status(200).json({ status: "success", message: "User updated", data: { user } });
+    res.status(200).json({ status: "success", message: "User updated successfully", data: { user } });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const remove = async (req, res, next) => {
+  try {
+    const result = await userService.remove(req.params.id);
+    res.status(200).json({ status: "success", data: result });
   } catch (error) {
     next(error);
   }
@@ -41,4 +50,5 @@ export const userController = {
   getById,
   create,
   update,
+  remove,
 };

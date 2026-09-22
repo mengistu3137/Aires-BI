@@ -14,6 +14,8 @@ import productRoutes from "./modules/products/product.routes.js";
 import competitorRoutes from "./modules/competitors/competitor.routes.js";
 import surveyRoutes from "./modules/surveys/survey.routes.js";
 import biRoutes from "./modules/bi/bi.routes.js";
+import storeRoutes from "./modules/store/store.routes.js";
+import periodRoutes from "./modules/period/period.routes.js";
 
 const app = express();
 
@@ -62,6 +64,8 @@ app.use("/api/v1/products", productRoutes);
 app.use("/api/v1/competitors", competitorRoutes);
 app.use("/api/v1/surveys", surveyRoutes);
 app.use("/api/v1/bi", biRoutes);
+app.use("/api/v1/stores", storeRoutes);
+app.use("/api/v1/survey-periods", periodRoutes);
 
 // ==========================================
 // 404 CATCH-ALL (Express 4 & 5 Compatible)
