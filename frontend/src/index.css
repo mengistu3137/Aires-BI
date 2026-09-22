@@ -1,0 +1,46 @@
+@import "tailwindcss";
+
+@theme {
+  /* Brand Palette */
+  --color-aires-red: #A41821;
+  --color-aires-red-dark: #7F1219;
+  --color-aires-red-light: #CC242F;
+
+  --color-aires-green: #017C4D;
+  --color-aires-green-dark: #015E3A;
+  --color-aires-green-light: #02A869;
+
+  --color-aires-orange: #FE7914;
+  --color-aires-orange-dark: #D45F06;
+  --color-aires-orange-light: #FFA155;
+
+  --color-aires-white: #FFFFFF;
+
+  /* Semantic UI Mappings: Primary = Red, Secondary = Green, Accent = Orange */
+  --color-brand-primary: var(--color-aires-red);
+  --color-brand-primary-dark: var(--color-aires-red-dark);
+  --color-brand-primary-light: var(--color-aires-red-light);
+
+  --color-brand-secondary: var(--color-aires-green);
+  --color-brand-secondary-dark: var(--color-aires-green-dark);
+  --color-brand-secondary-light: var(--color-aires-green-light);
+
+  --color-brand-accent: var(--color-aires-orange);
+  --color-brand-accent-dark: var(--color-aires-orange-dark);
+  --color-brand-accent-light: var(--color-aires-orange-light);
+}
+
+:root {
+  --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-sans);
+  background-color: #F8FAFC;
+  color: #1E293B;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}

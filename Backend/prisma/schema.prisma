@@ -1,0 +1,162 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+
+enum Role {
+  ADMIN
+  MANAGER
+  FIELD_AUDITOR
+}
+
+enum SyncStatus {
+  PENDING
+  SYNCED
+  FAILED
+}
+
+enum AssignmentStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum PriceAction {
+  PRICE_DOWN
+  PRICE_UP
+  KEEP
+}
+
+model User {
+  id                  String             @id @default(uuid())
+  name                String
+  email               String?            @unique
+  phone               String             @unique
+  passwordHash        String?
+  role                Role               @default(FIELD_AUDITOR)
+  active              Boolean            @default(true)
+
+  assignedMarkets     String[]           @default([])
+  assignedCompetitors String[]           @default([])
+
+  assignments         SurveyAssignment[]
+  surveyEntries       SurveyEntry[]
+
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  @@index([role, active])
+}
+
+model Product {
+  id          String        @id // e.g., "Veg-01"
+  name        String        // e.g., "Red Onion"
+  category    String        // "Fresh", "Ultra-Sensitive", "Sensitive", etc.
+  unit        String        @default("kg")
+  queensPrice Float         // Benchmark reference price (e.g. 64.00)
+  active      Boolean       @default(true)
+
+  entries     SurveyEntry[]
+
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([category, active])
+}
+
+model Competitor {
+  id          String             @id // e.g. "shoa", "allmart"
+  name        String             // "Shoa", "Allmart"
+  market      String             // "Shoa Supermarket"
+  type        String             @default("FMCG") // "FMCG" | "Fresh"
+  active      Boolean            @default(true)
+
+  assignments SurveyAssignment[]
+  entries     SurveyEntry[]
+
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+}
+
+model SurveyPeriod {
+  id          String             @id // e.g. "2026-W39"
+  startDate   DateTime
+  endDate     DateTime
+  status      String             @default("OPEN") // "OPEN" | "CLOSED"
+
+  assignments SurveyAssignment[]
+  entries     SurveyEntry[]
+}
+
+model SurveyAssignment {
+  id           String           @id @default(uuid())
+  auditorId    String
+  auditor      User             @relation(fields: [auditorId], references: [id], onDelete: Cascade)
+  competitorId String
+  competitor   Competitor       @relation(fields: [competitorId], references: [id], onDelete: Cascade)
+
+  marketName   String
+  surveyPeriodId String
+  surveyPeriod SurveyPeriod     @relation(fields: [surveyPeriodId], references: [id], onDelete: Cascade)
+
+  items        String[]         // Array of Product IDs: ["Veg-01", "Veg-02"]
+  status       AssignmentStatus @default(NOT_STARTED)
+  assignedAt   DateTime         @default(now())
+
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  @@index([auditorId, surveyPeriodId])
+}
+
+model SurveyEntry {
+  id             String       @id @default(uuid()) // "SUR-00001"
+  itemId         String
+  product        Product      @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  competitorId   String
+  competitor     Competitor   @relation(fields: [competitorId], references: [id], onDelete: Cascade)
+  marketName     String
+
+  auditorId      String
+  auditor        User         @relation(fields: [auditorId], references: [id], onDelete: Cascade)
+
+  surveyPeriodId String?
+  surveyPeriod   SurveyPeriod? @relation(fields: [surveyPeriodId], references: [id], onDelete: SetNull)
+
+  price          Float
+  unit           String       @default("kg")
+
+  latitude       Float?
+  longitude      Float?
+  accuracy       Float?
+
+  timestamp      DateTime     @default(now())
+  syncStatus     SyncStatus   @default(SYNCED)
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([itemId, competitorId, surveyPeriodId])
+  @@index([auditorId])
+}
+
+model Alert {
+  id              String      @id @default(uuid())
+  itemId          String
+  type            PriceAction // PRICE_DOWN | PRICE_UP
+  severity        String      @default("HIGH") // HIGH | MEDIUM
+  message         String
+  competitor      String
+  competitorPrice Float
+  queensPrice     Float
+  priceIndex      Float
+  resolved        Boolean     @default(false)
+  createdAt       DateTime    @default(now())
+
+  @@index([resolved, type])
+}

@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "target": "ES6",
+    "module": "node16",
+    "moduleResolution": "node16",
+    "allowSyntheticDefaultImports": true,
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "exclude": ["node_modules", "dist", "build"]
+}

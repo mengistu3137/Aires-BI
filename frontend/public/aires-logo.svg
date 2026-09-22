@@ -1,0 +1,164 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 620" width="100%" height="100%">
+  <defs>
+    <!-- RED RIBBON GRADIENTS -->
+    <linearGradient id="redMainGrad" x1="20%" y1="100%" x2="70%" y2="0%">
+      <stop offset="0%" stop-color="#7B0F16" />
+      <stop offset="35%" stop-color="#A41821" />
+      <stop offset="70%" stop-color="#D61F2C" />
+      <stop offset="100%" stop-color="#8F1018" />
+    </linearGradient>
+    <linearGradient id="redFoldShadow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4A050A" stop-opacity="0.85" />
+      <stop offset="100%" stop-color="#8B0F17" stop-opacity="0.2" />
+    </linearGradient>
+    <linearGradient id="redGloss" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.65" />
+      <stop offset="30%" stop-color="#FFFFFF" stop-opacity="0.25" />
+      <stop offset="70%" stop-color="#FFFFFF" stop-opacity="0" />
+    </linearGradient>
+
+    <!-- GREEN RIBBON GRADIENTS -->
+    <linearGradient id="greenMainGrad" x1="30%" y1="0%" x2="80%" y2="100%">
+      <stop offset="0%" stop-color="#015233" />
+      <stop offset="40%" stop-color="#017C4D" />
+      <stop offset="75%" stop-color="#02A869" />
+      <stop offset="100%" stop-color="#01663F" />
+    </linearGradient>
+    <linearGradient id="greenFoldShadow" x1="0%" y1="0%" x2="60%" y2="100%">
+      <stop offset="0%" stop-color="#00331F" stop-opacity="0.8" />
+      <stop offset="100%" stop-color="#017C4D" stop-opacity="0.1" />
+    </linearGradient>
+    <linearGradient id="greenGloss" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.6" />
+      <stop offset="40%" stop-color="#FFFFFF" stop-opacity="0.2" />
+      <stop offset="80%" stop-color="#FFFFFF" stop-opacity="0" />
+    </linearGradient>
+
+    <!-- ORANGE PARALLELOGRAM GRADIENTS -->
+    <linearGradient id="orangeMainGrad" x1="0%" y1="50%" x2="100%" y2="50%">
+      <stop offset="0%" stop-color="#E55F00" />
+      <stop offset="45%" stop-color="#FE7914" />
+      <stop offset="85%" stop-color="#FFA04D" />
+      <stop offset="100%" stop-color="#F26C05" />
+    </linearGradient>
+    <linearGradient id="orangeGloss" x1="30%" y1="0%" x2="80%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.75" />
+      <stop offset="50%" stop-color="#FFFFFF" stop-opacity="0.2" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0" />
+    </linearGradient>
+
+    <!-- DROP SHADOW -->
+    <filter id="airesShadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000000" flood-opacity="0.18" />
+    </filter>
+  </defs>
+
+  <g filter="url(#airesShadow)">
+    <!-- ========================================== -->
+    <!-- 1. RED RIBBON (Left leg & apex fold)       -->
+    <!-- ========================================== -->
+    <!-- Base Red Body -->
+    <path
+      d="M 85 510 
+         L 295 68 
+         L 375 68 
+         L 255 365 
+         L 185 510 
+         Z"
+      fill="url(#redMainGrad)"
+    />
+
+    <!-- Red Inner Fold Shadow (creates 3D ribbon illusion) -->
+    <path
+      d="M 295 68 
+         L 375 68 
+         L 255 365 
+         C 285 240, 275 140, 295 68 Z"
+      fill="url(#redFoldShadow)"
+    />
+
+    <!-- Red Ribbon Gloss Arc Highlight -->
+    <path
+      d="M 115 480 
+         L 295 85 
+         C 265 140, 230 260, 160 480 Z"
+      fill="url(#redGloss)"
+    />
+
+    <!-- ========================================== -->
+    <!-- 2. GREEN RIBBON (Upper-right descent)      -->
+    <!-- ========================================== -->
+    <!-- Base Green Body -->
+    <path
+      d="M 368 68 
+         L 440 68 
+         L 542 365 
+         L 425 365 
+         Z"
+      fill="url(#greenMainGrad)"
+    />
+
+    <!-- Green Top Crease Shadow -->
+    <path
+      d="M 368 68 
+         L 410 68 
+         L 425 150 
+         L 380 150 Z"
+      fill="url(#greenFoldShadow)"
+    />
+
+    <!-- Green Curved Gloss Reflection -->
+    <path
+      d="M 395 80 
+         L 435 80 
+         L 515 350 
+         C 475 260, 440 180, 395 80 Z"
+      fill="url(#greenGloss)"
+    />
+
+    <!-- ========================================== -->
+    <!-- 3. ORANGE RIBBON (Crossbar & Lower Right)  -->
+    <!-- ========================================== -->
+    <!-- Parallelogram Base -->
+    <path
+      d="M 255 365 
+         L 542 365 
+         L 615 510 
+         L 330 510 
+         Z"
+      fill="url(#orangeMainGrad)"
+    />
+
+    <!-- Orange Gloss / Specular Arc -->
+    <path
+      d="M 320 375 
+         L 535 375 
+         L 575 450 
+         C 460 410, 390 400, 320 375 Z"
+      fill="url(#orangeGloss)"
+    />
+
+    <!-- Subtle Orange-to-Red Contact Shadow -->
+    <path
+      d="M 255 365 L 300 365 L 315 420 L 270 420 Z"
+      fill="#000000"
+      opacity="0.15"
+    />
+  </g>
+
+  <!-- ========================================== -->
+  <!-- 4. OFFICIAL BRAND TYPOGRAPHY               -->
+  <!-- ========================================== -->
+  <text
+    x="350"
+    y="575"
+    text-anchor="middle"
+    font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+    font-size="34"
+    font-weight="800"
+    letter-spacing="5"
+    fill="#017C4D"
+  >
+    AIRES COMMUNICATION PLC
+  </text>
+</svg>
