@@ -1,8 +1,8 @@
 import { Router } from "express";
-import * as storeController from "./store.controller.js";
+import * as storeController from "./stores.controller.js";
 import { authenticate, restrictTo } from "../../middlewares/auth.middleware.js";
 import { validate } from "../../middlewares/validate.middleware.js";
-import { createStoreSchema, updateStoreSchema } from "./store.validation.js";
+import { createStoreSchema, updateStoreSchema } from "./stores.validation.js";
 
 const router = Router();
 
