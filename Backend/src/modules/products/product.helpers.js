@@ -1,10 +1,11 @@
 export const formatProductWithActivePrice = (product) => {
-  // Find current active Queens price (latest effectiveFrom where effectiveTo is null or future)
+  // Sort historical prices descending by effectiveFrom
   const sortedPrices = (product.queensPrices || []).sort(
     (a, b) => new Date(b.effectiveFrom) - new Date(a.effectiveFrom)
   );
 
   const currentPriceRecord = sortedPrices[0] || null;
+  const priceValue = currentPriceRecord ? Number(currentPriceRecord.price) : 0.0;
 
   return {
     id: product.id,
@@ -15,7 +16,9 @@ export const formatProductWithActivePrice = (product) => {
     category: product.category,
     unit: product.unit,
     active: product.active,
-    currentQueensPrice: currentPriceRecord ? Number(currentPriceRecord.price) : 0.0,
+    // Expose both currentQueensPrice and queensPrice for test compatibility
+    currentQueensPrice: priceValue,
+    queensPrice: priceValue,
     priceHistoryCount: (product.queensPrices || []).length,
     queensPrices: product.queensPrices || [],
     createdAt: product.createdAt,

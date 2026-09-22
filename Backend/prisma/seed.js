@@ -8,23 +8,34 @@ import {
   PILOT_PRODUCTS_20,
 } from "../src/config/pilot-data.js";
 
+async function safeDelete(modelName, deleteFn) {
+  try {
+    await deleteFn();
+  } catch (err) {
+    // P2021 = Table does not exist yet; safe to ignore on initial setup
+    if (err.code !== "P2021") {
+      throw err;
+    }
+  }
+}
+
 async function main() {
   console.log("🌱 [Aires-BI Iteration 2] Seeding Production Relational Database...");
 
-  // 1. Clean existing records in referential order
+  // 1. Clean existing records in referential order safely
   console.log("🧹 Clearing previous tables...");
-  await prisma.alert.deleteMany();
-  await prisma.priceAnalysis.deleteMany();
-  await prisma.priceObservation.deleteMany();
-  await prisma.audit.deleteMany();
-  await prisma.assignmentItem.deleteMany();
-  await prisma.surveyAssignment.deleteMany();
-  await prisma.surveyPeriod.deleteMany();
-  await prisma.queensPrice.deleteMany();
-  await prisma.product.deleteMany();
-  await prisma.store.deleteMany();
-  await prisma.competitor.deleteMany();
-  await prisma.user.deleteMany();
+  await safeDelete("Alert", () => prisma.alert.deleteMany());
+  await safeDelete("PriceAnalysis", () => prisma.priceAnalysis.deleteMany());
+  await safeDelete("PriceObservation", () => prisma.priceObservation.deleteMany());
+  await safeDelete("Audit", () => prisma.audit.deleteMany());
+  await safeDelete("AssignmentItem", () => prisma.assignmentItem.deleteMany());
+  await safeDelete("SurveyAssignment", () => prisma.surveyAssignment.deleteMany());
+  await safeDelete("SurveyPeriod", () => prisma.surveyPeriod.deleteMany());
+  await safeDelete("QueensPrice", () => prisma.queensPrice.deleteMany());
+  await safeDelete("Product", () => prisma.product.deleteMany());
+  await safeDelete("Store", () => prisma.store.deleteMany());
+  await safeDelete("Competitor", () => prisma.competitor.deleteMany());
+  await safeDelete("User", () => prisma.user.deleteMany());
 
   // 2. Seed Users (1 Admin, 1 Manager, 4 Field Auditors)
   const passwordHash = await bcrypt.hash("Aires@2026", 10);
@@ -92,7 +103,6 @@ async function main() {
       },
     });
 
-    // Create current effective Queens benchmark price
     await prisma.queensPrice.create({
       data: {
         productId: prod.id,
@@ -152,7 +162,7 @@ async function main() {
     data: {
       id: "AUD-001",
       assignmentId: createdAssignments[0].id,
-      auditorId: "USR-003", // Agent 1
+      auditorId: "USR-003",
       storeId: "STR-ALLMART-BOLE",
       surveyPeriodId: period.id,
       status: "IN_PROGRESS",
@@ -166,16 +176,16 @@ async function main() {
     },
   });
 
-  // Seed sample price observations (including OUT_OF_STOCK demonstration)
+  // Seed sample price observations
   await prisma.priceObservation.createMany({
     data: [
       {
         clientObservationId: "OBS-ALLMART-VEG01",
         auditId: auditAgent1.id,
-        productId: "VEG-01", // Red Onion
+        productId: "VEG-01",
         auditorId: "USR-003",
         availability: "AVAILABLE",
-        price: 58.50, // Queens is 64.00 -> Min comp
+        price: 58.50,
         observedUnit: "kg",
         latitude: 8.9984250,
         longitude: 38.7865150,
@@ -188,7 +198,7 @@ async function main() {
       {
         clientObservationId: "OBS-ALLMART-EDO01",
         auditId: auditAgent1.id,
-        productId: "EDO-01", // Sunflower Oil 5L
+        productId: "EDO-01",
         auditorId: "USR-003",
         availability: "AVAILABLE",
         price: 920.00,
@@ -204,9 +214,9 @@ async function main() {
       {
         clientObservationId: "OBS-ALLMART-SUG01",
         auditId: auditAgent1.id,
-        productId: "SUG-01", // White Sugar 1kg
+        productId: "SUG-01",
         auditorId: "USR-003",
-        availability: "OUT_OF_STOCK", // Out of stock demonstration: price is null
+        availability: "OUT_OF_STOCK",
         price: null,
         observedUnit: "kg",
         latitude: 8.9984300,
@@ -222,9 +232,7 @@ async function main() {
   });
   console.log("✅ Seeded Store Audit & Initial Price Observations");
 
-  // 9. Seed Sample Price Analysis Record (Min Competitor & Price Index)
-  // Formula: Index = (Queens Price / Min Competitor Price) * 100
-  // Red Onion: Queens = 64.00, Min Comp (Allmart) = 58.50 -> Index = (64 / 58.50) * 100 = 109.40% -> Action = PRICE_DOWN
+  // 9. Seed Sample Price Analysis Record
   await prisma.priceAnalysis.create({
     data: {
       productId: "VEG-01",
@@ -232,14 +240,13 @@ async function main() {
       queensPrice: 64.00,
       minimumCompetitorPrice: 58.50,
       competitorAveragePrice: 60.25,
-      priceIndex: 1.09, // 109.4%
+      priceIndex: 1.09,
       targetIndex: 0.95,
       action: "PRICE_DOWN",
       notes: "Queens is 9.4% above Allmart minimum. Price Down recommended.",
     },
   });
 
-  // Seed High Severity Alert
   await prisma.alert.create({
     data: {
       productId: "VEG-01",

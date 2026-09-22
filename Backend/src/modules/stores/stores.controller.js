@@ -1,4 +1,4 @@
-import { storeService } from "./store.service.js";
+import { storeService } from "./stores.service.js";
 
 export const getAll = async (req, res, next) => {
     try {

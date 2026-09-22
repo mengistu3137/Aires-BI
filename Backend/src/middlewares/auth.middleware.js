@@ -25,7 +25,7 @@ export const authenticate = async (req, res, next) => {
     // Verify token
     const decoded = verifyToken(token);
 
-    // Ensure user still exists and is active
+    // Query active user without legacy flat array fields
     const user = await prisma.user.findUnique({
       where: { id: decoded.id },
       select: {
@@ -35,8 +35,6 @@ export const authenticate = async (req, res, next) => {
         phone: true,
         role: true,
         active: true,
-        assignedMarkets: true,
-        assignedCompetitors: true,
       },
     });
 
