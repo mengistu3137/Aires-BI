@@ -97,7 +97,7 @@ export const router = createBrowserRouter([
         path: "observations/:observationId",
         element: <ObservationDetailPage />,
       },
-         {
+      {
         path: "observations/:observationId",
         element: <StoresPage />,
       },
@@ -131,6 +131,7 @@ export const router = createBrowserRouter([
         path: "products/:productId/queens-prices",
         element: <ProductQueensPricesPage />,
       },
+      {
         path: "users",
         element: (
           <ProtectedRoute allowedRoles={["ADMIN"]}>
