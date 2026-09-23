@@ -1,40 +1,33 @@
 /**
  * ============================================================
- *  DEVELOPMENT / TESTING DATABASE SEEDER
- * ============================================================
- *
- *  This seed is idempotent and safe to re-run:
- *    - Deterministic IDs are used everywhere.
- *    - `upsert` is used for every insert.
- *    - No TRUNCATE, no unbounded deleteMany.
- *
- *  It seeds the full workflow:
- *    Users → Products → Competitors → Stores → SurveyPeriods
- *      → Assignments → AssignmentItems → Audits → QueensPrices
- *      → PriceObservations → PriceAnalyses → Alerts
- *
- *  ⚠️  DEVELOPMENT PASSWORDS (all users):
- *        Password123!
- *
- *  Run with:  npx prisma db seed
- *        or:  npm run db:seed
+ *  AIRES-BI PRODUCTION DATABASE SEEDER (120 PRODUCTS)
+ *  Fully aligned with schema.prisma (Enums, Constraints & Relational Models)
  * ============================================================
  */
 import "dotenv/config";
+import { PrismaClient } from "@prisma/client";
 
-import prisma from "../src/config/db.js";
+// Resilient bcrypt loader (works with either bcrypt or bcryptjs)
+let bcrypt;
+try {
+  bcrypt = (await import("bcrypt")).default;
+} catch {
+  bcrypt = (await import("bcryptjs")).default;
+}
+
+const prisma = new PrismaClient();
 
 async function safeDelete(modelName, deleteFn) {
   try {
     await deleteFn();
   } catch (err) {
+    // Ignore P2021: table does not exist yet
     if (err.code !== "P2021") throw err;
   }
 }
 
 // =========================================================================
 // REAL QUEEN'S INVESTIGATION CATALOG (100 ULTRA-SENSITIVE + 20 DAILY LOW)
-// Source: Midroc Investment Group / Queen's Supermarket Doc: ኩዊንስ-አኮ-2019-002
 // =========================================================================
 
 const ULTRA_SENSITIVE_ITEMS = [
@@ -141,7 +134,6 @@ const ULTRA_SENSITIVE_ITEMS = [
 ];
 
 const DAILY_LOW_PRICE_ITEMS = [
-  // Vegetables (7 items)
   { barcode: "DLP-VEG-01", name: "RED ONION", category: "Fresh", unit: "kg", price: 64.0 },
   { barcode: "DLP-VEG-02", name: "TOMATO", category: "Fresh", unit: "kg", price: 55.0 },
   { barcode: "DLP-VEG-03", name: "POTATO", category: "Fresh", unit: "kg", price: 48.0 },
@@ -149,33 +141,25 @@ const DAILY_LOW_PRICE_ITEMS = [
   { barcode: "DLP-VEG-05", name: "HOT PEPPERS", category: "Fresh", unit: "kg", price: 120.0 },
   { barcode: "DLP-VEG-06", name: "GARLIC", category: "Fresh", unit: "kg", price: 260.0 },
   { barcode: "DLP-VEG-07", name: "CARROT", category: "Fresh", unit: "kg", price: 42.0 },
-
-  // Fruits (5 items)
   { barcode: "DLP-FRU-01", name: "ORANGE", category: "Fresh", unit: "kg", price: 130.0 },
   { barcode: "DLP-FRU-02", name: "PAPAYE", category: "Fresh", unit: "kg", price: 85.0 },
   { barcode: "DLP-FRU-03", name: "AVOCADO", category: "Fresh", unit: "kg", price: 95.0 },
   { barcode: "DLP-FRU-04", name: "BANANA", category: "Fresh", unit: "kg", price: 75.0 },
   { barcode: "DLP-FRU-05", name: "LEMMON", category: "Fresh", unit: "kg", price: 90.0 },
-
-  // Dairy Products (4 items)
   { barcode: "DLP-DAI-01", name: "LAME MILK 500L", category: "Dairy", unit: "pcs", price: 55.0 },
   { barcode: "DLP-DAI-02", name: "LAME YOGHURT 500ML", category: "Dairy", unit: "pcs", price: 65.0 },
   { barcode: "DLP-DAI-03", name: "LAME CHEESE", category: "Dairy", unit: "kg", price: 240.0 },
   { barcode: "DLP-DAI-04", name: "FARM EGG", category: "Dairy", unit: "crate", price: 420.0 },
-
-  // Meat Products (3 items)
   { barcode: "DLP-MEA-01", name: "TOP SIDE MEAT (NEKELE)", category: "Meat", unit: "kg", price: 980.0 },
   { barcode: "DLP-MEA-02", name: "CHUNCK MEAT (YEWET SEGA)", category: "Meat", unit: "kg", price: 850.0 },
   { barcode: "DLP-MEA-03", name: "LAMB CARACASS (YEBEG SEGA)", category: "Meat", unit: "kg", price: 920.0 },
-
-  // Poultry (1 item)
   { barcode: "DLP-PLT-01", name: "WHOLE CHICKEN", category: "Poultry", unit: "pcs", price: 650.0 },
 ];
 
 async function main() {
-  console.log("🌱 [Aires-BI Iteration 3] Seeding Real 120-Product Investigation Dataset...");
+  console.log("🌱 [Aires-BI] Seeding Database on cPanel PostgreSQL...");
 
-  // 1. Clean previous data safely
+  // 1. Clean previous data safely (strictly respecting foreign key dependencies)
   console.log("🧹 Clearing previous tables...");
   await safeDelete("Alert", () => prisma.alert.deleteMany());
   await safeDelete("PriceAnalysis", () => prisma.priceAnalysis.deleteMany());
@@ -190,12 +174,16 @@ async function main() {
   await safeDelete("Competitor", () => prisma.competitor.deleteMany());
   await safeDelete("User", () => prisma.user.deleteMany());
 
-  // 2. Seed Real Users (Project lead + 4 field data collectors)
+  // 2. Hash Password and Seed Users
   const passwordHash = await bcrypt.hash("Aires@2026", 10);
 
+  // Admin + 4 Field Auditors (Using exact schema Role enum: ADMIN, FIELD_AUDITOR)
   const users = [
     { id: "USR-001", name: "Abraham Shiferaw", email: "airesbi@airescommunications.com", phone: "+251910009094", role: "ADMIN" },
-   
+    { id: "USR-003", name: "Auditor Bole", email: "auditor1@airescommunications.com", phone: "+251910009001", role: "FIELD_AUDITOR" },
+    { id: "USR-004", name: "Auditor Piassa", email: "auditor2@airescommunications.com", phone: "+251910009002", role: "FIELD_AUDITOR" },
+    { id: "USR-005", name: "Auditor Shoa", email: "auditor3@airescommunications.com", phone: "+251910009003", role: "FIELD_AUDITOR" },
+    { id: "USR-006", name: "Auditor Bambis", email: "auditor4@airescommunications.com", phone: "+251910009004", role: "FIELD_AUDITOR" },
   ];
 
   for (const u of users) {
@@ -203,9 +191,9 @@ async function main() {
       data: { ...u, passwordHash, active: true },
     });
   }
-  console.log(`✅ Seeded ${users.length} Operational Users`);
+  console.log(`✅ Seeded ${users.length} Users`);
 
-  // 3. Seed Competitors
+  // 3. Seed Competitors (StoreType: FMCG, FRESH)
   const competitors = [
     { id: "allmart", name: "Allmart", type: "FMCG" },
     { id: "abadir", name: "Abadir", type: "FMCG" },
@@ -270,9 +258,9 @@ async function main() {
       },
     });
   }
-  console.log(`✅ Seeded ${createdProducts.length} Real Products with Historical Queens Benchmark Prices`);
+  console.log(`✅ Seeded ${createdProducts.length} Real Products with Benchmark Prices`);
 
-  // 6. Seed Survey Period: Meskerem 15 – 22, 2019 E.C. (September 25 – October 2, 2026 G.C.)
+  // 6. Seed Survey Period
   const period = await prisma.surveyPeriod.create({
     data: {
       id: "2026-W39",
@@ -286,10 +274,10 @@ async function main() {
 
   // 7. Seed Real Assignments for the 4 Field Auditors
   const assignmentsData = [
-    { auditorId: "USR-003", storeId: "STR-ALLMART-BOLE" },       // Agent 1 -> Allmart Bole
-    { auditorId: "USR-004", storeId: "STR-ABADIR-PIASSA" },      // Agent 2 -> Abadir Piassa
-    { auditorId: "USR-005", storeId: "STR-SHOA-BOLE" },          // Agent 3 -> Shoa Bole
-    { auditorId: "USR-006", storeId: "STR-BAMBIS-KAZANCHIS" },   // Agent 4 -> Bambis Kazanchis
+    { auditorId: "USR-003", storeId: "STR-ALLMART-BOLE" },
+    { auditorId: "USR-004", storeId: "STR-ABADIR-PIASSA" },
+    { auditorId: "USR-005", storeId: "STR-SHOA-BOLE" },
+    { auditorId: "USR-006", storeId: "STR-BAMBIS-KAZANCHIS" },
   ];
 
   for (const asn of assignmentsData) {
@@ -303,7 +291,6 @@ async function main() {
       },
     });
 
-    // Assign all 120 items to each store assignment
     const itemsData = createdProducts.map((p) => ({
       assignmentId: createdAsn.id,
       productId: p.id,
@@ -311,9 +298,9 @@ async function main() {
     }));
     await prisma.assignmentItem.createMany({ data: itemsData });
   }
-  console.log(`✅ Seeded 4 Real Store Assignments (Each with ${createdProducts.length} assigned investigation items)`);
+  console.log(`✅ Seeded 4 Store Assignments with ${createdProducts.length} items each`);
 
-  console.log("\n🎉 [Aires-BI Iteration 3] 120-Product Database Seed Complete!");
+  console.log("\n🎉 Database Seed Complete!");
 }
 
 main()
