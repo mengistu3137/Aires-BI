@@ -1,36 +1,70 @@
 {
-	"name": "Aires-BI — Business Intelligence & Field Survey",
-	"short_name": "Aires-BI",
-	"description": "Field survey collection and automated price intelligence platform for Aires retail audits.",
-	"start_url": "/",
-	"display": "standalone",
-	"background_color": "#FFFFFF",
-	"theme_color": "#A41821",
-	"orientation": "portrait-primary",
-	"icons": [
-		{
-			"src": "/icons/icon-192.png",
-			"sizes": "192x192",
-			"type": "image/png",
-			"purpose": "any"
-		},
-		{
-			"src": "/icons/icon-512.png",
-			"sizes": "512x512",
-			"type": "image/png",
-			"purpose": "any"
-		},
-		{
-			"src": "/icons/icon-maskable-192.png",
-			"sizes": "192x192",
-			"type": "image/png",
-			"purpose": "maskable"
-		},
-		{
-			"src": "/icons/icon-maskable-512.png",
-			"sizes": "512x512",
-			"type": "image/png",
-			"purpose": "maskable"
-		}
-	]
+  "id": "/",
+  "name": "Aires-BI — Business Intelligence & Field Survey",
+  "short_name": "Aires-BI",
+  "description": "Field survey collection and competitor price intelligence platform for Aires retail audits.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "window-controls-overlay", "minimal-ui"],
+  "background_color": "#FFFFFF",
+  "theme_color": "#A41821",
+  "orientation": "portrait-primary",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": ["business", "productivity", "utilities"],
+  "launch_handler": {
+    "client_mode": ["focus-existing", "auto"]
+  },
+  "capture_links": "existing_client_navigate",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/aires-logo-white.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "monochrome"
+    },
+    {
+      "src": "/pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "My Assignments",
+      "url": "/survey",
+      "description": "Open assigned store price surveys"
+    },
+    {
+      "name": "Sync & History",
+      "url": "/progress",
+      "description": "View sync queue and offline records"
+    }
+  ]
 }

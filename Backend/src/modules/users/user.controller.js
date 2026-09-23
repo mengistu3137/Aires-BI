@@ -1,4 +1,14 @@
 import { userService } from "./user.service.js";
+// Add to Backend/src/modules/user/user.controller.js
+export const updateMyLocationPermission = async (req, res, next) => {
+  try {
+    const { status } = req.body;
+    const user = await userService.updateMyLocationPermission(req.user.id, status);
+    res.status(200).json({ status: "success", data: { user } });
+  } catch (error) {
+    next(error);
+  }
+};
 
 export const getAll = async (req, res, next) => {
   try {

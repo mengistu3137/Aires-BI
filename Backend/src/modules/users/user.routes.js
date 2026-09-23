@@ -7,6 +7,7 @@ import { createUserSchema, updateUserSchema, userQuerySchema } from "./user.vali
 const router = Router();
 
 router.use(authenticate);
+router.patch("/me/location-permission", userController.updateMyLocationPermission);
 router.use(restrictTo("ADMIN"));
 
 router

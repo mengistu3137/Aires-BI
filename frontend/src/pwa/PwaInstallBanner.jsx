@@ -1,127 +1,113 @@
-import React, { useEffect, useRef, useState } from "react";
-import toast from "react-hot-toast";
-
-const TOAST_KEY = "aires-bi-pwa-install-toasted";
+import React, { useEffect, useState } from "react";
+import { initPwaPrompts } from "./pwaPrompts.js";
 
 function isStandaloneDisplay() {
   if (typeof window === "undefined") return false;
-  if (window.matchMedia?.("(display-mode: standalone)")?.matches) return true;
-  return Boolean(window.navigator.standalone);
+  return (
+    window.matchMedia?.("(display-mode: standalone)")?.matches ||
+    window.matchMedia?.("(display-mode: fullscreen)")?.matches ||
+    Boolean(window.navigator?.standalone)
+  );
 }
 
 export function PwaInstallBanner() {
-  const deferredPromptRef = useRef(null);
   const [isDismissed, setIsDismissed] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
   const [isInstalling, setIsInstalling] = useState(false);
-  const [isPromptAvailable, setIsPromptAvailable] = useState(false);
+  const [canPromptNative, setCanPromptNative] = useState(false);
 
   useEffect(() => {
     setIsStandalone(isStandaloneDisplay());
 
-    if (!window.localStorage.getItem(TOAST_KEY)) {
-      toast("Install Aires-BI for offline field audits", {
-        icon: "📱",
-        duration: 4000,
-      });
-      window.localStorage.setItem(TOAST_KEY, "true");
+    // Check if install prompt was captured at page load
+    if (initPwaPrompts.getDeferredPrompt()) {
+      setCanPromptNative(true);
     }
 
-    function handleBeforeInstallPrompt(event) {
-      event.preventDefault();
-      deferredPromptRef.current = event;
-      setIsPromptAvailable(true);
-    }
+    const handlePromptAvailable = () => {
+      setCanPromptNative(true);
+    };
 
-    function handleAppInstalled() {
-      deferredPromptRef.current = null;
-      setIsPromptAvailable(false);
+    const handleAppInstalled = () => {
       setIsStandalone(true);
-      setIsDismissed(true);
-      setIsInstalling(false);
-      toast.success("Aires-BI installed on this device!");
-    }
+      setCanPromptNative(false);
+      initPwaPrompts.clearDeferredPrompt();
+    };
 
-    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+    window.addEventListener("aires:install-prompt-available", handlePromptAvailable);
     window.addEventListener("appinstalled", handleAppInstalled);
 
     return () => {
-      window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+      window.removeEventListener("aires:install-prompt-available", handlePromptAvailable);
       window.removeEventListener("appinstalled", handleAppInstalled);
     };
   }, []);
 
-  const shouldShowFallback = !isStandalone && !isDismissed;
-  const canPromptNative = isPromptAvailable && Boolean(deferredPromptRef.current);
+  // One-click direct installation without instructions or extra popups
+  const handleDirectInstall = async () => {
+    const promptEvent = initPwaPrompts.getDeferredPrompt();
 
-  const handleInstall = async () => {
-    const promptEvent = deferredPromptRef.current;
-
-    if (!promptEvent) {
-      toast("Use 'Add to Home Screen' in your browser menu to install Aires-BI.");
-      return;
-    }
-
-    setIsInstalling(true);
-    try {
-      promptEvent.prompt();
-      const choice = await promptEvent.userChoice;
-      deferredPromptRef.current = null;
-      setIsPromptAvailable(false);
-
-      if (choice?.outcome === "accepted") {
-        toast.success("Aires-BI installation accepted.");
+    if (promptEvent) {
+      setIsInstalling(true);
+      try {
+        await promptEvent.prompt();
+        await promptEvent.userChoice;
+        initPwaPrompts.clearDeferredPrompt();
+        setCanPromptNative(false);
+        setIsDismissed(true);
+      } catch {
+        // Handled silently
+      } finally {
+        setIsInstalling(false);
       }
-      setIsDismissed(true);
-    } catch {
-      toast.error("Install prompt failed to initialize.");
-    } finally {
-      setIsInstalling(false);
+    } else {
+      // If already installed or browser handles launch directly
+      window.open("/", "_self");
     }
   };
 
-  const handleDismiss = () => {
-    setIsDismissed(true);
-  };
-
-  if (!shouldShowFallback) return null;
+  if (isStandalone || isDismissed) return null;
 
   return (
-    <div className="fixed inset-x-0 bottom-3 z-50 px-3 sm:bottom-4 sm:px-4 lg:px-8">
-      <div className="mx-auto flex max-w-2xl items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white/95 p-3.5 shadow-xl backdrop-blur-md sm:max-w-3xl sm:gap-4 sm:p-4">
-        {/* Brand Badge in Aires Red */}
-        <div className="flex h-11 w-11 flex-none items-center justify-center rounded-xl bg-[#A41821] text-white font-black text-lg shadow-xs">
-          A
+    <aside
+      aria-label="Install Application"
+      className="fixed inset-x-3 bottom-3 z-50 sm:bottom-4 sm:left-auto sm:right-4 sm:max-w-sm animate-in fade-in slide-in-from-bottom-3"
+    >
+      <div className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white/95 p-3.5 shadow-xl backdrop-blur-md">
+        <div className="flex items-center gap-3 min-w-0 flex-1">
+          <img
+            src="/aires-logo.svg"
+            alt="Aires Logo"
+            className="h-10 w-10 flex-none rounded-xl bg-white p-1 border border-slate-100 shadow-2xs object-contain"
+          />
+          <div className="min-w-0">
+            <p className="text-sm font-black text-slate-900 leading-tight truncate">
+              Aires-BI
+            </p>
+            <p className="text-xs text-slate-500 truncate">
+              Install for field price collection
+            </p>
+          </div>
         </div>
 
-        <div className="min-w-0 flex-1 space-y-0.5">
-          <p className="text-sm font-bold text-slate-900">
-            Install Aires-BI Field Audit App
-          </p>
-          <p className="text-xs text-slate-600">
-            Enables instant offline competitor pricing entry, GPS tag locks, and background sync.
-          </p>
-        </div>
-
-        <div className="flex flex-none items-center gap-2">
+        <div className="flex items-center gap-1.5 flex-none">
           <button
             type="button"
-            onClick={handleInstall}
-            disabled={isInstalling}
-            className="rounded-xl bg-[#A41821] hover:bg-[#7F1219] px-4 py-2 text-xs font-bold text-white shadow-xs transition active:scale-95 disabled:opacity-50"
-          >
-            {canPromptNative ? "Install App" : "Add to Home"}
-          </button>
-          <button
-            type="button"
-            onClick={handleDismiss}
-            className="flex h-8 w-8 items-center justify-center rounded-xl text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition"
-            aria-label="Dismiss banner"
+            onClick={() => setIsDismissed(true)}
+            className="rounded-xl px-2.5 py-1.5 text-xs font-semibold text-slate-400 hover:text-slate-600 cursor-pointer"
           >
             ✕
           </button>
+          <button
+            type="button"
+            onClick={handleDirectInstall}
+            disabled={isInstalling}
+            className="rounded-xl bg-[#A41821] hover:bg-[#7F1219] px-4 py-2 text-xs font-bold text-white shadow-xs transition active:scale-95 cursor-pointer disabled:opacity-50"
+          >
+            {isInstalling ? "Installing..." : "Install"}
+          </button>
         </div>
       </div>
-    </div>
+    </aside>
   );
 }
