@@ -7,26 +7,36 @@ const LocationPermissionBadge = ({ role, permission }) => {
     return <span className="text-slate-400 font-mono text-[10px]">N/A (Staff)</span>;
   }
 
-  const perm = permission || "NOT_REQUESTED";
-  const isAllowed = perm === "ALLOWED";
+  const perm = (permission || "NOT_REQUESTED").toUpperCase();
+
+  const isAllowed = perm === "ALLOWED" || perm === "GRANTED";
   const isDenied = perm === "DENIED";
+  const isPrompt = perm === "PROMPT";
+
+  let badgeStyle = "bg-slate-100 text-slate-500 border-slate-200";
+  let dotStyle = "bg-slate-400";
+  let label = "Not Requested";
+
+  if (isAllowed) {
+    badgeStyle = "bg-emerald-50 text-[#017C4D] border-emerald-200";
+    dotStyle = "bg-[#017C4D]";
+    label = "Allowed";
+  } else if (isDenied) {
+    badgeStyle = "bg-red-50 text-[#A41821] border-red-200";
+    dotStyle = "bg-[#A41821]";
+    label = "Denied / Blocked";
+  } else if (isPrompt) {
+    badgeStyle = "bg-amber-50 text-amber-700 border-amber-200";
+    dotStyle = "bg-amber-500";
+    label = "Prompt Pending";
+  }
 
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${
-        isAllowed
-          ? "bg-emerald-50 text-[#017C4D] border border-emerald-200"
-          : isDenied
-          ? "bg-red-50 text-[#A41821] border border-red-200"
-          : "bg-slate-100 text-slate-500"
-      }`}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[10px] font-bold transition-colors duration-300 ${badgeStyle}`}
     >
-      <span
-        className={`h-1.5 w-1.5 rounded-full ${
-          isAllowed ? "bg-[#017C4D]" : isDenied ? "bg-[#A41821]" : "bg-slate-400"
-        }`}
-      />
-      {isAllowed ? "Allowed" : isDenied ? "Denied / Blocked" : "Not Requested"}
+      <span className={`h-1.5 w-1.5 rounded-full ${dotStyle}`} />
+      {label}
     </span>
   );
 };
