@@ -2,6 +2,7 @@ import React from "react";
 import { createBrowserRouter, Navigate } from "react-router-dom";
 import { MainLayout } from "@/components/MainLayout.jsx";
 import { LoginPage } from "@/features/auth/pages/LoginPage.jsx";
+import { SurveyorHomePage } from "@/features/survey/pages/SurveyorHomePage.jsx";
 import { Survey } from "@/features/survey/pages/Survery.jsx";
 import { SurveyProgress } from "@/features/survey/pages/SurveyProgress.jsx";
 import { UsersPage } from "@/features/users/pages/UsersPage.jsx";
@@ -31,18 +32,18 @@ import { AlertDetailPage } from "@/features/alerts/pages/AlertDetailPage.jsx";
 import { DashboardPage } from "@/features/dashboard/pages/DashboardPage.jsx";
 
 const ProtectedRoute = ({ children, allowedRoles }) => {
-  const { isAuthenticated, role } = useAuth();
+	const { isAuthenticated, role } = useAuth();
 
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
-  }
+	if (!isAuthenticated) {
+		return <Navigate to="/login" replace />;
+	}
 
   if (allowedRoles && !allowedRoles.includes(role)) {
     // Fall back to Dashboard — the safest neutral destination for all roles
     return <Navigate to="/dashboard" replace />;
   }
 
-  return children;
+	return children;
 };
 
 export const router = createBrowserRouter([

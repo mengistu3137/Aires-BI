@@ -8,6 +8,7 @@ export const formatAssignmentResponse = (assignment) => ({
         id: assignment.auditor?.id,
         name: assignment.auditor?.name,
         phone: assignment.auditor?.phone,
+        locationPermission: assignment.auditor?.locationPermission || "NOT_REQUESTED",
     },
     store: {
         id: assignment.store?.id,

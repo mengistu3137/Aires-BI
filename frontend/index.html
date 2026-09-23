@@ -1,60 +1,40 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
 
-    <!-- Favicon & Icons -->
-    <link rel="shortcut icon" href="/icons/favicon.ico" />
-    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png" />
-    <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+<head>
+  <meta charset="UTF-8" />
 
-    <!-- Primary Meta -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <meta
-      name="description"
-      content="Aires-BI — Field Survey & Business Intelligence platform for retail price intelligence and market tracking."
-    />
-    <meta
-      name="keywords"
-      content="Aires, Aires-BI, business intelligence, field survey, price intelligence, competitor tracking, retail audit"
-    />
-    <meta name="author" content="Aires" />
+  <!-- Favicon & Touch Icons -->
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="alternate icon" type="image/x-icon" href="/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/pwa-192x192.png" />
 
-    <!-- Brand Theme: Primary Aires Red (#A41821) -->
-    <meta name="theme-color" content="#A41821" />
-    <meta name="msapplication-TileColor" content="#A41821" />
+  <!-- Primary Meta & Viewport with Notch Support -->
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="description"
+    content="Aires-BI — Field Survey & Business Intelligence platform for retail price intelligence and market tracking." />
+  <meta name="author" content="Aires Communication PLC" />
 
-    <!-- Apple / iOS Standalone Support -->
-    <meta name="apple-mobile-web-app-title" content="Aires-BI" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <!-- Brand Theme Color (Aires Red #A41821) -->
+  <meta name="theme-color" content="#A41821" />
+  <meta name="msapplication-TileColor" content="#A41821" />
 
-    <!-- Web App Manifest -->
-    <link rel="manifest" href="/manifest.json" />
+  <!-- Apple / iOS Standalone Web App Meta -->
+  <meta name="apple-mobile-web-app-title" content="Aires-BI" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 
-    <!-- Open Graph -->
-    <meta property="og:type" content="website" />
-    <meta property="og:title" content="Aires-BI — Field Survey & Business Intelligence" />
-    <meta
-      property="og:description"
-      content="High-precision field survey audit and automated competitor price intelligence."
-    />
-    <meta property="og:image" content="/icons/og-image.png" />
+  <!-- Web App Manifest -->
+  <link rel="manifest" href="/manifest.json" />
 
-    <!-- Twitter -->
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Aires-BI — Field Survey & Business Intelligence" />
-    <meta name="twitter:description" content="Retail Price Intelligence & Field Audit Platform" />
-    <meta name="twitter:image" content="/icons/og-image.png" />
+  <!-- Clean, Non-Repeated Document Title -->
+  <title>Aires-BI — Business Intelligence &amp; Field Survey</title>
+</head>
 
-    <!-- Application -->
-    <meta name="application-name" content="Aires-BI" />
-    <title>Aires-BI | Business Intelligence & Field Survey</title>
-  </head>
+<body class="bg-slate-50 text-slate-900 antialiased selection:bg-[#A41821] selection:text-white">
+  <div id="root"></div>
+  <script type="module" src="/src/main.jsx"></script>
+</body>
 
-  <body class="bg-slate-50 text-slate-900 antialiased selection:bg-[#A41821] selection:text-white">
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
 </html>

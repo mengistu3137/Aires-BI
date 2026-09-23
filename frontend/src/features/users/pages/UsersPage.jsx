@@ -2,6 +2,35 @@ import React, { useState } from "react";
 import { useUsers } from "../hooks/useUsers.js";
 import toast from "react-hot-toast";
 
+const LocationPermissionBadge = ({ role, permission }) => {
+  if (role !== "FIELD_AUDITOR") {
+    return <span className="text-slate-400 font-mono text-[10px]">N/A (Staff)</span>;
+  }
+
+  const perm = permission || "NOT_REQUESTED";
+  const isAllowed = perm === "ALLOWED";
+  const isDenied = perm === "DENIED";
+
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${
+        isAllowed
+          ? "bg-emerald-50 text-[#017C4D] border border-emerald-200"
+          : isDenied
+          ? "bg-red-50 text-[#A41821] border border-red-200"
+          : "bg-slate-100 text-slate-500"
+      }`}
+    >
+      <span
+        className={`h-1.5 w-1.5 rounded-full ${
+          isAllowed ? "bg-[#017C4D]" : isDenied ? "bg-[#A41821]" : "bg-slate-400"
+        }`}
+      />
+      {isAllowed ? "Allowed" : isDenied ? "Denied / Blocked" : "Not Requested"}
+    </span>
+  );
+};
+
 export const UsersPage = () => {
   const { users, isLoading, createUser, updateUser, deleteUser } = useUsers();
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -90,7 +119,7 @@ export const UsersPage = () => {
         </button>
       </div>
 
-      {/* Users Table */}
+      {/* Users Table with GPS Permission Column */}
       <div className="rounded-2xl border border-slate-200 bg-white shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
@@ -99,6 +128,7 @@ export const UsersPage = () => {
                 <th className="px-4 py-3">Staff Member</th>
                 <th className="px-4 py-3">Role</th>
                 <th className="px-4 py-3">Phone</th>
+                <th className="px-4 py-3">GPS Permission</th>
                 <th className="px-4 py-3">Field Records</th>
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3 text-right">Actions</th>
@@ -127,6 +157,15 @@ export const UsersPage = () => {
                     </span>
                   </td>
                   <td className="px-4 py-3 font-mono text-slate-600">{u.phone}</td>
+
+                  {/* Dedicated GPS Permission Column */}
+                  <td className="px-4 py-3">
+                    <LocationPermissionBadge
+                      role={u.role}
+                      permission={u.locationPermission}
+                    />
+                  </td>
+
                   <td className="px-4 py-3">
                     <span className="text-slate-600 font-medium">
                       {u.stats?.assignments || 0} assignments • {u.stats?.createdAudits || 0} audits

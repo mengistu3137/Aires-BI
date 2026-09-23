@@ -89,7 +89,7 @@ model User {
   passwordHash String?
   role         Role    @default(FIELD_AUDITOR)
   active       Boolean @default(true)
-
+  locationPermission String? @default("NOT_REQUESTED")
   assignments     SurveyAssignment[] @relation("AssignedAuditor")
   createdAudits   Audit[]            @relation("AuditCreatedBy")
   observations    PriceObservation[] @relation("ObservedBy")

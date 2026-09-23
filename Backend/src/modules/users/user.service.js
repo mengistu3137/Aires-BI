@@ -3,6 +3,28 @@ import prisma from "../../config/db.js";
 import ApiError from "../../utils/api-error.js";
 import { sanitizeUserRecord, getRolePermissions } from "./user.helpers.js";
 
+// Add to Backend/src/modules/user/user.service.js
+
+export const updateMyLocationPermission = async (userId, permissionStatus) => {
+  const allowed = ["ALLOWED", "DENIED", "PROMPT", "NOT_REQUESTED"];
+  const status = allowed.includes(permissionStatus?.toUpperCase())
+    ? permissionStatus.toUpperCase()
+    : "NOT_REQUESTED";
+
+  const updated = await prisma.user.update({
+    where: { id: userId },
+    data: { locationPermission: status },
+    select: {
+      id: true,
+      name: true,
+      role: true,
+      locationPermission: true,
+    },
+  });
+
+  return updated;
+};
+
 export const getAll = async (query = {}) => {
   const where = {};
   if (query.role) where.role = query.role;

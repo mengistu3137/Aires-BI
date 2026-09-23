@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useProducts } from "../hooks/useProducts.js";
 import { DataTable } from "@/components/DataTable.jsx";
 import { Can } from "@/components/Can.jsx";
@@ -6,10 +6,15 @@ import toast from "react-hot-toast";
 
 export const ProductsPage = () => {
   const { products, isLoading, addPrice, isUpdatingPrice } = useProducts();
+  console.log("the products,",products)
   const [selectedCategory, setSelectedCategory] = useState("ALL");
   const [activeProductForPrice, setActiveProductForPrice] = useState(null);
   const [newPrice, setNewPrice] = useState("");
   const [priceNotes, setPriceNotes] = useState("");
+  useEffect(()=>{
+  console.log("the products,", products);
+
+  },[])
 
   const categories = [
     "ALL",
