@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="50 40 600 500" width="100%" height="100%">
+  <g fill="#FFFFFF">
+    <!-- Left Leg (Solid White) -->
+    <path d="M 85 510 L 295 68 L 375 68 L 255 365 L 185 510 Z" opacity="1.0" />
+    <!-- Right Leg (Slight Tone Distinction) -->
+    <path d="M 368 68 L 440 68 L 542 365 L 425 365 Z" opacity="0.88" />
+    <!-- Crossbar -->
+    <path d="M 255 365 L 542 365 L 615 510 L 330 510 Z" opacity="0.75" />
+  </g>
+</svg>
