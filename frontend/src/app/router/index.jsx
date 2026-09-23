@@ -9,6 +9,18 @@ import { UsersPage } from "@/features/users/pages/UsersPage.jsx";
 import { StoresPage } from "@/features/stores/pages/StoresPage.jsx";
 import { ProductsPage } from "@/features/products/pages/ProductsPage.jsx";
 import { useAuth } from "@/hooks/useAuth.js";
+import { AuditListPage } from "@/features/audits/pages/AuditListPage.jsx";
+import { AuditDetailPage } from "@/features/audits/pages/AuditDetailPage.jsx";
+import { AuditHistoryPage } from "@/features/audits/pages/AuditHistoryPage.jsx";
+
+import { AuditObservationsPage } from "@/features/observations/pages/AuditObservationsPage.jsx";
+import { ObservationDetailPage } from "@/features/observations/pages/ObservationDetailPage.jsx";
+
+import { QueensPricesPage } from "@/features/queens-prices/pages/QueensPricesPage.jsx";
+import { CreateQueensPricePage } from "@/features/queens-prices/pages/CreateQueensPricePage.jsx";
+import { EditQueensPricePage } from "@/features/queens-prices/pages/EditQueensPricePage.jsx";
+import { QueensPriceDetailsPage } from "@/features/queens-prices/pages/QueensPriceDetailsPage.jsx";
+import { ProductQueensPricesPage } from "@/features/queens-prices/pages/ProductQueensPricesPage.jsx";
 
 const ProtectedRoute = ({ children, allowedRoles }) => {
   const { isAuthenticated, role } = useAuth();
@@ -66,14 +78,59 @@ export const router = createBrowserRouter([
         ),
       },
       {
-        path: "stores",
+        path: "audits",
+        element: <AuditListPage />,
+      },
+      {
+        path: "audits/:auditId",
+        element: <AuditDetailPage />,
+      },
+      {
+        path: "audits/history",
+        element: <AuditHistoryPage />,
+      },
+      {
+        path: "audits/:auditId/observations",
+        element: <AuditObservationsPage />,
+      },
+      {
+        path: "observations/:observationId",
+        element: <ObservationDetailPage />,
+      },
+         {
+        path: "observations/:observationId",
+        element: <StoresPage />,
+      },
+
+      // Inside children:
+      {
+        path: "queens-prices",
+        element: <QueensPricesPage />,
+      },
+      {
+        path: "queens-prices/new",
         element: (
           <ProtectedRoute allowedRoles={["ADMIN", "MANAGER"]}>
-            <StoresPage />
+            <CreateQueensPricePage />
           </ProtectedRoute>
         ),
       },
       {
+        path: "queens-prices/:id",
+        element: <QueensPriceDetailsPage />,
+      },
+      {
+        path: "queens-prices/:id/edit",
+        element: (
+          <ProtectedRoute allowedRoles={["ADMIN", "MANAGER"]}>
+            <EditQueensPricePage />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: "products/:productId/queens-prices",
+        element: <ProductQueensPricesPage />,
+      },
         path: "users",
         element: (
           <ProtectedRoute allowedRoles={["ADMIN"]}>
