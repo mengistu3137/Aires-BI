@@ -40,7 +40,7 @@ jobs:
         run: |
           rsync -avz --delete --exclude 'node_modules' --exclude '.env' --exclude '.htaccess' --exclude 'uploads' -e "ssh -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=no -o ConnectTimeout=30" Backend/ ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/home/airescad/biapi/
 
-      - name: 🔄 Install Dependencies, Migrate Prisma, Seed Database & Restart Node
+      - name: 🔄 Install Dependencies, Sync Prisma DB, Seed & Restart Node
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SSH_HOST }}
@@ -52,7 +52,7 @@ jobs:
             source /home/airescad/nodevenv/biapi/22/bin/activate && cd /home/airescad/biapi
             npm install --omit=dev
             npx prisma generate
-            npx prisma migrate deploy
+            npx prisma db push --accept-data-loss
             node prisma/seed.js
             mkdir -p /home/airescad/biapi/tmp
             touch /home/airescad/biapi/tmp/restart.txt
