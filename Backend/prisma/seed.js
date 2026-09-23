@@ -13,7 +13,35 @@ async function safeDelete(modelName, deleteFn) {
   try {
     await deleteFn();
   } catch (err) {
+    // P2021 = table does not exist yet (fresh DB, migrations not run)
     if (err.code !== "P2021") throw err;
+  }
+}
+
+// ---------------------------------------------------------------------
+// Preflight: catch schema drift (schema.prisma ahead of applied
+// migrations) with a clear, actionable error instead of a raw Prisma
+// stack trace mid-seed.
+// ---------------------------------------------------------------------
+async function ensureSchemaUpToDate() {
+  const requiredColumns = [
+    { table: "User", column: "locationPermission" },
+  ];
+
+  for (const { table, column } of requiredColumns) {
+    const rows = await prisma.$queryRawUnsafe(
+      `SELECT 1 FROM information_schema.columns WHERE table_name = $1 AND column_name = $2`,
+      table,
+      column
+    );
+    if (rows.length === 0) {
+      throw new Error(
+        `\n❌ Schema drift detected: column "${table}.${column}" is missing from the database.\n` +
+        `   schema.prisma defines this field, but no migration ever added it in this environment.\n` +
+        `   Fix: generate/commit a migration for it (e.g. npx prisma migrate dev --name add_${column}),\n` +
+        `   redeploy so "prisma migrate deploy" applies it, then re-run this seeder.\n`
+      );
+    }
   }
 }
 
@@ -149,6 +177,9 @@ const DAILY_LOW_PRICE_ITEMS = [
 
 async function main() {
   console.log("🌱 [Aires-BI] Seeding Database on cPanel PostgreSQL...");
+
+  // 0. Preflight: fail fast with a clear message if migrations are behind schema.prisma
+  await ensureSchemaUpToDate();
 
   // 1. Clean previous data safely (strictly respecting foreign key dependencies)
   console.log("🧹 Clearing previous tables...");
