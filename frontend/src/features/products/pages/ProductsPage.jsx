@@ -3,6 +3,7 @@ import { useProducts } from "../hooks/useProducts.js";
 import { DataTable } from "@/components/DataTable.jsx";
 import { Can } from "@/components/Can.jsx";
 import toast from "react-hot-toast";
+import { formatProductName } from "@/utils/formatters.js";
 
 export const ProductsPage = () => {
   const { products, isLoading, addPrice, isUpdatingPrice } = useProducts();
@@ -59,7 +60,7 @@ export const ProductsPage = () => {
       sortable: true,
       render: (row) => (
         <div>
-          <span className="font-bold text-slate-900">{row.name}</span>
+          <span className="font-bold text-slate-900">{formatProductName(row.name)}</span>
           <span className="block text-[10px] font-mono text-slate-400">
             ID: {row.id} • Unit: {row.unit}
           </span>

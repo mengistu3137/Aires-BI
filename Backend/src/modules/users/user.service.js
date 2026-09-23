@@ -1,30 +1,52 @@
 import bcrypt from "bcryptjs";
 import prisma from "../../config/db.js";
 import ApiError from "../../utils/api-error.js";
+import { emitToRoles } from "../../config/socket.js";
 import { sanitizeUserRecord, getRolePermissions } from "./user.helpers.js";
 
-// Add to Backend/src/modules/user/user.service.js
-
 export const updateMyLocationPermission = async (userId, permissionStatus) => {
-  const allowed = ["ALLOWED", "DENIED", "PROMPT", "NOT_REQUESTED"];
-  const status = allowed.includes(permissionStatus?.toUpperCase())
-    ? permissionStatus.toUpperCase()
-    : "NOT_REQUESTED";
+  const allowedStatuses = ["ALLOWED", "GRANTED", "DENIED", "PROMPT", "NOT_REQUESTED"];
 
-  const updated = await prisma.user.update({
+  // Normalize incoming browser state (e.g., 'granted' -> 'GRANTED')
+  let status = (permissionStatus || "NOT_REQUESTED").toUpperCase().trim();
+  if (status === "ALLOWED") status = "GRANTED";
+
+  if (!allowedStatuses.includes(status)) {
+    throw new ApiError(400, `Invalid GPS status. Must be one of: ${allowedStatuses.join(", ")}`);
+  }
+
+  // 1. Persist the updated state to the DB
+  const updatedUser = await prisma.user.update({
     where: { id: userId },
     data: { locationPermission: status },
     select: {
       id: true,
       name: true,
       role: true,
+      active: true,
       locationPermission: true,
+      updatedAt: true,
     },
   });
 
-  return updated;
-};
+  // 2. Broadcast realtime update specifically to ADMIN and MANAGER clients
+  const payload = {
+    userId: updatedUser.id,
+    name: updatedUser.name,
+    role: updatedUser.role,
+    gpsPermissionStatus: updatedUser.locationPermission,
+    locationPermission: updatedUser.locationPermission,
+    updatedAt: updatedUser.updatedAt.toISOString(),
+  };
 
+  try {
+    emitToRoles(["ADMIN", "MANAGER"], "user:gps-permission-updated", payload);
+  } catch (err) {
+    console.warn("⚠️ WebSocket broadcast skipped:", err.message);
+  }
+
+  return payload;
+};
 export const getAll = async (query = {}) => {
   const where = {};
   if (query.role) where.role = query.role;

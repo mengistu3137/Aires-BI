@@ -1,31 +1,35 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useAuth } from "./useAuth.js";
 import { apiClient } from "@/services/client.js";
 
 export function useLocationPermissionSync() {
     const { isAuthenticated, isAuditor } = useAuth();
     const [permissionStatus, setPermissionStatus] = useState("NOT_REQUESTED");
+    const lastSyncedStatus = useRef(null);
 
     useEffect(() => {
-        if (!isAuthenticated || typeof window === "undefined" || !navigator.permissions) {
+        if (!isAuthenticated || !isAuditor || typeof window === "undefined" || !navigator.permissions) {
             return;
         }
 
         let isMounted = true;
-        let permissionObject = null;
+        let permissionStatusObject = null;
 
         const syncWithBackend = async (status) => {
+            if (lastSyncedStatus.current === status) return;
+            lastSyncedStatus.current = status;
+
             try {
                 await apiClient.patch("/users/me/location-permission", { status });
-            } catch {
-                // Silent failure in background sync
+            } catch (err) {
+                console.warn("Location permission sync to backend failed:", err.message);
             }
         };
 
         const mapPermissionState = (state) => {
             switch (state) {
                 case "granted":
-                    return "ALLOWED";
+                    return "GRANTED";
                 case "denied":
                     return "DENIED";
                 case "prompt":
@@ -34,16 +38,18 @@ export function useLocationPermissionSync() {
             }
         };
 
+        // Query browser Permissions API
         navigator.permissions
             .query({ name: "geolocation" })
             .then((permission) => {
                 if (!isMounted) return;
-                permissionObject = permission;
+                permissionStatusObject = permission;
 
                 const currentStatus = mapPermissionState(permission.state);
                 setPermissionStatus(currentStatus);
                 syncWithBackend(currentStatus);
 
+                // Listen for live browser permission changes (e.g. user taps 'Allow' or 'Block')
                 permission.onchange = () => {
                     if (!isMounted) return;
                     const updated = mapPermissionState(permission.state);
@@ -57,8 +63,8 @@ export function useLocationPermissionSync() {
 
         return () => {
             isMounted = false;
-            if (permissionObject) {
-                permissionObject.onchange = null;
+            if (permissionStatusObject) {
+                permissionStatusObject.onchange = null;
             }
         };
     }, [isAuthenticated, isAuditor]);
