@@ -1,13 +1,7 @@
-/**
- * ============================================================
- *  AIRES-BI PRODUCTION DATABASE SEEDER (120 PRODUCTS)
- *  Fully aligned with schema.prisma (Enums, Constraints & Relational Models)
- * ============================================================
- */
 import "dotenv/config";
-import { PrismaClient } from "@prisma/client";
+import prisma from "../src/config/db.js";
 
-// Resilient bcrypt loader (works with either bcrypt or bcryptjs)
+// Resilient bcrypt loader (works with both bcrypt and bcryptjs)
 let bcrypt;
 try {
   bcrypt = (await import("bcrypt")).default;
@@ -15,13 +9,10 @@ try {
   bcrypt = (await import("bcryptjs")).default;
 }
 
-const prisma = new PrismaClient();
-
 async function safeDelete(modelName, deleteFn) {
   try {
     await deleteFn();
   } catch (err) {
-    // Ignore P2021: table does not exist yet
     if (err.code !== "P2021") throw err;
   }
 }
