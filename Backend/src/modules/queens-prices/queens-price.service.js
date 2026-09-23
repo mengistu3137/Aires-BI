@@ -191,8 +191,12 @@ export const getQueensPriceAtDate = async (productId, dateInput) => {
 /**
  * Retrieves full historical timeline of benchmark prices for a product.
  */
-export const getProductQueensPriceHistory = async (productId, query) => {
-  const { page = 1, limit = 20, from, to } = query;
+export const getProductQueensPriceHistory = async (productId, query = {}) => {
+  const { page: rawPage = 1, limit: rawLimit = 20, from, to } = query;
+
+  // Sanitize and explicitly parse pagination parameters to ensure integer types for Prisma
+  const page = Math.max(1, parseInt(rawPage, 10) || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(rawLimit, 10) || 20));
 
   const product = await prisma.product.findUnique({
     where: { id: productId },
@@ -206,8 +210,16 @@ export const getProductQueensPriceHistory = async (productId, query) => {
 
   if (from || to) {
     where.effectiveFrom = {};
-    if (from) where.effectiveFrom.gte = new Date(from);
-    if (to) where.effectiveFrom.lte = new Date(to);
+    if (from) {
+      where.effectiveFrom.gte = new Date(from);
+    }
+    if (to) {
+      const toDate = new Date(to);
+      if (typeof to === "string" && /^\d{4}-\d{2}-\d{2}$/.test(to)) {
+        toDate.setUTCHours(23, 59, 59, 999);
+      }
+      where.effectiveFrom.lte = toDate;
+    }
   }
 
   const skip = (page - 1) * limit;
@@ -217,7 +229,7 @@ export const getProductQueensPriceHistory = async (productId, query) => {
     prisma.queensPrice.findMany({
       where,
       skip,
-      take: limit,
+      take: limit, // Explicit Int
       orderBy: { effectiveFrom: "desc" },
       include: QUEENS_PRICE_INCLUDE_RELATIONS,
     }),
@@ -255,8 +267,19 @@ export const getQueensPriceById = async (id) => {
 /**
  * Lists benchmark prices across products with optional filtering.
  */
-export const listQueensPrices = async (query) => {
-  const { page = 1, limit = 20, productId, current, from, to } = query;
+export const listQueensPrices = async (query = {}) => {
+  const {
+    page: rawPage = 1,
+    limit: rawLimit = 20,
+    productId,
+    current,
+    from,
+    to,
+  } = query;
+
+  // Sanitize and explicitly parse pagination parameters to ensure integer types for Prisma
+  const page = Math.max(1, parseInt(rawPage, 10) || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(rawLimit, 10) || 20));
 
   const where = {};
 
@@ -265,14 +288,24 @@ export const listQueensPrices = async (query) => {
   }
 
   const now = new Date();
-  if (current === true) {
+  const isCurrentFilter = current === true || current === "true";
+
+  if (isCurrentFilter) {
     where.effectiveFrom = { lte: now };
     where.OR = [{ effectiveTo: null }, { effectiveTo: { gt: now } }];
   } else {
     if (from || to) {
       where.effectiveFrom = {};
-      if (from) where.effectiveFrom.gte = new Date(from);
-      if (to) where.effectiveFrom.lte = new Date(to);
+      if (from) {
+        where.effectiveFrom.gte = new Date(from);
+      }
+      if (to) {
+        const toDate = new Date(to);
+        if (typeof to === "string" && /^\d{4}-\d{2}-\d{2}$/.test(to)) {
+          toDate.setUTCHours(23, 59, 59, 999);
+        }
+        where.effectiveFrom.lte = toDate;
+      }
     }
   }
 
@@ -283,7 +316,7 @@ export const listQueensPrices = async (query) => {
     prisma.queensPrice.findMany({
       where,
       skip,
-      take: limit,
+      take: limit, // Explicit Int prevents PrismaClientValidationError
       orderBy: { effectiveFrom: "desc" },
       include: QUEENS_PRICE_INCLUDE_RELATIONS,
     }),

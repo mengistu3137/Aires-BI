@@ -247,6 +247,13 @@ export const startAudit = async ({
     throw new ApiError(400, "Target store is deactivated");
   }
 
+  const parsedLat = Number(latitude);
+  const parsedLon = Number(longitude);
+  const parsedAccuracy =
+    accuracyMeters !== undefined && accuracyMeters !== null
+      ? Number(accuracyMeters)
+      : null;
+
   let distanceFromStoreMeters = null;
   let gpsValid = null;
 
@@ -255,15 +262,15 @@ export const startAudit = async ({
     const storeLon = Number(audit.store.longitude);
 
     distanceFromStoreMeters = calculateDistanceMeters(
-      latitude,
-      longitude,
+      parsedLat,
+      parsedLon,
       storeLat,
       storeLon,
     );
 
     gpsValid = isWithinAuditRadius({
       distanceMeters: distanceFromStoreMeters,
-      accuracyMeters,
+      accuracyMeters: parsedAccuracy,
     });
   }
 
@@ -273,9 +280,9 @@ export const startAudit = async ({
       data: {
         status: "IN_PROGRESS",
         startedAt: new Date(),
-        startLatitude: latitude,
-        startLongitude: longitude,
-        startAccuracyMeters: accuracyMeters,
+        startLatitude: parsedLat,
+        startLongitude: parsedLon,
+        startAccuracyMeters: parsedAccuracy,
         distanceFromStoreMeters:
           distanceFromStoreMeters !== null
             ? distanceFromStoreMeters
@@ -389,6 +396,15 @@ export const completeAudit = async ({
     );
   }
 
+  const parsedLat =
+    latitude !== undefined && latitude !== null ? Number(latitude) : null;
+  const parsedLon =
+    longitude !== undefined && longitude !== null ? Number(longitude) : null;
+  const parsedAccuracy =
+    accuracyMeters !== undefined && accuracyMeters !== null
+      ? Number(accuracyMeters)
+      : null;
+
   const mergedNotes = notes?.trim()
     ? audit.notes
       ? `${audit.notes}\n[Completion Note]: ${notes.trim()}`
@@ -401,9 +417,9 @@ export const completeAudit = async ({
       data: {
         status: "COMPLETED",
         completedAt: new Date(),
-        endLatitude: latitude,
-        endLongitude: longitude,
-        endAccuracyMeters: accuracyMeters,
+        endLatitude: parsedLat,
+        endLongitude: parsedLon,
+        endAccuracyMeters: parsedAccuracy,
         notes: mergedNotes,
       },
       include: AUDIT_INCLUDE_RELATIONS,
@@ -558,8 +574,8 @@ export const getCurrentAudit = async (user) => {
  */
 export const listAudits = async ({ user, query }) => {
   const {
-    page = 1,
-    limit = 20,
+    page: rawPage = 1,
+    limit: rawLimit = 20,
     status,
     assignmentId,
     storeId,
@@ -568,6 +584,10 @@ export const listAudits = async ({ user, query }) => {
     from,
     to,
   } = query;
+
+  // Explicitly parse and sanitize pagination numbers to prevent PrismaClientValidationError
+  const page = Math.max(1, parseInt(rawPage, 10) || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(rawLimit, 10) || 20));
 
   const where = {};
 
@@ -601,7 +621,6 @@ export const listAudits = async ({ user, query }) => {
     }
     if (to) {
       const toDate = new Date(to);
-      // If date without time was passed (e.g. YYYY-MM-DD), set to end of day
       if (typeof to === "string" && /^\d{4}-\d{2}-\d{2}$/.test(to)) {
         toDate.setUTCHours(23, 59, 59, 999);
       }
@@ -616,7 +635,7 @@ export const listAudits = async ({ user, query }) => {
     prisma.audit.findMany({
       where,
       skip,
-      take: limit,
+      take: limit, // Explicit integer guarantees valid Prisma execution
       orderBy: { createdAt: "desc" },
       include: AUDIT_INCLUDE_RELATIONS,
     }),
