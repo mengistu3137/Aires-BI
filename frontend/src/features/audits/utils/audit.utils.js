@@ -1,9 +1,10 @@
 /**
- * Format a date to a human-readable string
+ * Format a date for display
  */
 export const formatDate = (dateString) => {
   if (!dateString) return "—";
   const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return "—";
   return date.toLocaleDateString("en-US", {
     year: "numeric",
     month: "short",
@@ -17,6 +18,7 @@ export const formatDate = (dateString) => {
 export const formatDateTime = (dateString) => {
   if (!dateString) return "—";
   const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return "—";
   return date.toLocaleString("en-US", {
     year: "numeric",
     month: "short",
@@ -46,7 +48,7 @@ export const formatRelativeTime = (dateString) => {
 };
 
 /**
- * Format distance in meters to human-readable
+ * Format distance in meters to a human-readable string
  */
 export const formatDistance = (meters) => {
   if (meters === null || meters === undefined) return "—";

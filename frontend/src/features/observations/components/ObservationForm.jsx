@@ -1,18 +1,20 @@
 import React, { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { observationFormSchema } from "../schemas/observation.schema.js";
 import { AvailabilitySelector } from "./AvailabilitySelector.jsx";
 import { PriceInput } from "./PriceInput.jsx";
 import { EvidenceCapture } from "./EvidenceCapture.jsx";
-import { LocationStatus } from "./LocationStatus.jsx";
 import { generateClientObservationId } from "../utils/observation.utils.js";
 import { enqueueObservation, syncObservation } from "../offline/observationQueue.js";
 
 /**
  * Full observation entry form.
  * Handles local save + immediate sync attempt (falls back to queue if offline).
+ * After a successful server sync, invalidates the audit observation queries
+ * so the parent list refreshes without a page reload.
  */
 export const ObservationForm = ({
   auditId,
@@ -21,9 +23,7 @@ export const ObservationForm = ({
   onSaved,
   onCancel,
 }) => {
-  const [geoStatus, setGeoStatus] = useState("idle");
-  const [geoCoords, setGeoCoords] = useState(null);
-  const [geoAccuracy, setGeoAccuracy] = useState(null);
+  const queryClient = useQueryClient();
   const [evidence, setEvidence] = useState(() => {
     if (existingObservation?.evidencePhotoUrl) {
       return {
@@ -67,39 +67,24 @@ export const ObservationForm = ({
     }
   }, [isAvailable, setValue]);
 
-  // Auto-capture location on mount
-  useEffect(() => {
-    if (!existingObservation) {
-      captureLocation();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const captureLocation = () => {
-    if (!navigator.geolocation) {
-      setGeoStatus("error");
-      return;
-    }
-
-    setGeoStatus("capturing");
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setGeoCoords({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-        });
-        setGeoAccuracy(position.coords.accuracy);
-        setGeoStatus("success");
-      },
-      () => {
-        setGeoStatus("error");
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 15000,
-        maximumAge: 0,
-      }
-    );
+  /**
+   * Invalidate every query the observation touches so the UI updates live.
+   */
+  const invalidateObservationQueries = () => {
+    // Audit-scoped observation list (used by AuditObservationsPage)
+    queryClient.invalidateQueries({
+      queryKey: ["observations", "audit", auditId],
+    });
+    // Global observation list (used by ObservationsPage)
+    queryClient.invalidateQueries({ queryKey: ["observations", "list"] });
+    // Audit detail (contains observationsCount)
+    queryClient.invalidateQueries({
+      queryKey: ["audits", "detail", auditId],
+    });
+    // Audit list (may show counts / progress)
+    queryClient.invalidateQueries({ queryKey: ["audits"] });
+    // Dashboard KPIs (observation totals)
+    queryClient.invalidateQueries({ queryKey: ["dashboard"] });
   };
 
   const onSubmit = async (data) => {
@@ -122,24 +107,29 @@ export const ObservationForm = ({
         notes: data.notes?.trim() || null,
       };
 
-      // Save locally first (always)
+      // 1. Always persist locally first (offline-first)
       const queued = await enqueueObservation(payload);
 
-      // Try immediate sync
+      // 2. Attempt immediate sync
       const result = await syncObservation(queued);
 
       if (result.success) {
         toast.success("Observation saved");
+        invalidateObservationQueries();
+        reset();
+        onSaved?.();
       } else if (result.permanent) {
         toast.error(result.error?.response?.data?.message || "This observation could not be saved");
         setIsSubmitting(false);
         return;
       } else {
+        // Saved offline — still invalidate so the queued observation
+        // appears in the list (its sync status will be PENDING).
         toast.success("Observation saved offline");
+        invalidateObservationQueries();
+        reset();
+        onSaved?.();
       }
-
-      reset();
-      onSaved?.();
     } catch (error) {
       console.error("[ObservationForm] Save failed:", error);
       toast.error(error?.message || "Unable to save observation");
@@ -232,8 +222,6 @@ export const ObservationForm = ({
             <p className="mt-1 text-xs font-medium text-[#A41821]">{errors.notes.message}</p>
           )}
         </div>
-
-        <LocationStatus status={geoStatus} accuracyMeters={geoAccuracy} onRetry={captureLocation} />
       </div>
 
       {/* Actions */}

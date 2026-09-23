@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { useDashboard } from "../hooks/useDashboard.js";
 import { useAuth } from "@/hooks/useAuth.js";
 import { DashboardHeader } from "../components/DashboardHeader.jsx";
-import { SurveyPeriodSelector } from "../components/SurveyPeriodSelector.jsx";
+import { SurveyPeriodSelector } from "@/features/survey/components/SurveyPeriodSelector.jsx";
 import { ActiveSurveyPeriodCard } from "../components/ActiveSurveyPeriodCard.jsx";
 import { DashboardKpiGrid } from "../components/DashboardKpiGrid.jsx";
 import { AssignmentProgressCard } from "../components/AssignmentProgressCard.jsx";

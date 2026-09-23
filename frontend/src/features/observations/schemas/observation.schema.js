@@ -5,8 +5,9 @@ export const REVIEW_STATUS_OPTIONS = ["PENDING", "APPROVED", "REJECTED", "NEEDS_
 export const SYNC_STATUS_OPTIONS = ["PENDING", "SYNCING", "SYNCED", "FAILED"];
 
 /**
- * Client-side observation form schema
- * Mirrors backend observation.validation.js
+ * Client-side observation form schema.
+ * Mirrors backend observation.validation.js (createObservationSchema).
+ * NOTE: No latitude/longitude — GPS is captured on the Audit, not the observation.
  */
 export const observationFormSchema = z
   .object({
@@ -49,20 +50,18 @@ export const observationFormSchema = z
         });
       }
     } else {
-      // OUT_OF_STOCK / NOT_FOUND → price must be null
       if (data.price !== null && data.price !== undefined) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["price"],
-          message: `Price must be empty when product is ${data.availability === "OUT_OF_STOCK" ? "out of stock" : "not found"}`,
+          message: `Price must be empty when product is ${
+            data.availability === "OUT_OF_STOCK" ? "out of stock" : "not found"
+          }`,
         });
       }
     }
   });
 
-/**
- * Review action schemas
- */
 export const rejectObservationSchema = z.object({
   reviewNote: z
     .string()

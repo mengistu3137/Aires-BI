@@ -35,8 +35,14 @@ router.get(
 );
 
 // ========================================================
-// 2. ROOT OBSERVATION ROUTES: /api/v1/observations/:observationId
+// 2. ROOT OBSERVATION ROUTES: /api/v1/observations
 // ========================================================
+router.get(
+  "/observations",
+  validate(listObservationsQuerySchema, "query"),
+  observationController.listAllObservations,
+);
+
 router.get(
   "/observations/:observationId",
   validate(observationIdParamSchema, "params"),

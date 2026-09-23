@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { usePriceAnalyses } from "../hooks/usePriceAnalyses.js";
 import { useRecalculateSurveyPeriod } from "../hooks/usePriceAnalysisMutations.js";
 import { useAuth } from "@/hooks/useAuth.js";
-import { SurveyPeriodSelector } from "../components/SurveyPeriodSelector.jsx";
+import { SurveyPeriodSelector } from "@/features/survey/components/SurveyPeriodSelector.jsx";
 import { ActionFilter } from "../components/ActionFilter.jsx";
 import { PriceAnalysisListTable } from "../components/PriceAnalysisListTable.jsx";
 import { PriceAnalysisMobileList } from "../components/PriceAnalysisMobileList.jsx";

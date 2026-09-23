@@ -10,13 +10,16 @@ export const ObservationListItem = ({ product, observation, onSelect }) => {
   const isObserved = Boolean(observation);
   const colors = observation ? getAvailabilityColors(observation.availability) : null;
 
+  // API returns sync status nested at `observation.sync.status`.
+  // Fall back to flat `syncStatus` for any legacy shape.
+  const syncStatus = observation?.sync?.status || observation?.syncStatus || "SYNCED";
+
   return (
     <button
       type="button"
       onClick={() => onSelect(product)}
       className="flex w-full items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3 text-left transition hover:border-slate-300 hover:bg-slate-50 focus:outline-hidden focus:ring-2 focus:ring-[#A41821] focus:ring-offset-2"
     >
-      {/* Product icon / status dot */}
       <div
         className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
           isObserved ? colors.bg : "bg-slate-100"
@@ -41,7 +44,6 @@ export const ObservationListItem = ({ product, observation, onSelect }) => {
         )}
       </div>
 
-      {/* Product details */}
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <p className="truncate text-sm font-bold text-slate-800">{product.name}</p>
@@ -56,7 +58,6 @@ export const ObservationListItem = ({ product, observation, onSelect }) => {
           {product.unit && ` · ${product.unit}`}
         </p>
 
-        {/* Observation summary */}
         {isObserved && (
           <div className="mt-1.5 flex items-center gap-2">
             <span
@@ -73,10 +74,9 @@ export const ObservationListItem = ({ product, observation, onSelect }) => {
         )}
       </div>
 
-      {/* Right side: sync badge or add icon */}
       <div className="shrink-0">
         {isObserved ? (
-          <ObservationSyncBadge status={observation.syncStatus || "SYNCED"} />
+          <ObservationSyncBadge status={syncStatus} />
         ) : (
           <svg
             className="h-4 w-4 text-slate-300"

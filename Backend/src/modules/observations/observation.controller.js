@@ -36,6 +36,23 @@ export const listAuditObservations = async (req, res, next) => {
   }
 };
 
+export const listAllObservations = async (req, res, next) => {
+  try {
+    const result = await observationService.listAllObservations({
+      user: req.user,
+      query: req.query,
+    });
+
+    res.status(200).json({
+      status: "success",
+      data: result.data,
+      meta: result.meta,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const getObservationById = async (req, res, next) => {
   try {
     const observation = await observationService.getObservationById({
@@ -126,6 +143,7 @@ export const requestObservationReview = async (req, res, next) => {
 export const observationController = {
   createObservation,
   listAuditObservations,
+  listAllObservations,
   getObservationById,
   updateObservation,
   approveObservation,

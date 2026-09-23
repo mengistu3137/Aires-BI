@@ -22,16 +22,19 @@ const QUEENS_PRICE_INCLUDE_RELATIONS = {
 /**
  * Checks if a candidate price interval overlaps with any existing QueensPrice for that product.
  * Excludes self (excludeId) when validating updates.
+ * Excludes previous open-ended records that start before newFrom if auto-close is enabled.
  */
 export const checkOverlap = async (
   productId,
   newFrom,
   newTo,
   excludeId = null,
+  ignoreOpenEndedBefore = null,
 ) => {
   const where = {
     productId,
     ...(excludeId ? { id: { not: excludeId } } : {}),
+    ...(ignoreOpenEndedBefore ? { id: { not: ignoreOpenEndedBefore } } : {}),
   };
 
   // Database-level pre-filter using interval logic:
@@ -66,7 +69,8 @@ export const checkOverlap = async (
 
 /**
  * Creates a new benchmark QueensPrice record.
- * Validates product existence, active status, date range semantics, and non-overlap.
+ * If a prior benchmark is open-ended (effectiveTo = null) and starts before the new price,
+ * it automatically sets its effectiveTo = newFrom transactionally.
  */
 export const createQueensPrice = async ({
   productId,
@@ -94,8 +98,29 @@ export const createQueensPrice = async ({
   const fromDate = new Date(effectiveFrom);
   const toDate = effectiveTo ? new Date(effectiveTo) : null;
 
-  // Check for overlapping period
-  const conflict = await checkOverlap(productId, fromDate, toDate);
+  if (toDate && toDate <= fromDate) {
+    throw new ApiError(400, "effectiveTo must be strictly after effectiveFrom");
+  }
+
+  // Find any previous open-ended record starting BEFORE the new price
+  const priorOpenEnded = await prisma.queensPrice.findFirst({
+    where: {
+      productId,
+      effectiveTo: null,
+      effectiveFrom: { lt: fromDate },
+    },
+    orderBy: { effectiveFrom: "desc" },
+  });
+
+  // Check for any actual conflicting overlap (ignoring the prior record we will close)
+  const conflict = await checkOverlap(
+    productId,
+    fromDate,
+    toDate,
+    null,
+    priorOpenEnded?.id || null,
+  );
+
   if (conflict) {
     const conflictTo = conflict.effectiveTo
       ? conflict.effectiveTo.toISOString()
@@ -106,19 +131,31 @@ export const createQueensPrice = async ({
     );
   }
 
-  const record = await prisma.queensPrice.create({
-    data: {
-      productId,
-      price,
-      effectiveFrom: fromDate,
-      effectiveTo: toDate,
-      source: source?.trim() || null,
-      notes: notes?.trim() || null,
-    },
-    include: QUEENS_PRICE_INCLUDE_RELATIONS,
+  // Execute in a transaction: close prior open-ended record + create new record
+  const result = await prisma.$transaction(async (tx) => {
+    if (priorOpenEnded) {
+      await tx.queensPrice.update({
+        where: { id: priorOpenEnded.id },
+        data: { effectiveTo: fromDate },
+      });
+    }
+
+    const created = await tx.queensPrice.create({
+      data: {
+        productId,
+        price,
+        effectiveFrom: fromDate,
+        effectiveTo: toDate,
+        source: source?.trim() || null,
+        notes: notes?.trim() || null,
+      },
+      include: QUEENS_PRICE_INCLUDE_RELATIONS,
+    });
+
+    return created;
   });
 
-  return formatQueensPriceResponse(record);
+  return formatQueensPriceResponse(result);
 };
 
 /**
@@ -194,7 +231,6 @@ export const getQueensPriceAtDate = async (productId, dateInput) => {
 export const getProductQueensPriceHistory = async (productId, query = {}) => {
   const { page: rawPage = 1, limit: rawLimit = 20, from, to } = query;
 
-  // Sanitize and explicitly parse pagination parameters to ensure integer types for Prisma
   const page = Math.max(1, parseInt(rawPage, 10) || 1);
   const limit = Math.min(100, Math.max(1, parseInt(rawLimit, 10) || 20));
 
@@ -229,7 +265,7 @@ export const getProductQueensPriceHistory = async (productId, query = {}) => {
     prisma.queensPrice.findMany({
       where,
       skip,
-      take: limit, // Explicit Int
+      take: limit,
       orderBy: { effectiveFrom: "desc" },
       include: QUEENS_PRICE_INCLUDE_RELATIONS,
     }),
@@ -277,7 +313,6 @@ export const listQueensPrices = async (query = {}) => {
     to,
   } = query;
 
-  // Sanitize and explicitly parse pagination parameters to ensure integer types for Prisma
   const page = Math.max(1, parseInt(rawPage, 10) || 1);
   const limit = Math.min(100, Math.max(1, parseInt(rawLimit, 10) || 20));
 
@@ -316,7 +351,7 @@ export const listQueensPrices = async (query = {}) => {
     prisma.queensPrice.findMany({
       where,
       skip,
-      take: limit, // Explicit Int prevents PrismaClientValidationError
+      take: limit,
       orderBy: { effectiveFrom: "desc" },
       include: QUEENS_PRICE_INCLUDE_RELATIONS,
     }),

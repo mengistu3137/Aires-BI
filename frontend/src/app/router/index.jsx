@@ -28,22 +28,23 @@ import { PriceAnalysisDetailPage } from "@/features/price-analysis/pages/PriceAn
 
 import { AlertsPage } from "@/features/alerts/pages/AlertsPage.jsx";
 import { AlertDetailPage } from "@/features/alerts/pages/AlertDetailPage.jsx";
+import { ObservationsPage } from "@/features/observations/pages/ObservationsPage.jsx";
 
 import { DashboardPage } from "@/features/dashboard/pages/DashboardPage.jsx";
 
 const ProtectedRoute = ({ children, allowedRoles }) => {
-	const { isAuthenticated, role } = useAuth();
+  const { isAuthenticated, role } = useAuth();
 
-	if (!isAuthenticated) {
-		return <Navigate to="/login" replace />;
-	}
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
 
   if (allowedRoles && !allowedRoles.includes(role)) {
     // Fall back to Dashboard — the safest neutral destination for all roles
     return <Navigate to="/dashboard" replace />;
   }
 
-	return children;
+  return children;
 };
 
 export const router = createBrowserRouter([
@@ -143,11 +144,14 @@ export const router = createBrowserRouter([
           </ProtectedRoute>
         ),
       },
-
-      // ── Observations ──
-      // NOTE: There is currently no `/observations` index page component.
-      // The nav config exposes "Observations" → /observations which will
-      // 404 until an ObservationsPage is added. Only the detail route exists.
+      {
+        path: "observations",
+        element: (
+          <ProtectedRoute allowedRoles={["ADMIN", "MANAGER", "FIELD_AUDITOR"]}>
+            <ObservationsPage />
+          </ProtectedRoute>
+        ),
+      },
       {
         path: "observations/:observationId",
         element: (
