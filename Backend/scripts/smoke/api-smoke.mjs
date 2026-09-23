@@ -1,118 +1,201 @@
 /**
- * Automated Smoke Test for Aires-BI Backend
- * Run via: node scripts/smoke/api-smoke.mjs (ensure backend is running first!)
+ * Iteration 2 Smoke Test Suite
+ * Validates the 7 scoped modules:
+ * 1. /auth
+ * 2. /users
+ * 3. /products
+ * 4. /competitors
+ * 5. /stores
+ * 6. /survey-periods
+ * 7. /assignments
+ *
+ * Run with: node scripts/smoke/scope-smoke.mjs
  */
+
 const BASE_URL = process.env.API_URL || "http://localhost:5000";
 
-const testLog = (name, passed, detail = "") => {
+let adminToken = null;
+let auditorToken = null;
+let testUserId = null;
+let testStoreId = null;
+let testAssignmentId = null;
+
+const log = (moduleName, testName, passed, detail = "") => {
   const icon = passed ? "✅" : "❌";
-  console.log(`${icon} [Smoke Test] ${name} ${detail ? `— ${detail}` : ""}`);
+  console.log(`${icon} [${moduleName}] ${testName} ${detail ? `— ${detail}` : ""}`);
 };
 
-async function runSmokeSuite() {
-  console.log("\n🚀 Starting Aires-BI Enterprise Smoke Verification Suite...\n");
-  let failed = false;
+async function req(path, method = "GET", body = null, token = null) {
+  const headers = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  // Pre-flight check: Test if backend is reachable
-  try {
-    await fetch(`${BASE_URL}/health`);
-  } catch (err) {
-    console.error(`❌ Could not connect to Aires-BI server at ${BASE_URL}`);
-    console.error(`👉 The server is not running. Please start it in another terminal:\n`);
-    console.error(`   cd Backend`);
-    console.error(`   npm run dev\n`);
-    process.exit(1);
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : null,
+  });
+
+  const data = await res.json().catch(() => ({}));
+  return { status: res.status, ok: res.ok, data };
+}
+
+async function runScopeSmokeSuite() {
+  console.log("\n=======================================================");
+  console.log("🚀 Aires-BI Iteration 2 Scoped Verification Suite");
+  console.log("=======================================================\n");
+
+  let failures = 0;
+
+  // 0. HEALTH GATEWAY
+  const health = await req("/health");
+  const healthOk = health.status === 200 && health.data?.app === "Aires-BI";
+  log("GATEWAY", "Health Check", healthOk, `Status: ${health.status}`);
+  if (!healthOk) failures++;
+
+  // 1. AUTH MODULE
+  console.log("\n--- Testing 1. /auth ---");
+  // Admin Login
+  const adminLogin = await req("/api/v1/auth/login", "POST", {
+    identifier: "+251911000001", // Abraham Tefera (Admin)
+    password: "Aires@2026",
+  });
+  adminToken = adminLogin.data?.data?.token;
+  const adminLoginOk = adminLogin.status === 200 && Boolean(adminToken);
+  log("AUTH", "POST /login (Admin)", adminLoginOk, adminLogin.data?.data?.user?.name);
+  if (!adminLoginOk) failures++;
+
+  // Auditor Login
+  const auditorLogin = await req("/api/v1/auth/login", "POST", {
+    identifier: "+251911223344", // Dawit Haile (Agent 1)
+    password: "Aires@2026",
+  });
+  auditorToken = auditorLogin.data?.data?.token;
+  const auditorLoginOk = auditorLogin.status === 200 && Boolean(auditorToken);
+  log("AUTH", "POST /login (Auditor)", auditorLoginOk, auditorLogin.data?.data?.user?.name);
+  if (!auditorLoginOk) failures++;
+
+  // GET /me
+  const getMe = await req("/api/v1/auth/me", "GET", null, adminToken);
+  const getMeOk = getMe.status === 200 && getMe.data?.data?.user?.role === "ADMIN";
+  log("AUTH", "GET /me", getMeOk, `Role: ${getMe.data?.data?.user?.role}`);
+  if (!getMeOk) failures++;
+
+  // POST /logout
+  const logoutRes = await req("/api/v1/auth/logout", "POST", null, adminToken);
+  const logoutOk = logoutRes.status === 200;
+  log("AUTH", "POST /logout", logoutOk, logoutRes.data?.message);
+  if (!logoutOk) failures++;
+
+  // 2. USERS MODULE
+  console.log("\n--- Testing 2. /users ---");
+  // GET /users
+  const listUsers = await req("/api/v1/users", "GET", null, adminToken);
+  const listUsersOk = listUsers.status === 200 && Array.isArray(listUsers.data?.data?.users);
+  log("USERS", "GET /", listUsersOk, `Count: ${listUsers.data?.data?.users?.length}`);
+  if (!listUsersOk) failures++;
+
+  // POST /users
+  const tempPhone = `+251999${Math.floor(100000 + Math.random() * 900000)}`;
+  const createUser = await req("/api/v1/users", "POST", {
+    name: "Temporary Auditor Test",
+    phone: tempPhone,
+    email: `temp_${Date.now()}@aires.et`,
+    password: "TempPassword@123",
+    role: "FIELD_AUDITOR",
+  }, adminToken);
+  testUserId = createUser.data?.data?.user?.id;
+  const createUserOk = createUser.status === 201 && Boolean(testUserId);
+  log("USERS", "POST /", createUserOk, `Created ID: ${testUserId}`);
+  if (!createUserOk) failures++;
+
+  // PATCH /users/:id
+  if (testUserId) {
+    const updateUser = await req(`/api/v1/users/${testUserId}`, "PATCH", {
+      name: "Updated Auditor Name",
+    }, adminToken);
+    const updateUserOk = updateUser.status === 200 && updateUser.data?.data?.user?.name === "Updated Auditor Name";
+    log("USERS", "PATCH /:id", updateUserOk);
+    if (!updateUserOk) failures++;
+
+    // DELETE /users/:id
+    const deleteUser = await req(`/api/v1/users/${testUserId}`, "DELETE", null, adminToken);
+    const deleteUserOk = deleteUser.status === 200;
+    log("USERS", "DELETE /:id", deleteUserOk, deleteUser.data?.data?.message);
+    if (!deleteUserOk) failures++;
   }
 
-  try {
-    // 1. Health Gateway Endpoint
-    const healthRes = await fetch(`${BASE_URL}/health`);
-    const healthData = await healthRes.json();
-    const healthOk = healthRes.status === 200 && healthData.app === "Aires-BI";
-    testLog("Health Check Gateway", healthOk, `Status: ${healthRes.status}`);
-    if (!healthOk) failed = true;
+  // 3. PRODUCTS MODULE
+  console.log("\n--- Testing 3. /products ---");
+  const listProducts = await req("/api/v1/products", "GET", null, auditorToken);
+  const listProductsOk = listProducts.status === 200 && listProducts.data?.results >= 20;
+  log("PRODUCTS", "GET /", listProductsOk, `Catalog items: ${listProducts.data?.results}`);
+  if (!listProductsOk) failures++;
 
-    // 2. Field Auditor Login (Dawit Haile)
-    const loginRes = await fetch(`${BASE_URL}/api/v1/auth/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        identifier: "+251911223344",
-        password: "Aires@2026",
-      }),
-    });
-    const loginData = await loginRes.json();
-    const token = loginData?.data?.token;
-    const authOk = loginRes.status === 200 && Boolean(token);
-    testLog("Auditor Authentication", authOk, `User: ${loginData?.data?.user?.name || "N/A"}`);
-    if (!authOk) failed = true;
+  const getProduct = await req("/api/v1/products/VEG-01", "GET", null, auditorToken);
+  const getProductOk = getProduct.status === 200 && getProduct.data?.data?.product?.currentQueensPrice > 0;
+  log("PRODUCTS", "GET /:id", getProductOk, `Active price: ${getProduct.data?.data?.product?.currentQueensPrice} ETB`);
+  if (!getProductOk) failures++;
 
-    // 3. Manager Login (Tigist Alemu)
-    const managerLoginRes = await fetch(`${BASE_URL}/api/v1/auth/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        identifier: "+251922334455",
-        password: "Aires@2026",
-      }),
-    });
-    const managerData = await managerLoginRes.json();
-    const managerToken = managerData?.data?.token;
-    const managerOk = managerLoginRes.status === 200 && Boolean(managerToken);
-    testLog("Manager Authentication", managerOk, `User: ${managerData?.data?.user?.name || "N/A"}`);
-    if (!managerOk) failed = true;
+  // 4. COMPETITORS MODULE
+  console.log("\n--- Testing 4. /competitors ---");
+  const listCompetitors = await req("/api/v1/competitors", "GET", null, adminToken);
+  const listCompetitorsOk = listCompetitors.status === 200 && listCompetitors.data?.results >= 7;
+  log("COMPETITORS", "GET /", listCompetitorsOk, `Competitors count: ${listCompetitors.data?.results}`);
+  if (!listCompetitorsOk) failures++;
 
-    // 4. Submit Field Price Entry (Red Onion at Shoa)
-    const submitRes = await fetch(`${BASE_URL}/api/v1/surveys/entries`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        itemId: "Veg-01",
-        competitorId: "shoa",
-        marketName: "Shoa Supermarket",
-        surveyPeriodId: "2026-W39",
-        price: 61.5,
-        unit: "kg",
-        latitude: 9.032,
-        longitude: 38.7469,
-        accuracy: 7,
-      }),
-    });
-    const submitData = await submitRes.json();
-    const submitOk = submitRes.status === 201;
-    testLog("Field Price & GPS Entry Submission", submitOk, `Entry ID: ${submitData?.data?.entry?.id || "N/A"}`);
-    if (!submitOk) failed = true;
+  // 5. STORES MODULE
+  console.log("\n--- Testing 5. /stores ---");
+  const listStores = await req("/api/v1/stores", "GET", null, auditorToken);
+  const listStoresOk = listStores.status === 200 && listStores.data?.results >= 7;
+  testStoreId = listStores.data?.data?.stores?.[0]?.id;
+  log("STORES", "GET /", listStoresOk, `Stores count: ${listStores.data?.results}`);
+  if (!listStoresOk) failures++;
 
-    // 5. BI Pricing Intelligence Calculation Query
-    const biRes = await fetch(`${BASE_URL}/api/v1/bi/dashboard?periodId=2026-W39`, {
-      headers: {
-        Authorization: `Bearer ${managerToken}`,
-      },
-    });
-    const biData = await biRes.json();
-    const biOk = biRes.status === 200 && Boolean(biData?.data?.dashboardSummary);
-    testLog(
-      "BI Pricing Engine & Indexing",
-      biOk,
-      `Overall Index: ${biData?.data?.dashboardSummary?.overallPriceIndexPercent || "N/A"}%`
-    );
-    if (!biOk) failed = true;
+  // 6. SURVEY PERIODS MODULE
+  console.log("\n--- Testing 6. /survey-periods ---");
+  const activePeriod = await req("/api/v1/survey-periods/active", "GET", null, auditorToken);
+  const activePeriodOk = activePeriod.status === 200 && activePeriod.data?.data?.period?.id === "2026-W39";
+  log("PERIODS", "GET /active", activePeriodOk, `Active ID: ${activePeriod.data?.data?.period?.id}`);
+  if (!activePeriodOk) failures++;
 
-    console.log("\n==========================================");
-    if (failed) {
-      console.log("❌ Some verifications failed. Review logs above.\n");
-      process.exit(1);
-    } else {
-      console.log("🎉 ALL AIRES-BI SMOKE VERIFICATIONS PASSED!\n");
-      process.exit(0);
-    }
-  } catch (error) {
-    console.error("💥 Smoke Test encountered unexpected error:", error.message);
+  // 7. ASSIGNMENTS MODULE
+  console.log("\n--- Testing 7. /assignments ---");
+  // GET /assignments/mine (Auditor)
+  const myAssignments = await req("/api/v1/assignments/mine", "GET", null, auditorToken);
+  const myAssignmentsOk = myAssignments.status === 200 && Array.isArray(myAssignments.data?.data?.assignments);
+  log("ASSIGNMENTS", "GET /mine (Auditor)", myAssignmentsOk, `Auditor assignments: ${myAssignments.data?.results}`);
+  if (!myAssignmentsOk) failures++;
+
+  // GET /assignments (Manager/Admin)
+  const allAssignments = await req("/api/v1/assignments", "GET", null, adminToken);
+  const allAssignmentsOk = allAssignments.status === 200 && allAssignments.data?.results >= 4;
+  testAssignmentId = allAssignments.data?.data?.assignments?.[0]?.id;
+  log("ASSIGNMENTS", "GET / (Manager/Admin)", allAssignmentsOk, `Total: ${allAssignments.data?.results}`);
+  if (!allAssignmentsOk) failures++;
+
+  // PATCH /assignments/:id
+  if (testAssignmentId) {
+    const updateAssignment = await req(`/api/v1/assignments/${testAssignmentId}`, "PATCH", {
+      status: "IN_PROGRESS",
+    }, adminToken);
+    const updateAssignmentOk = updateAssignment.status === 200 && updateAssignment.data?.data?.assignment?.status === "IN_PROGRESS";
+    log("ASSIGNMENTS", "PATCH /:id", updateAssignmentOk, `Status: ${updateAssignment.data?.data?.assignment?.status}`);
+    if (!updateAssignmentOk) failures++;
+  }
+
+  console.log("\n=======================================================");
+  if (failures === 0) {
+    console.log("🎉 ALL 7 SCOPED MODULES PASSED VERIFICATION!");
+    console.log("=======================================================\n");
+    process.exit(0);
+  } else {
+    console.log(`❌ Verification completed with ${failures} failure(s).`);
+    console.log("=======================================================\n");
     process.exit(1);
   }
 }
 
-runSmokeSuite();
+runScopeSmokeSuite().catch((err) => {
+  console.error("Fatal error during smoke suite:", err);
+  process.exit(1);
+});

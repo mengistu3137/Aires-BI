@@ -7,8 +7,9 @@ export const getAll = async (activeOnly = false) => {
         where,
         orderBy: { name: "asc" },
         include: {
+            stores: true,
             _count: {
-                select: { assignments: true, entries: true },
+                select: { stores: true },
             },
         },
     });
@@ -18,8 +19,9 @@ export const getById = async (id) => {
     const competitor = await prisma.competitor.findUnique({
         where: { id },
         include: {
+            stores: true,
             _count: {
-                select: { assignments: true, entries: true },
+                select: { stores: true },
             },
         },
     });

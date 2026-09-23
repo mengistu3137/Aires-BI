@@ -1,0 +1,66 @@
+export const ROLES = {
+    ADMIN: "ADMIN",
+    MANAGER: "MANAGER",
+    FIELD_AUDITOR: "FIELD_AUDITOR",
+};
+
+export const STORE_TYPES = {
+    FMCG: "FMCG",
+    FRESH: "FRESH",
+    BOTH: "BOTH",
+};
+
+export const SURVEY_PERIOD_STATUSES = {
+    DRAFT: "DRAFT",
+    OPEN: "OPEN",
+    CLOSED: "CLOSED",
+};
+
+export const ASSIGNMENT_STATUSES = {
+    NOT_STARTED: "NOT_STARTED",
+    IN_PROGRESS: "IN_PROGRESS",
+    COMPLETED: "COMPLETED",
+    CANCELLED: "CANCELLED",
+};
+
+export const AUDIT_STATUSES = {
+    NOT_STARTED: "NOT_STARTED",
+    IN_PROGRESS: "IN_PROGRESS",
+    COMPLETED: "COMPLETED",
+    CANCELLED: "CANCELLED",
+    NEEDS_REVIEW: "NEEDS_REVIEW",
+};
+
+export const PRODUCT_AVAILABILITY = {
+    AVAILABLE: "AVAILABLE",
+    OUT_OF_STOCK: "OUT_OF_STOCK",
+    NOT_FOUND: "NOT_FOUND",
+};
+
+export const SYNC_STATUSES = {
+    PENDING: "PENDING",
+    SYNCING: "SYNCING",
+    SYNCED: "SYNCED",
+    FAILED: "FAILED",
+};
+
+export const OBSERVATION_REVIEW_STATUSES = {
+    PENDING: "PENDING",
+    APPROVED: "APPROVED",
+    REJECTED: "REJECTED",
+    NEEDS_REVIEW: "NEEDS_REVIEW",
+};
+
+export const PRICE_ACTIONS = {
+    PRICE_DOWN: "PRICE_DOWN",
+    PRICE_UP: "PRICE_UP",
+    KEEP: "KEEP",
+    REVIEW: "REVIEW",
+};
+
+export const ALERT_SEVERITIES = {
+    LOW: "LOW",
+    MEDIUM: "MEDIUM",
+    HIGH: "HIGH",
+    CRITICAL: "CRITICAL",
+};

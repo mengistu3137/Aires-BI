@@ -17,7 +17,7 @@ export const login = async ({ identifier, password }) => {
   }
 
   if (!user.active) {
-    throw new ApiError(403, "Your account has been deactivated. Contact an admin.");
+    throw new ApiError(403, "Your account has been deactivated. Contact an administrator.");
   }
 
   const isMatch = await comparePassword(password, user.passwordHash);
@@ -26,6 +26,20 @@ export const login = async ({ identifier, password }) => {
   }
 
   return generateAuthPayload(user);
+};
+
+export const logout = async (userId) => {
+  // Verifies user exists upon explicit session logout
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, active: true },
+  });
+
+  if (!user) {
+    throw new ApiError(404, "User not found.");
+  }
+
+  return { success: true };
 };
 
 export const getMe = async (userId) => {
@@ -42,5 +56,6 @@ export const getMe = async (userId) => {
 
 export const authService = {
   login,
+  logout,
   getMe,
 };

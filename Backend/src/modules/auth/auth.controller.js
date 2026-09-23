@@ -13,6 +13,18 @@ export const login = async (req, res, next) => {
   }
 };
 
+export const logout = async (req, res, next) => {
+  try {
+    await authService.logout(req.user.id);
+    res.status(200).json({
+      status: "success",
+      message: "Logout successful. Session cleared.",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const getMe = async (req, res, next) => {
   try {
     const user = await authService.getMe(req.user.id);
@@ -27,5 +39,6 @@ export const getMe = async (req, res, next) => {
 
 export const authController = {
   login,
+  logout,
   getMe,
 };

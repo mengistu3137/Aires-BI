@@ -6,6 +6,8 @@ import { Survey } from "@/features/survey/pages/Survery.jsx";
 import { SurveyProgress } from "@/features/survey/pages/SurveyProgress.jsx";
 import { Dashboard } from "@/features/bi/pages/Dashboard.jsx";
 import { UsersPage } from "@/features/users/pages/UsersPage.jsx";
+import { StoresPage } from "@/features/stores/pages/StoresPage.jsx";
+import { ProductsPage } from "@/features/products/pages/ProductsPage.jsx";
 import { useAuth } from "@/hooks/useAuth.js";
 import { AuditListPage } from "@/features/audits/pages/AuditListPage.jsx";
 import { AuditDetailPage } from "@/features/audits/pages/AuditDetailPage.jsx";
@@ -20,7 +22,6 @@ import { EditQueensPricePage } from "@/features/queens-prices/pages/EditQueensPr
 import { QueensPriceDetailsPage } from "@/features/queens-prices/pages/QueensPriceDetailsPage.jsx";
 import { ProductQueensPricesPage } from "@/features/queens-prices/pages/ProductQueensPricesPage.jsx";
 
-// Protected Route Guard
 const ProtectedRoute = ({ children, allowedRoles }) => {
   const { isAuthenticated, role } = useAuth();
 
@@ -29,7 +30,6 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
   }
 
   if (allowedRoles && !allowedRoles.includes(role)) {
-    // If an auditor tries to view the admin/manager BI dashboard, route them to field survey
     return <Navigate to="/survey" replace />;
   }
 
@@ -70,10 +70,10 @@ export const router = createBrowserRouter([
         element: <SurveyProgress />,
       },
       {
-        path: "users",
+        path: "products",
         element: (
-          <ProtectedRoute allowedRoles={["ADMIN"]}>
-            <UsersPage />
+          <ProtectedRoute allowedRoles={["ADMIN", "MANAGER"]}>
+            <ProductsPage />
           </ProtectedRoute>
         ),
       },
@@ -96,6 +96,10 @@ export const router = createBrowserRouter([
       {
         path: "observations/:observationId",
         element: <ObservationDetailPage />,
+      },
+         {
+        path: "observations/:observationId",
+        element: <StoresPage />,
       },
 
       // Inside children:
@@ -126,6 +130,13 @@ export const router = createBrowserRouter([
       {
         path: "products/:productId/queens-prices",
         element: <ProductQueensPricesPage />,
+      },
+        path: "users",
+        element: (
+          <ProtectedRoute allowedRoles={["ADMIN"]}>
+            <UsersPage />
+          </ProtectedRoute>
+        ),
       },
     ],
   },
