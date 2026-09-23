@@ -31,15 +31,14 @@ jobs:
           echo "${{ secrets.SSH_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keygen -p -P "${{ secrets.SSH_PASSPHRASE }}" -N "" -f ~/.ssh/id_rsa
-          ssh-keyscan -p ${{ secrets.SSH_PORT }} -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
 
       - name: 🚀 Deploy Frontend to cPanel
         run: |
-          rsync -avz --delete -e "ssh -p ${{ secrets.SSH_PORT }}" frontend/dist/ ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/home/airescad/airesbi/
+          rsync -avz --delete -e "ssh -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=no -o ConnectTimeout=30" frontend/dist/ ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/home/airescad/airesbi/
 
       - name: 🚀 Deploy Backend to cPanel
         run: |
-          rsync -avz --delete --exclude 'node_modules' --exclude '.env' --exclude 'uploads' -e "ssh -p ${{ secrets.SSH_PORT }}" Backend/ ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/home/airescad/biapi/
+          rsync -avz --delete --exclude 'node_modules' --exclude '.env' --exclude 'uploads' -e "ssh -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=no -o ConnectTimeout=30" Backend/ ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/home/airescad/biapi/
 
       - name: 🔄 Install Dependencies, Migrate Prisma & Restart Node
         uses: appleboy/ssh-action@v1.0.3
