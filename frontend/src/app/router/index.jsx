@@ -10,6 +10,18 @@ import { UsersPage } from "@/features/users/pages/UsersPage.jsx";
 import { StoresPage } from "@/features/stores/pages/StoresPage.jsx";
 import { ProductsPage } from "@/features/products/pages/ProductsPage.jsx";
 import { useAuth } from "@/hooks/useAuth.js";
+import { AuditListPage } from "@/features/audits/pages/AuditListPage.jsx";
+import { AuditDetailPage } from "@/features/audits/pages/AuditDetailPage.jsx";
+import { AuditHistoryPage } from "@/features/audits/pages/AuditHistoryPage.jsx";
+
+import { AuditObservationsPage } from "@/features/observations/pages/AuditObservationsPage.jsx";
+import { ObservationDetailPage } from "@/features/observations/pages/ObservationDetailPage.jsx";
+
+import { QueensPricesPage } from "@/features/queens-prices/pages/QueensPricesPage.jsx";
+import { CreateQueensPricePage } from "@/features/queens-prices/pages/CreateQueensPricePage.jsx";
+import { EditQueensPricePage } from "@/features/queens-prices/pages/EditQueensPricePage.jsx";
+import { QueensPriceDetailsPage } from "@/features/queens-prices/pages/QueensPriceDetailsPage.jsx";
+import { ProductQueensPricesPage } from "@/features/queens-prices/pages/ProductQueensPricesPage.jsx";
 
 const ProtectedRoute = ({ children, allowedRoles }) => {
 	const { isAuthenticated, role } = useAuth();

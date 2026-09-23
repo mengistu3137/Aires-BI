@@ -1,5 +1,27 @@
+/**
+ * ============================================================
+ *  DEVELOPMENT / TESTING DATABASE SEEDER
+ * ============================================================
+ *
+ *  This seed is idempotent and safe to re-run:
+ *    - Deterministic IDs are used everywhere.
+ *    - `upsert` is used for every insert.
+ *    - No TRUNCATE, no unbounded deleteMany.
+ *
+ *  It seeds the full workflow:
+ *    Users → Products → Competitors → Stores → SurveyPeriods
+ *      → Assignments → AssignmentItems → Audits → QueensPrices
+ *      → PriceObservations → PriceAnalyses → Alerts
+ *
+ *  ⚠️  DEVELOPMENT PASSWORDS (all users):
+ *        Password123!
+ *
+ *  Run with:  npx prisma db seed
+ *        or:  npm run db:seed
+ * ============================================================
+ */
 import "dotenv/config";
-import bcrypt from "bcryptjs";
+
 import prisma from "../src/config/db.js";
 
 async function safeDelete(modelName, deleteFn) {
@@ -300,7 +322,7 @@ async function main() {
 
 main()
   .catch((e) => {
-    console.error("❌ Seed failed:", e);
+    console.error("\n❌ Seed failed:", e);
     process.exit(1);
   })
   .finally(async () => {
