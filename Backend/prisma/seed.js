@@ -194,12 +194,8 @@ async function main() {
   const passwordHash = await bcrypt.hash("Aires@2026", 10);
 
   const users = [
-    { id: "USR-001", name: "Abraham Shiferaw", email: "abraham.admin@aires.et", phone: "+251911000001", role: "ADMIN" },
-    { id: "USR-002", name: "Endalkachew Girma", email: "endalkachew.manager@aires.et", phone: "+251911000002", role: "MANAGER" },
-    { id: "USR-003", name: "Dawit Haile (Agent 1)", email: "agent1@aires.et", phone: "+251911223344", role: "FIELD_AUDITOR" },
-    { id: "USR-004", name: "Marta Girma (Agent 2)", email: "agent2@aires.et", phone: "+251911223345", role: "FIELD_AUDITOR" },
-    { id: "USR-005", name: "Yared Tadesse (Agent 3)", email: "agent3@aires.et", phone: "+251911223346", role: "FIELD_AUDITOR" },
-    { id: "USR-006", name: "Selam Fikru (Agent 4)", email: "agent4@aires.et", phone: "+251911223347", role: "FIELD_AUDITOR" },
+    { id: "USR-001", name: "Abraham Shiferaw", email: "airesbi@airescommunications.com", phone: "+251910009094", role: "ADMIN" },
+   
   ];
 
   for (const u of users) {
