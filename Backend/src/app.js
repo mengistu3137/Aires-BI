@@ -22,6 +22,7 @@ import alertRoutes from "./modules/alerts/alert.routes.js";
 import storeRoutes from "./modules/stores/stores.routes.js";
 import periodRoutes from "./modules/period/period.routes.js";
 import assignmentRoutes from "./modules/assignment/assignment.routes.js";
+import dashboardRoutes from "./modules/dashboard/dashboard.routes.js";
 
 const app = express();
 
@@ -73,11 +74,12 @@ app.use("/api/v1/bi", biRoutes);
 app.use("/api/v1/audits", auditRoutes);
 app.use("/api/v1", observationRoutes);
 app.use("/api/v1", queensPriceRoutes);
-app.use("/api/v1/price-analyses", priceAnalysisRoutes);
+app.use("/api/v1/price-analysis", priceAnalysisRoutes);
 app.use("/api/v1/alerts", alertRoutes);
 app.use("/api/v1/stores", storeRoutes);
 app.use("/api/v1/survey-periods", periodRoutes);
 app.use("/api/v1/assignments", assignmentRoutes);
+app.use("/api/v1/dashboard", dashboardRoutes);
 
 // ==========================================
 // 404 CATCH-ALL (Express 4 & 5 Compatible)
