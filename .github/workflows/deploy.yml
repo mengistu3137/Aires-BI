@@ -38,7 +38,7 @@ jobs:
 
       - name: 🚀 Deploy Backend to cPanel
         run: |
-          rsync -avz --delete --exclude 'node_modules' --exclude '.env' --exclude 'uploads' -e "ssh -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=no -o ConnectTimeout=30" Backend/ ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/home/airescad/biapi/
+          rsync -avz --delete --exclude 'node_modules' --exclude '.env' --exclude '.htaccess' --exclude 'uploads' -e "ssh -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=no -o ConnectTimeout=30" Backend/ ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/home/airescad/biapi/
 
       - name: 🔄 Install Dependencies, Migrate Prisma, Seed Database & Restart Node
         uses: appleboy/ssh-action@v1.0.3
