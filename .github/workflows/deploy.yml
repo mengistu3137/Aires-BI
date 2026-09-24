@@ -1,0 +1,58 @@
+name: Deploy Aires-BI to cPanel
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: ⬇️ Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 🏗️ Build Frontend (React)
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+
+      - name: 🔐 Setup & Unlock SSH Key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keygen -p -P "${{ secrets.SSH_PASSPHRASE }}" -N "" -f ~/.ssh/id_rsa
+
+      - name: 🚀 Deploy Frontend to cPanel
+        run: |
+          rsync -avz --delete -e "ssh -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=no -o ConnectTimeout=30" frontend/dist/ ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/home/airescad/airesbi/
+
+      - name: 🚀 Deploy Backend to cPanel
+        run: |
+          rsync -avz --delete --exclude 'node_modules' --exclude '.env' --exclude '.htaccess' --exclude 'uploads' -e "ssh -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=no -o ConnectTimeout=30" Backend/ ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/home/airescad/biapi/
+
+      - name: 🔄 Install Dependencies, Sync Prisma DB, Seed & Restart Node
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          passphrase: ${{ secrets.SSH_PASSPHRASE }}
+          port: ${{ secrets.SSH_PORT }}
+          script: |
+            source /home/airescad/nodevenv/biapi/22/bin/activate && cd /home/airescad/biapi
+            npm install --omit=dev
+            npx prisma generate
+            npx prisma db push --accept-data-loss
+            node prisma/seed.js
+            mkdir -p /home/airescad/biapi/tmp
+            touch /home/airescad/biapi/tmp/restart.txt

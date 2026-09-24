@@ -11,7 +11,6 @@ export const validate = (schema, source = "body") => {
       const parsed = await schema.parseAsync(req[source] || {});
 
       if (source === "query") {
-        // Express 5: Mutate properties instead of reassigning req.query
         for (const key of Object.keys(req.query)) {
           delete req.query[key];
         }
@@ -23,7 +22,9 @@ export const validate = (schema, source = "body") => {
       next();
     } catch (error) {
       if (error instanceof ZodError) {
-        const formattedErrors = error.errors.map((err) => ({
+        // Safe access: Zod's internal array is `error.issues`
+        const issues = error.issues || error.errors || [];
+        const formattedErrors = issues.map((err) => ({
           field: err.path.join("."),
           message: err.message,
         }));

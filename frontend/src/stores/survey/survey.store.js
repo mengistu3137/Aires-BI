@@ -8,7 +8,7 @@ export const useSurveyStore = create(
         (set, get) => ({
             assignments: PILOT_ASSIGNMENTS,
             surveyEntries: PILOT_ENTRIES,
-            products: PILOT_PRODUCTS,
+            products: PILOT_PRODUCTS, 
             competitors: PILOT_COMPETITORS,
             offlineQueue: [],
             isSyncing: false,

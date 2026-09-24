@@ -3,7 +3,7 @@ import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
 import path from "path";
-
+import "dotenv/config";
 import ApiError from "./utils/api-error.js";
 import globalErrorHandler from "./middlewares/error.middleware.js";
 

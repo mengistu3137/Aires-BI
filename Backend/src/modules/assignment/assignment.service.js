@@ -74,20 +74,24 @@ export const getById = async (id) => {
 
     return formatAssignmentResponse(assignment);
 };
+// In Backend/src/modules/assignment/assignment.service.js
 
 export const create = async (payload) => {
     const { auditorId, storeId, surveyPeriodId, productIds, status } = payload;
 
+    // 1. Verify auditor exists and is active
     const auditor = await prisma.user.findUnique({ where: { id: auditorId } });
     if (!auditor || !auditor.active) {
         throw new ApiError(400, "Assigned user must be an active system user.");
     }
 
+    // 2. Verify physical store exists and is active
     const store = await prisma.store.findUnique({ where: { id: storeId } });
     if (!store || !store.active) {
         throw new ApiError(400, `Physical store '${storeId}' does not exist or is inactive.`);
     }
 
+    // 3. Verify survey period exists and is open
     const period = await prisma.surveyPeriod.findUnique({ where: { id: surveyPeriodId } });
     if (!period) {
         throw new ApiError(400, `Survey period '${surveyPeriodId}' does not exist.`);
@@ -96,6 +100,7 @@ export const create = async (payload) => {
         throw new ApiError(400, "Cannot create assignments for a CLOSED survey period.");
     }
 
+    // 4. Ensure no duplicate assignment for the same auditor + store + period
     const existing = await prisma.surveyAssignment.findUnique({
         where: {
             auditorId_storeId_surveyPeriodId: {
@@ -112,6 +117,29 @@ export const create = async (payload) => {
         );
     }
 
+    // 5. Verify product IDs against the database (supports id, barcode, or SKU)
+    const matchingProducts = await prisma.product.findMany({
+        where: {
+            OR: [
+                { id: { in: productIds } },
+                { barcode: { in: productIds } },
+                { sku: { in: productIds } },
+            ],
+        },
+        select: { id: true },
+    });
+
+    if (matchingProducts.length === 0) {
+        throw new ApiError(
+            400,
+            "None of the selected products exist in the database. Please refresh the product catalog."
+        );
+    }
+
+    // Use the verified primary key IDs
+    const validProductIds = matchingProducts.map((p) => p.id);
+
+    // 6. Execute atomic assignment creation with valid product foreign keys
     const createdAssignment = await prisma.$transaction(async (tx) => {
         const asn = await tx.surveyAssignment.create({
             data: {
@@ -122,7 +150,7 @@ export const create = async (payload) => {
             },
         });
 
-        const itemRecords = productIds.map((pId) => ({
+        const itemRecords = validProductIds.map((pId) => ({
             assignmentId: asn.id,
             productId: pId,
             required: true,
@@ -145,7 +173,6 @@ export const create = async (payload) => {
 
     return formatAssignmentResponse(createdAssignment);
 };
-
 export const update = async (id, payload, currentUser) => {
     const assignment = await prisma.surveyAssignment.findUnique({ where: { id } });
     if (!assignment) {
