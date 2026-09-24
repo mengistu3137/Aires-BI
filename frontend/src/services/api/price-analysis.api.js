@@ -68,3 +68,22 @@ export const recalculateSurveyPeriodRequest = async (input) => {
   console.log("response", response);
   return response.data;
 };
+
+/**
+ * Download the price analysis Excel file.
+ * Returns a Blob and the suggested filename.
+ */
+export const exportPriceAnalysisExcelRequest = async ({ surveyPeriodId } = {}) => {
+  const response = await apiClient.get("/price-analysis/export/excel", {
+    params: surveyPeriodId ? { surveyPeriodId } : {},
+    responseType: "blob", // ← critical
+    timeout: 5 * 60 * 1000,
+  });
+
+  // Try to extract the filename from the Content-Disposition header
+  const disposition = response.headers?.["content-disposition"] || "";
+  const match = /filename="?([^"]+)"?/.exec(disposition);
+  const filename = match?.[1] || `price-analysis-${Date.now()}.xlsx`;
+
+  return { blob: response.data, filename };
+};

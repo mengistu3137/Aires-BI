@@ -587,29 +587,68 @@ export const AuditDetailPage = () => {
 // Sub-components
 // ────────────────────────────────────────────────────────────
 
-const LocationBlock = ({ label, coords, timestamp }) => (
-  <div className="rounded-xl border border-slate-100 bg-slate-50/60 p-3">
-    <p className="text-[11px] font-semibold text-slate-500">{label}</p>
-    <p className="mt-1 font-mono text-xs font-semibold text-slate-800">
-      {Number(coords.latitude).toFixed(6)}, {Number(coords.longitude).toFixed(6)}
-    </p>
-    {coords.accuracyMeters !== null && coords.accuracyMeters !== undefined && (
-      <p className="mt-0.5 text-[11px] text-slate-400">
-        Accuracy ±{Math.round(coords.accuracyMeters)} m
-      </p>
-    )}
-    {timestamp && (
-      <p className="mt-0.5 text-[11px] text-slate-400">
-        {new Date(timestamp).toLocaleString("en-US", {
-          month: "short",
-          day: "numeric",
-          hour: "2-digit",
-          minute: "2-digit",
-        })}
-      </p>
-    )}
-  </div>
-);
+const LocationBlock = ({ label, coords, timestamp }) => {
+  const lat = Number(coords.latitude);
+  const lng = Number(coords.longitude);
+  const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
+
+  const mapsUrl = hasCoords
+    ? `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`
+    : null;
+
+  return (
+    <div className="rounded-xl border border-slate-100 bg-slate-50/60 p-3">
+      <p className="text-[11px] font-semibold text-slate-500">{label}</p>
+
+      {hasCoords ? (
+        <a
+          href={mapsUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="group mt-1 inline-flex items-center gap-1.5 font-mono text-xs font-semibold text-[#A41821] hover:underline"
+          title="Open in Google Maps"
+        >
+          <span>
+            {lat.toFixed(6)}, {lng.toFixed(6)}
+          </span>
+          <svg
+            className="h-3.5 w-3.5 shrink-0 opacity-70 transition group-hover:opacity-100"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+            />
+          </svg>
+        </a>
+      ) : (
+        <p className="mt-1 font-mono text-xs font-semibold text-slate-400">Invalid coordinates</p>
+      )}
+
+      {coords.accuracyMeters !== null && coords.accuracyMeters !== undefined && (
+        <p className="mt-0.5 text-[11px] text-slate-400">
+          Accuracy ±{Math.round(coords.accuracyMeters)} m
+        </p>
+      )}
+
+      {timestamp && (
+        <p className="mt-0.5 text-[11px] text-slate-400">
+          {new Date(timestamp).toLocaleString("en-US", {
+            month: "short",
+            day: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+        </p>
+      )}
+    </div>
+  );
+};
 
 const EmptyLocationBlock = ({ label }) => (
   <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/30 p-3">

@@ -79,10 +79,29 @@ export const listPriceAnalyses = async (req, res, next) => {
   }
 };
 
+export const exportPriceAnalysisExcel = async (req, res, next) => {
+  try {
+    const { buffer, filename } =
+      await priceAnalysisService.generatePriceAnalysisExcel({
+        surveyPeriodId: req.query.surveyPeriodId,
+      });
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(Buffer.from(buffer));
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const priceAnalysisController = {
   calculateProductAnalysis,
   recalculateSurveyPeriodAnalysis,
   getPriceAnalysisById,
   getProductSurveyPeriodAnalysis,
   listPriceAnalyses,
+  exportPriceAnalysisExcel,
 };
