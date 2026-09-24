@@ -7,16 +7,12 @@ export const EvidenceCapture = ({ value, onChange, disabled = false, error }) =>
     const file = event.target.files?.[0];
     if (!file) return;
 
-    // Create a local object URL for preview
-    // In production, upload to storage and store the returned URL
     const objectUrl = URL.createObjectURL(file);
     onChange({
       file,
       previewUrl: objectUrl,
-      // In a real implementation, this would be the uploaded URL
       url: objectUrl,
     });
-    // Reset input so the same file can be re-selected
     event.target.value = "";
   };
 

@@ -12,39 +12,24 @@ import {
 
 const router = Router();
 
-// Authentication required on all alert routes
 router.use(authenticate);
 
-// ========================================================
-// 1. QUERY & RETRIEVAL (Admins, Managers, Field Auditors where permitted)
-// ========================================================
-
-// Convenience route for unresolved/active alerts
 router.get(
   "/active",
   validate(listAlertsQuerySchema, "query"),
   alertController.getActiveAlerts,
 );
-
-// List alerts with filtering and pagination
 router.get(
   "/",
   validate(listAlertsQuerySchema, "query"),
   alertController.listAlerts,
 );
-
-// Single alert by ID
 router.get(
   "/:id",
   validate(alertIdParamSchema, "params"),
   alertController.getAlertById,
 );
 
-// ========================================================
-// 2. RESOLUTION & MANAGEMENT (ADMIN & MANAGER ONLY)
-// ========================================================
-
-// Resolve an alert
 router.post(
   "/:id/resolve",
   restrictTo("ADMIN", "MANAGER"),
@@ -53,7 +38,6 @@ router.post(
   alertController.resolveAlert,
 );
 
-// Trigger batch alert generation for a survey period
 router.post(
   "/generate/survey-period",
   restrictTo("ADMIN", "MANAGER"),
@@ -61,7 +45,6 @@ router.post(
   alertController.generateAlertsForSurveyPeriod,
 );
 
-// Trigger alert evaluation for a single PriceAnalysis
 router.post(
   "/generate/analysis",
   restrictTo("ADMIN", "MANAGER"),

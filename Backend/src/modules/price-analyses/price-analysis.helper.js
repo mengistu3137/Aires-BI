@@ -9,14 +9,39 @@ const Decimal = Prisma.Decimal;
  * via environment variables so production rules remain easily adaptable.
  */
 export const PRICE_ANALYSIS_CONFIG = {
-  // Default target benchmark index (100.00 = parity with market average)
+  // Fallback target index for any product category not explicitly classified
+  // below (100.00 = parity with market average).
   DEFAULT_TARGET_INDEX: new Decimal(
     process.env.PRICE_INDEX_TARGET_DEFAULT || "100.00",
   ),
 
-  // Acceptable parity band around target index (e.g. +/- 3%)
+  // Ultra-Sensitive FMCG target index — per Queens/Carrefour pilot plan,
+  // Queens should price ~5% below the competitor average for this stream.
+  TARGET_INDEX_FMCG: new Decimal(
+    process.env.PRICE_INDEX_TARGET_FMCG || "95.00",
+  ),
+
+  // Daily Fresh target index — fresh produce gets a wider cushion (~8%
+  // below competitor average) since it's more price-visible to shoppers.
+  TARGET_INDEX_FRESH: new Decimal(
+    process.env.PRICE_INDEX_TARGET_FRESH || "92.00",
+  ),
+
+  // Product categories treated as "Daily Fresh" for target-index purposes.
+  // Anything not in this list is treated as FMCG. Override via a
+  // comma-separated env var if the taxonomy changes.
+  FRESH_CATEGORIES: (
+    process.env.PRICE_INDEX_FRESH_CATEGORIES ||
+    "Vegetables,Fruits,Fresh Produce,Fresh"
+  )
+    .split(",")
+    .map((c) => c.trim().toLowerCase())
+    .filter(Boolean),
+
+  // Acceptable band around the target index (e.g. +/- 5%). Set to "0" if
+  // the client wants a strict ceiling with no cushion above the target.
   TOLERANCE_BAND_PERCENT: new Decimal(
-    process.env.PRICE_INDEX_TOLERANCE_BAND || "3.00",
+    process.env.PRICE_INDEX_TOLERANCE_BAND || "5.00",
   ),
 
   // Minimum required approved competitor observations to make a confident action recommendation
@@ -97,12 +122,26 @@ export const calculatePriceIndex = (queensPrice, competitorAveragePrice) => {
 
 /**
  * Resolves the target price index for a product.
- * Returns configurable default unless product/category target is provided.
  *
- * @param {object} product
+ * Per the Queens/Carrefour pilot plan, the target index is stream-specific:
+ *   - Daily Fresh items  → 92% (product.category is one of FRESH_CATEGORIES)
+ *   - Ultra-Sensitive FMCG items → 95%
+ *   - Anything else/unclassified → DEFAULT_TARGET_INDEX (parity fallback)
+ *
+ * @param {object} product - expects a `category` string field
  * @returns {Prisma.Decimal}
  */
 export const getTargetIndex = (product = null) => {
+  const category = product?.category?.trim().toLowerCase();
+
+  if (category && PRICE_ANALYSIS_CONFIG.FRESH_CATEGORIES.includes(category)) {
+    return PRICE_ANALYSIS_CONFIG.TARGET_INDEX_FRESH;
+  }
+
+  if (category) {
+    return PRICE_ANALYSIS_CONFIG.TARGET_INDEX_FMCG;
+  }
+
   return PRICE_ANALYSIS_CONFIG.DEFAULT_TARGET_INDEX;
 };
 

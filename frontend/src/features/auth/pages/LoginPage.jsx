@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useLogin } from "../hooks/useLogin.js";
 import { useAuth } from "@/hooks/useAuth.js";
+import { PwaInstallBanner } from "@/pwa/PwaInstallBanner.jsx";
 
 export const LoginPage = () => {
 	const navigate = useNavigate();
@@ -231,6 +232,7 @@ export const LoginPage = () => {
 					 Aires Business intelligence
 				</p>
 			</div>
+			 <PwaInstallBanner />
 		</div>
 	);
 };

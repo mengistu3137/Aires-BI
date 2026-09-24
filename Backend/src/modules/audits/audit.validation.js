@@ -20,11 +20,17 @@ const accuracyMeters = z
   .refine((v) => !Number.isNaN(v) && Number.isFinite(v), "Invalid accuracy");
 
 export const assignmentIdParamSchema = z.object({
-  assignmentId: z.string().uuid("Invalid assignment ID format"),
+  assignmentId: z
+    .string({ required_error: "assignmentId is required" })
+    .trim()
+    .min(1, "assignmentId cannot be empty"),
 });
 
 export const auditIdParamSchema = z.object({
-  auditId: z.string().uuid("Invalid audit ID format"),
+  auditId: z
+    .string({ required_error: "auditId is required" })
+    .trim()
+    .min(1, "auditId cannot be empty"),
 });
 
 export const createAuditSchema = z.object({
@@ -82,10 +88,10 @@ export const listAuditsQuerySchema = z.object({
       "NEEDS_REVIEW",
     ])
     .optional(),
-  assignmentId: z.string().uuid().optional(),
-  storeId: z.string().uuid().optional(),
-  surveyPeriodId: z.string().optional(),
-  auditorId: z.string().uuid().optional(),
+  assignmentId: z.string().trim().optional(),
+  storeId: z.string().trim().optional(),
+  surveyPeriodId: z.string().trim().optional(),
+  auditorId: z.string().trim().optional(),
   from: z
     .string()
     .datetime({ offset: true })

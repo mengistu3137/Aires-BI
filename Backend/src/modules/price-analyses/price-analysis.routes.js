@@ -62,4 +62,10 @@ router.post(
   priceAnalysisController.recalculateSurveyPeriodAnalysis,
 );
 
+router.get(
+  "/export/excel",
+  restrictTo("ADMIN", "MANAGER"),
+  priceAnalysisController.exportPriceAnalysisExcel,
+);
+
 export default router;

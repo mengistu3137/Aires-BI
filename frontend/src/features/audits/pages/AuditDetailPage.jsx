@@ -13,23 +13,16 @@ import {
 } from "../hooks/useAuditMutations.js";
 import { useGeolocation } from "../hooks/useGeolocation.js";
 import { AuditHeader } from "../components/AuditHeader.jsx";
-import { AuditObservationsList } from "../components/AuditObservationsList.jsx";
 import { AuditProgressRing } from "../components/AuditProgressRing.jsx";
-import {
-  startAuditSchema,
-  completeAuditSchema,
-  cancelAuditSchema,
-  markReviewSchema,
-  updateAuditSchema,
-} from "../schemas/audit.schema.js";
-import { calculateAuditProgress, getStatusLabel } from "../utils/audit.utils.js";
+import { cancelAuditSchema, markReviewSchema, updateAuditSchema } from "../schemas/audit.schema.js";
+import { calculateAuditProgress } from "../utils/audit.utils.js";
 import { useAuth } from "@/hooks/useAuth.js";
 import { ObservationEmptyState } from "@/features/observations/components/ObservationEmptyState.jsx";
 
 export const AuditDetailPage = () => {
   const { auditId } = useParams();
   const navigate = useNavigate();
-  const { isManager } = useAuth();
+  const { user, isManager, isAdmin } = useAuth();
   const { captureLocation, isCapturing } = useGeolocation();
 
   const { data: audit, isLoading, isError, error } = useAudit(auditId);
@@ -39,44 +32,53 @@ export const AuditDetailPage = () => {
   const updateAudit = useUpdateAudit();
   const markReview = useMarkAuditReview();
 
-  const [activeModal, setActiveModal] = useState(null); // 'start' | 'complete' | 'cancel' | 'review' | 'notes'
+  const [activeModal, setActiveModal] = useState(null);
 
-  // Start form
-  const startForm = useForm({
-    resolver: zodResolver(startAuditSchema),
-  });
-
-  // Complete form
+  // Notes-only forms (GPS is captured imperatively, not via form)
   const completeForm = useForm({
-    resolver: zodResolver(completeAuditSchema),
+    defaultValues: { notes: "" },
   });
-
-  // Cancel form
-  const cancelForm = useForm({
-    resolver: zodResolver(cancelAuditSchema),
-  });
-
-  // Review form
-  const reviewForm = useForm({
-    resolver: zodResolver(markReviewSchema),
-  });
-
-  // Notes form
+  const cancelForm = useForm({ resolver: zodResolver(cancelAuditSchema) });
+  const reviewForm = useForm({ resolver: zodResolver(markReviewSchema) });
   const notesForm = useForm({
     resolver: zodResolver(updateAuditSchema),
     defaultValues: { notes: audit?.notes || "" },
   });
 
-  const handleStart = async () => {
+  // ────────────────────────────────────────────────────────────
+  // GPS helper with explicit success/failure feedback
+  // ────────────────────────────────────────────────────────────
+  const captureGpsOrThrow = async () => {
     try {
       const location = await captureLocation();
-      const payload = {
-        latitude: location.latitude,
-        longitude: location.longitude,
-        accuracyMeters: location.accuracyMeters,
-      };
-      startForm.reset(payload);
-      await startAudit.mutateAsync({ auditId, payload });
+      if (
+        !location ||
+        typeof location.latitude !== "number" ||
+        typeof location.longitude !== "number"
+      ) {
+        throw new Error("Unable to determine your location.");
+      }
+      return location;
+    } catch (err) {
+      const message =
+        err?.message && err.message.trim().length > 0
+          ? err.message
+          : "Unable to capture GPS. Please enable location access and try again.";
+      throw new Error(message);
+    }
+  };
+
+  const handleStart = async () => {
+    try {
+      const location = await captureGpsOrThrow();
+      await startAudit.mutateAsync({
+        auditId,
+        payload: {
+          latitude: location.latitude,
+          longitude: location.longitude,
+          accuracyMeters: location.accuracyMeters,
+        },
+      });
       setActiveModal(null);
     } catch (err) {
       toast.error(err?.message || "Failed to start audit");
@@ -85,17 +87,25 @@ export const AuditDetailPage = () => {
 
   const handleComplete = async () => {
     try {
-      const location = await captureLocation();
+      // 1. Capture GPS first — this is what actually determines success
+      const location = await captureGpsOrThrow();
+
+      // 2. Read notes from the form
       const notes = completeForm.getValues("notes");
-      const payload = {
-        latitude: location.latitude,
-        longitude: location.longitude,
-        accuracyMeters: location.accuracyMeters,
-        notes: notes || undefined,
-      };
-      completeForm.reset(payload);
-      await completeAudit.mutateAsync({ auditId, payload });
+
+      // 3. Send mutation
+      await completeAudit.mutateAsync({
+        auditId,
+        payload: {
+          latitude: location.latitude,
+          longitude: location.longitude,
+          accuracyMeters: location.accuracyMeters,
+          notes: notes?.trim() || undefined,
+        },
+      });
+
       setActiveModal(null);
+      completeForm.reset({ notes: "" });
     } catch (err) {
       toast.error(err?.message || "Failed to complete audit");
     }
@@ -108,6 +118,7 @@ export const AuditDetailPage = () => {
         payload: { reason: data.reason },
       });
       setActiveModal(null);
+      cancelForm.reset();
     } catch (err) {
       toast.error(err?.message || "Failed to cancel audit");
     }
@@ -120,6 +131,7 @@ export const AuditDetailPage = () => {
         payload: { reviewNote: data.reviewNote },
       });
       setActiveModal(null);
+      reviewForm.reset();
     } catch (err) {
       toast.error(err?.message || "Failed to mark for review");
     }
@@ -147,31 +159,39 @@ export const AuditDetailPage = () => {
 
   if (isError || !audit) {
     return (
-      <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-center">
-        <p className="text-sm font-bold text-[#A41821]">{error?.message || "Audit not found"}</p>
-        <button
-          type="button"
-          onClick={() => navigate("/audits")}
-          className="mt-3 rounded-xl bg-[#A41821] px-4 py-2 text-xs font-bold text-white"
-        >
-          Back to Audits
-        </button>
+      <div className="mx-auto max-w-3xl px-4 py-8">
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-center">
+          <p className="text-sm font-bold text-[#A41821]">{error?.message || "Audit not found"}</p>
+          <button
+            type="button"
+            onClick={() => navigate("/audits")}
+            className="mt-3 rounded-xl bg-[#A41821] px-4 py-2 text-xs font-bold text-white"
+          >
+            Back to audits
+          </button>
+        </div>
       </div>
     );
   }
 
   const progress = calculateAuditProgress(audit);
-  const canStart = audit.status === "NOT_STARTED";
-  const canComplete = audit.status === "IN_PROGRESS";
-  const canCancel = ["NOT_STARTED", "IN_PROGRESS"].includes(audit.status);
+  const isAssignedAuditor = Boolean(user?.id && audit.auditor?.id === user.id);
+
+  const canStart = audit.status === "NOT_STARTED" && isAssignedAuditor;
+  const canComplete = audit.status === "IN_PROGRESS" && isAssignedAuditor;
+  const canCancel =
+    ["NOT_STARTED", "IN_PROGRESS"].includes(audit.status) && (isAssignedAuditor || isManager);
   const canReview = isManager && ["IN_PROGRESS", "COMPLETED"].includes(audit.status);
-  const canEditNotes = audit.status === "IN_PROGRESS";
+  const canEditNotes = audit.status === "IN_PROGRESS" && isAssignedAuditor;
+
+  const canManageObservations = isAssignedAuditor && audit.status === "IN_PROGRESS";
+  const canViewObservations = isManager || isAdmin;
 
   return (
     <div className="space-y-4">
       <AuditHeader audit={audit} />
 
-      {/* Action Buttons */}
+      {/* Action buttons */}
       <div className="flex flex-wrap gap-2">
         {canStart && (
           <button
@@ -180,21 +200,7 @@ export const AuditDetailPage = () => {
             disabled={isCapturing}
             className="inline-flex items-center gap-1.5 rounded-xl bg-[#017C4D] px-4 py-2.5 text-xs font-bold text-white transition hover:bg-[#015E3A] disabled:opacity-50"
           >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"
-              />
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-              />
-            </svg>
-            Start Visit
+            Start visit
           </button>
         )}
 
@@ -205,15 +211,27 @@ export const AuditDetailPage = () => {
             disabled={isCapturing}
             className="inline-flex items-center gap-1.5 rounded-xl bg-[#017C4D] px-4 py-2.5 text-xs font-bold text-white transition hover:bg-[#015E3A] disabled:opacity-50"
           >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-              />
-            </svg>
-            Complete Visit
+            Complete visit
+          </button>
+        )}
+
+        {canManageObservations && (
+          <button
+            type="button"
+            onClick={() => navigate(`/audits/${audit.id}/observations`)}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-[#A41821] px-4 py-2.5 text-xs font-bold text-white transition hover:bg-[#7F1219]"
+          >
+            Manage observations
+          </button>
+        )}
+
+        {canViewObservations && !canManageObservations && audit.observationsCount > 0 && (
+          <button
+            type="button"
+            onClick={() => navigate(`/audits/${audit.id}/observations`)}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-[#A41821] px-4 py-2.5 text-xs font-bold text-white transition hover:bg-[#7F1219]"
+          >
+            View all observations
           </button>
         )}
 
@@ -223,15 +241,7 @@ export const AuditDetailPage = () => {
             onClick={() => setActiveModal("notes")}
             className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50"
           >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-              />
-            </svg>
-            Edit Notes
+            Edit notes
           </button>
         )}
 
@@ -241,15 +251,7 @@ export const AuditDetailPage = () => {
             onClick={() => setActiveModal("review")}
             className="inline-flex items-center gap-1.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs font-bold text-[#FE7914] transition hover:bg-amber-100"
           >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-              />
-            </svg>
-            Mark for Review
+            Mark for review
           </button>
         )}
 
@@ -259,26 +261,15 @@ export const AuditDetailPage = () => {
             onClick={() => setActiveModal("cancel")}
             className="inline-flex items-center gap-1.5 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-xs font-bold text-[#A41821] transition hover:bg-red-100"
           >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M6 18L18 6M6 6l12 12"
-              />
-            </svg>
             Cancel
           </button>
         )}
       </div>
 
-      {/* Progress & Observations */}
+      {/* Progress + observations summary */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        {/* Progress Card */}
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs lg:col-span-1">
-          <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400">
-            Collection Progress
-          </h2>
+          <h2 className="text-xs font-bold text-slate-500">Collection progress</h2>
           <div className="mt-4 flex flex-col items-center">
             <AuditProgressRing progress={progress} size={100} strokeWidth={8} />
             <p className="mt-3 text-xs font-medium text-slate-500">
@@ -287,19 +278,16 @@ export const AuditDetailPage = () => {
           </div>
         </div>
 
-        {/* Observations List */}
         <div className="lg:col-span-2">
           <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400">
-              Price Observations
-            </h2>
-            {audit.status === "IN_PROGRESS" && (
+            <h2 className="text-xs font-bold text-slate-500">Price observations</h2>
+            {audit.observationsCount > 0 && (
               <button
                 type="button"
                 onClick={() => navigate(`/audits/${audit.id}/observations`)}
-                className="text-xs font-bold text-[#A41821] hover:underline"
+                className="text-xs font-semibold text-[#A41821] hover:underline"
               >
-                Manage observations
+                {canManageObservations ? "Manage observations" : "View all observations"}
               </button>
             )}
           </div>
@@ -307,9 +295,13 @@ export const AuditDetailPage = () => {
           {audit.observationsCount === 0 ? (
             <ObservationEmptyState
               title="No observations recorded yet"
-              description="Start by selecting a product from the assignment."
+              description={
+                canManageObservations
+                  ? "Start by selecting a product from the assignment."
+                  : "The assigned auditor has not recorded any observations yet."
+              }
               action={
-                audit.status === "IN_PROGRESS" ? (
+                canManageObservations ? (
                   <button
                     type="button"
                     onClick={() => navigate(`/audits/${audit.id}/observations`)}
@@ -326,19 +318,80 @@ export const AuditDetailPage = () => {
               onClick={() => navigate(`/audits/${audit.id}/observations`)}
               className="w-full rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-xs transition hover:border-slate-300"
             >
-              <p className="text-sm font-bold text-slate-800">
+              <p className="text-sm font-semibold text-slate-800">
                 {audit.observationsCount} observation
                 {audit.observationsCount === 1 ? "" : "s"} recorded
               </p>
-              <p className="mt-1 text-xs text-slate-500">Tap to view or add more observations</p>
+              <p className="mt-1 text-xs text-slate-500">
+                {canManageObservations
+                  ? "Tap to continue collecting or review"
+                  : "Tap to view the observation details"}
+              </p>
             </button>
           )}
         </div>
       </div>
 
+      {/* Location section — start & end GPS */}
+      {(audit.gps?.start || audit.gps?.end) && (
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
+          <div className="flex items-start justify-between gap-3">
+            <h2 className="text-xs font-bold text-slate-500">Location verification</h2>
+            {audit.gps?.gpsValid === true && (
+              <span className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[#017C4D]">
+                <span className="h-1.5 w-1.5 rounded-full bg-[#017C4D]" />
+                Location verified
+              </span>
+            )}
+            {audit.gps?.gpsValid === false && (
+              <span className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[#FE7914]">
+                <span className="h-1.5 w-1.5 rounded-full bg-[#FE7914]" />
+                Outside radius
+              </span>
+            )}
+          </div>
+
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {audit.gps?.start ? (
+              <LocationBlock
+                label="Started at"
+                coords={audit.gps.start}
+                timestamp={audit.startedAt}
+              />
+            ) : (
+              <EmptyLocationBlock label="Started at" />
+            )}
+
+            {audit.gps?.end ? (
+              <LocationBlock
+                label="Completed at"
+                coords={audit.gps.end}
+                timestamp={audit.completedAt}
+              />
+            ) : (
+              <EmptyLocationBlock label="Completed at" />
+            )}
+          </div>
+
+          {audit.gps?.distanceFromStoreMeters !== null &&
+            audit.gps?.distanceFromStoreMeters !== undefined && (
+              <p className="mt-3 text-xs text-slate-500">
+                Distance from store:{" "}
+                <span className="font-semibold text-slate-700">
+                  {Math.round(audit.gps.distanceFromStoreMeters)} m
+                </span>
+              </p>
+            )}
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────── */}
       {/* Modals */}
+      {/* ──────────────────────────────────────────────────────── */}
+
+      {/* Start visit */}
       {activeModal === "start" && (
-        <Modal title="Start Audit Visit" onClose={() => setActiveModal(null)}>
+        <Modal title="Start audit visit" onClose={() => setActiveModal(null)}>
           <p className="text-xs text-slate-600">
             We'll capture your GPS location to verify you're at the store.
           </p>
@@ -362,50 +415,72 @@ export const AuditDetailPage = () => {
               disabled={isCapturing || startAudit.isPending}
               className="rounded-xl bg-[#017C4D] px-4 py-2 text-xs font-bold text-white hover:bg-[#015E3A] disabled:opacity-50"
             >
-              {startAudit.isPending ? "Starting..." : "Start Visit"}
+              {startAudit.isPending ? "Starting..." : "Start visit"}
             </button>
           </div>
         </Modal>
       )}
 
+      {/* Complete visit */}
       {activeModal === "complete" && (
-        <Modal title="Complete Audit Visit" onClose={() => setActiveModal(null)}>
+        <Modal title="Complete audit visit" onClose={() => setActiveModal(null)}>
           <p className="text-xs text-slate-600">
             We'll capture your end GPS location to verify the visit.
           </p>
-          <form onSubmit={completeForm.handleSubmit(handleComplete)} className="mt-3">
-            <label className="text-xs font-bold uppercase tracking-wider text-slate-500">
-              Completion Notes (optional)
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleComplete();
+            }}
+            className="mt-3"
+          >
+            <label className="text-xs font-semibold text-slate-600">
+              Completion notes (optional)
             </label>
             <textarea
               rows={2}
               {...completeForm.register("notes")}
               className="mt-1.5 w-full resize-none rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2 text-xs focus:border-[#A41821] focus:bg-white focus:ring-1 focus:ring-[#A41821] outline-hidden"
             />
+
+            {isCapturing && (
+              <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
+                <div className="h-4 w-4 animate-spin rounded-full border-2 border-[#A41821] border-t-transparent" />
+                Capturing end location...
+              </div>
+            )}
+
             <div className="mt-4 flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setActiveModal(null)}
-                className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                disabled={isCapturing || completeAudit.isPending}
+                className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                disabled={completeAudit.isPending}
+                disabled={isCapturing || completeAudit.isPending}
                 className="rounded-xl bg-[#017C4D] px-4 py-2 text-xs font-bold text-white hover:bg-[#015E3A] disabled:opacity-50"
               >
-                {completeAudit.isPending ? "Completing..." : "Complete Visit"}
+                {completeAudit.isPending
+                  ? "Completing..."
+                  : isCapturing
+                    ? "Capturing..."
+                    : "Complete visit"}
               </button>
             </div>
           </form>
         </Modal>
       )}
 
+      {/* Cancel */}
       {activeModal === "cancel" && (
-        <Modal title="Cancel Audit" onClose={() => setActiveModal(null)}>
+        <Modal title="Cancel audit" onClose={() => setActiveModal(null)}>
           <form onSubmit={cancelForm.handleSubmit(handleCancel)} className="mt-2">
-            <label className="text-xs font-bold uppercase tracking-wider text-slate-500">
+            <label className="text-xs font-semibold text-slate-600">
               Reason for cancellation *
             </label>
             <textarea
@@ -425,26 +500,25 @@ export const AuditDetailPage = () => {
                 onClick={() => setActiveModal(null)}
                 className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
               >
-                Keep Audit
+                Keep audit
               </button>
               <button
                 type="submit"
                 disabled={cancelAudit.isPending}
                 className="rounded-xl bg-[#A41821] px-4 py-2 text-xs font-bold text-white hover:bg-[#7F1219] disabled:opacity-50"
               >
-                {cancelAudit.isPending ? "Cancelling..." : "Confirm Cancel"}
+                {cancelAudit.isPending ? "Cancelling..." : "Confirm cancel"}
               </button>
             </div>
           </form>
         </Modal>
       )}
 
+      {/* Mark for review */}
       {activeModal === "review" && (
-        <Modal title="Mark for Review" onClose={() => setActiveModal(null)}>
+        <Modal title="Mark for review" onClose={() => setActiveModal(null)}>
           <form onSubmit={reviewForm.handleSubmit(handleReview)} className="mt-2">
-            <label className="text-xs font-bold uppercase tracking-wider text-slate-500">
-              Review note *
-            </label>
+            <label className="text-xs font-semibold text-slate-600">Review note *</label>
             <textarea
               rows={3}
               {...reviewForm.register("reviewNote")}
@@ -469,15 +543,16 @@ export const AuditDetailPage = () => {
                 disabled={markReview.isPending}
                 className="rounded-xl bg-[#FE7914] px-4 py-2 text-xs font-bold text-white hover:bg-[#D45F06] disabled:opacity-50"
               >
-                {markReview.isPending ? "Submitting..." : "Mark for Review"}
+                {markReview.isPending ? "Submitting..." : "Mark for review"}
               </button>
             </div>
           </form>
         </Modal>
       )}
 
+      {/* Edit notes */}
       {activeModal === "notes" && (
-        <Modal title="Edit Audit Notes" onClose={() => setActiveModal(null)}>
+        <Modal title="Edit audit notes" onClose={() => setActiveModal(null)}>
           <form onSubmit={notesForm.handleSubmit(handleSaveNotes)} className="mt-2">
             <textarea
               rows={4}
@@ -498,7 +573,7 @@ export const AuditDetailPage = () => {
                 disabled={updateAudit.isPending}
                 className="rounded-xl bg-[#A41821] px-4 py-2 text-xs font-bold text-white hover:bg-[#7F1219] disabled:opacity-50"
               >
-                {updateAudit.isPending ? "Saving..." : "Save Notes"}
+                {updateAudit.isPending ? "Saving..." : "Save notes"}
               </button>
             </div>
           </form>
@@ -508,7 +583,80 @@ export const AuditDetailPage = () => {
   );
 };
 
-// Simple Modal wrapper
+// ────────────────────────────────────────────────────────────
+// Sub-components
+// ────────────────────────────────────────────────────────────
+
+const LocationBlock = ({ label, coords, timestamp }) => {
+  const lat = Number(coords.latitude);
+  const lng = Number(coords.longitude);
+  const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
+
+  const mapsUrl = hasCoords
+    ? `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`
+    : null;
+
+  return (
+    <div className="rounded-xl border border-slate-100 bg-slate-50/60 p-3">
+      <p className="text-[11px] font-semibold text-slate-500">{label}</p>
+
+      {hasCoords ? (
+        <a
+          href={mapsUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="group mt-1 inline-flex items-center gap-1.5 font-mono text-xs font-semibold text-[#A41821] hover:underline"
+          title="Open in Google Maps"
+        >
+          <span>
+            {lat.toFixed(6)}, {lng.toFixed(6)}
+          </span>
+          <svg
+            className="h-3.5 w-3.5 shrink-0 opacity-70 transition group-hover:opacity-100"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+            />
+          </svg>
+        </a>
+      ) : (
+        <p className="mt-1 font-mono text-xs font-semibold text-slate-400">Invalid coordinates</p>
+      )}
+
+      {coords.accuracyMeters !== null && coords.accuracyMeters !== undefined && (
+        <p className="mt-0.5 text-[11px] text-slate-400">
+          Accuracy ±{Math.round(coords.accuracyMeters)} m
+        </p>
+      )}
+
+      {timestamp && (
+        <p className="mt-0.5 text-[11px] text-slate-400">
+          {new Date(timestamp).toLocaleString("en-US", {
+            month: "short",
+            day: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+        </p>
+      )}
+    </div>
+  );
+};
+
+const EmptyLocationBlock = ({ label }) => (
+  <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/30 p-3">
+    <p className="text-[11px] font-semibold text-slate-400">{label}</p>
+    <p className="mt-1 text-xs text-slate-400">Not captured</p>
+  </div>
+);
+
 const Modal = ({ title, children, onClose }) => (
   <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
     <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-xs" onClick={onClose} />
@@ -519,8 +667,15 @@ const Modal = ({ title, children, onClose }) => (
           type="button"
           onClick={onClose}
           className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+          aria-label="Close dialog"
         >
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg
+            className="h-4 w-4"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            aria-hidden="true"
+          >
             <path
               strokeLinecap="round"
               strokeLinejoin="round"

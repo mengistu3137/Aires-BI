@@ -28,12 +28,12 @@ export const calculateDistanceMeters = (lat1, lon1, lat2, lon2) => {
 
 /**
  * Validates GPS compliance against store coordinates and accuracy threshold.
- * Configurable via AUDIT_GPS_RADIUS_METERS env variable (default 300 meters).
+ * Configurable via AUDIT_GPS_RADIUS_METERS env variable (default 100 meters).
  */
 export const isWithinAuditRadius = ({
   distanceMeters,
   accuracyMeters,
-  allowedRadiusMeters = Number(process.env.AUDIT_GPS_RADIUS_METERS) || 300,
+  allowedRadiusMeters = Number(process.env.AUDIT_GPS_RADIUS_METERS) || 100,
 }) => {
   if (distanceMeters === null || distanceMeters === undefined) {
     return false;

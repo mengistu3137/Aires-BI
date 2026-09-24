@@ -114,6 +114,8 @@ export const listObservationsQuerySchema = z.object({
     .enum(["PENDING", "APPROVED", "REJECTED", "NEEDS_REVIEW"])
     .optional(),
   syncStatus: z.enum(["PENDING", "SYNCING", "SYNCED", "FAILED"]).optional(),
+  storeId: z.string().trim().optional(), // ← NEW
+  surveyPeriodId: z.string().trim().optional(), // ← NEW
   from: z.string().optional(),
   to: z.string().optional(),
 });

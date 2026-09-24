@@ -1,25 +1,69 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { apiClient } from "@/services/client.js";
 import { useStores } from "@/features/survey/hooks/useStores.js";
 import { DataTable } from "@/components/DataTable.jsx";
 import { Can } from "@/components/Can.jsx";
-import { PILOT_COMPETITORS } from "@/data/pilotData.js";
-import toast from "react-hot-toast";
+
+const DEFAULT_FORM_STATE = {
+  competitorId: "",
+  name: "",
+  address: "",
+  area: "",
+  city: "Addis Ababa",
+  type: "FMCG",
+  latitude: 9.0012,
+  longitude: 38.7712,
+};
 
 export const StoresPage = () => {
-  const { stores, isLoading, createStore, updateStore } = useStores();
+  const { stores, isLoading, createStore, updateStore, deleteStore, isDeleting } = useStores();
   const [selectedType, setSelectedType] = useState("ALL");
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingStore, setEditingStore] = useState(null);
+  const [deleteCandidate, setDeleteCandidate] = useState(null);
+  const [formData, setFormData] = useState(DEFAULT_FORM_STATE);
 
-  const [formData, setFormData] = useState({
-    competitorId: "allmart",
-    name: "",
-    address: "",
-    area: "",
-    city: "Addis Ababa",
-    type: "FMCG",
-    latitude: 9.0012,
-    longitude: 38.7712,
+  // Fetch real database competitors: { status: "success", data: { competitors: [...] } }
+  const { data: competitors = [] } = useQuery({
+    queryKey: ["competitors", "all"],
+    queryFn: async () => {
+      const res = await apiClient.get("/competitors");
+      return res.data?.data?.competitors || res.data?.competitors || [];
+    },
+    staleTime: 5 * 60 * 1000,
   });
+
+  // Pre-select first real competitor when loaded
+  useEffect(() => {
+    if (competitors.length > 0 && !formData.competitorId) {
+      setFormData((prev) => ({ ...prev, competitorId: competitors[0].id }));
+    }
+  }, [competitors, formData.competitorId]);
+
+  const handleOpenCreateModal = () => {
+    setEditingStore(null);
+    setFormData({
+      ...DEFAULT_FORM_STATE,
+      competitorId: competitors[0]?.id || "",
+    });
+    setIsModalOpen(true);
+  };
+
+  const handleOpenEditModal = (store) => {
+    setEditingStore(store);
+    setFormData({
+      competitorId: store.competitorId || store.competitor?.id || competitors[0]?.id || "",
+      name: store.name || "",
+      address: store.address || "",
+      area: store.area || "",
+      city: store.city || "Addis Ababa",
+      type: store.type || "FMCG",
+      latitude: store.latitude !== null ? Number(store.latitude) : 9.0012,
+      longitude: store.longitude !== null ? Number(store.longitude) : 38.7712,
+    });
+    setIsModalOpen(true);
+  };
 
   const handleToggleActive = async (store) => {
     try {
@@ -28,31 +72,45 @@ export const StoresPage = () => {
         payload: { active: !store.active },
       });
     } catch {
-      // Error handled in hook
+      // Error handled by mutation hook toast
     }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      await createStore({
-        ...formData,
+      const payload = {
+        competitorId: formData.competitorId,
+        name: formData.name.trim(),
+        address: formData.address?.trim() || null,
+        area: formData.area?.trim() || null,
+        city: formData.city?.trim() || "Addis Ababa",
+        type: formData.type,
         latitude: parseFloat(formData.latitude),
         longitude: parseFloat(formData.longitude),
-      });
+      };
+
+      if (editingStore) {
+        await updateStore({ id: editingStore.id, payload });
+      } else {
+        await createStore(payload);
+      }
+
       setIsModalOpen(false);
-      setFormData({
-        competitorId: "allmart",
-        name: "",
-        address: "",
-        area: "",
-        city: "Addis Ababa",
-        type: "FMCG",
-        latitude: 9.0012,
-        longitude: 38.7712,
-      });
+      setEditingStore(null);
+      setFormData(DEFAULT_FORM_STATE);
     } catch {
-      // Error handled in hook
+      // Error handled by mutation hook toast
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteCandidate) return;
+    try {
+      await deleteStore(deleteCandidate.id);
+      setDeleteCandidate(null);
+    } catch {
+      // Error handled by mutation hook toast
     }
   };
 
@@ -70,7 +128,7 @@ export const StoresPage = () => {
         <div>
           <span className="font-bold text-slate-900">{row.name}</span>
           <span className="block text-[11px] text-slate-500">
-            {row.competitor?.name || row.competitorId}
+            {row.competitor?.name || "Competitor Market"}
           </span>
         </div>
       ),
@@ -97,7 +155,7 @@ export const StoresPage = () => {
       sortable: true,
       render: (row) => (
         <div>
-          <span className="font-medium text-slate-800">{row.area || "Downtown"}</span>
+          <span className="font-medium text-slate-800">{row.area || "Addis Ababa"}</span>
           <span className="block text-[10px] text-slate-400">
             {row.address || row.city}
           </span>
@@ -132,7 +190,7 @@ export const StoresPage = () => {
               row.active ? "bg-[#017C4D]" : "bg-slate-400"
             }`}
           />
-          {row.active ? "Active Target" : "Inactive"}
+          {row.active ? "Active" : "Inactive"}
         </span>
       ),
     },
@@ -141,13 +199,31 @@ export const StoresPage = () => {
       key: "actions",
       align: "right",
       render: (row) => (
-        <button
-          type="button"
-          onClick={() => handleToggleActive(row)}
-          className="text-xs font-semibold text-slate-600 hover:text-slate-900 transition underline cursor-pointer"
-        >
-          {row.active ? "Deactivate" : "Activate"}
-        </button>
+        <div className="flex items-center justify-end gap-2.5">
+          <button
+            type="button"
+            onClick={() => handleOpenEditModal(row)}
+            className="text-xs font-semibold text-slate-700 hover:text-[#A41821] transition cursor-pointer"
+          >
+            Edit
+          </button>
+          <span className="text-slate-300">|</span>
+          <button
+            type="button"
+            onClick={() => handleToggleActive(row)}
+            className="text-xs font-semibold text-slate-600 hover:text-slate-900 transition underline cursor-pointer"
+          >
+            {row.active ? "Deactivate" : "Activate"}
+          </button>
+          <span className="text-slate-300">|</span>
+          <button
+            type="button"
+            onClick={() => setDeleteCandidate(row)}
+            className="text-xs font-semibold text-red-600 hover:text-red-800 transition cursor-pointer"
+          >
+            Delete
+          </button>
+        </div>
       ),
     },
   ];
@@ -168,7 +244,7 @@ export const StoresPage = () => {
         <Can role={["ADMIN", "MANAGER"]}>
           <button
             type="button"
-            onClick={() => setIsModalOpen(true)}
+            onClick={handleOpenCreateModal}
             className="inline-flex items-center gap-1.5 rounded-xl bg-[#A41821] hover:bg-[#7F1219] px-4 py-2.5 text-xs font-bold text-white shadow-xs transition active:scale-95 cursor-pointer"
           >
             <span className="text-sm">+</span>
@@ -208,23 +284,24 @@ export const StoresPage = () => {
           searchKey="name"
           searchPlaceholder="Search store name, area, or competitor..."
           pageSize={8}
-          emptyMessage={
-            isLoading ? "Loading physical stores..." : "No stores match the filter."
-          }
+          emptyMessage={isLoading ? "Loading physical stores..." : "No stores match the filter."}
         />
       </div>
 
-      {/* Register Store Modal */}
+      {/* Register / Edit Store Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl border border-slate-100 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <h2 className="text-base font-bold text-slate-900">
-                Register Target Store Location
+                {editingStore ? "Edit Target Store Location" : "Register Target Store Location"}
               </h2>
               <button
                 type="button"
-                onClick={() => setIsModalOpen(false)}
+                onClick={() => {
+                  setIsModalOpen(false);
+                  setEditingStore(null);
+                }}
                 className="text-slate-400 hover:text-slate-600 cursor-pointer"
               >
                 ✕
@@ -243,7 +320,7 @@ export const StoresPage = () => {
                   }
                   className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] outline-hidden"
                 >
-                  {PILOT_COMPETITORS.map((c) => (
+                  {competitors.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name} ({c.type})
                     </option>
@@ -344,7 +421,10 @@ export const StoresPage = () => {
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setIsModalOpen(false)}
+                  onClick={() => {
+                    setIsModalOpen(false);
+                    setEditingStore(null);
+                  }}
                   className="rounded-xl border border-slate-200 px-4 py-2 font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
                 >
                   Cancel
@@ -353,10 +433,41 @@ export const StoresPage = () => {
                   type="submit"
                   className="rounded-xl bg-[#A41821] hover:bg-[#7F1219] px-4 py-2 font-bold text-white shadow-xs cursor-pointer"
                 >
-                  Save Store Location
+                  {editingStore ? "Update Store Location" : "Save Store Location"}
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deleteCandidate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl border border-slate-100 space-y-4">
+            <h3 className="text-base font-bold text-slate-900">Confirm Deletion</h3>
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Are you sure you want to remove{" "}
+              <strong className="text-slate-900">{deleteCandidate.name}</strong>?
+              If historical audits or assignments reference this location, the store will be deactivated instead of deleted to protect audit history integrity.
+            </p>
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setDeleteCandidate(null)}
+                className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                disabled={isDeleting}
+                className="rounded-xl bg-[#A41821] hover:bg-[#7F1219] px-4 py-2 text-xs font-bold text-white shadow-xs cursor-pointer disabled:opacity-50"
+              >
+                {isDeleting ? "Removing..." : "Yes, Remove"}
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -19,3 +19,7 @@ export const updateStoreRequest = async (id, payload) => {
     const response = await apiClient.patch(`/stores/${id}`, payload);
     return response.data;
 };
+export const deleteStoreRequest = async (id) => {
+    const response = await apiClient.delete(`/stores/${id}`);
+    return response.data;
+};
