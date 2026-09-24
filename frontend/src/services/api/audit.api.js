@@ -1,7 +1,8 @@
 import { apiClient } from "../client.js";
 
 /**
- * Create a new audit from an assignment
+ * Create a new audit from an assignment.
+ * @param {{ assignmentId: string, notes?: string }} args
  */
 export const createAuditRequest = async ({ assignmentId, notes }) => {
   const response = await apiClient.post(`/audits/assignments/${assignmentId}`, {
@@ -11,7 +12,7 @@ export const createAuditRequest = async ({ assignmentId, notes }) => {
 };
 
 /**
- * Get current active audit for the authenticated auditor
+ * Get current active audit for the authenticated auditor.
  */
 export const getCurrentAuditRequest = async () => {
   const response = await apiClient.get("/audits/current");
@@ -19,7 +20,8 @@ export const getCurrentAuditRequest = async () => {
 };
 
 /**
- * List audits with pagination and filters
+ * List audits with pagination and filters.
+ * @param {object} params
  */
 export const listAuditsRequest = async (params = {}) => {
   const response = await apiClient.get("/audits", { params });
@@ -27,7 +29,8 @@ export const listAuditsRequest = async (params = {}) => {
 };
 
 /**
- * Get audit history (completed audits)
+ * Get audit history (completed audits).
+ * @param {object} params
  */
 export const getAuditHistoryRequest = async (params = {}) => {
   const response = await apiClient.get("/audits/history", { params });
@@ -35,7 +38,8 @@ export const getAuditHistoryRequest = async (params = {}) => {
 };
 
 /**
- * Get a single audit by ID
+ * Get a single audit by ID.
+ * @param {string} auditId
  */
 export const getAuditByIdRequest = async (auditId) => {
   const response = await apiClient.get(`/audits/${auditId}`);
@@ -43,60 +47,46 @@ export const getAuditByIdRequest = async (auditId) => {
 };
 
 /**
- * Start an audit visit with GPS coordinates
+ * Start an audit visit with GPS coordinates.
+ * @param {{ auditId: string, payload: { latitude: number, longitude: number, accuracyMeters: number } }} args
  */
-export const startAuditRequest = async ({ auditId, latitude, longitude, accuracyMeters }) => {
-  const response = await apiClient.post(`/audits/${auditId}/start`, {
-    latitude,
-    longitude,
-    accuracyMeters,
-  });
+export const startAuditRequest = async ({ auditId, payload }) => {
+  const response = await apiClient.post(`/audits/${auditId}/start`, payload);
   return response.data;
 };
 
 /**
- * Update audit notes (only while IN_PROGRESS)
+ * Update audit notes (only while IN_PROGRESS).
+ * @param {{ auditId: string, payload: { notes: string | null } }} args
  */
-export const updateAuditRequest = async ({ auditId, notes }) => {
-  const response = await apiClient.patch(`/audits/${auditId}`, { notes });
+export const updateAuditRequest = async ({ auditId, payload }) => {
+  const response = await apiClient.patch(`/audits/${auditId}`, payload);
   return response.data;
 };
 
 /**
- * Complete an audit visit with end GPS coordinates
+ * Complete an audit visit with end GPS coordinates.
+ * @param {{ auditId: string, payload: { latitude, longitude, accuracyMeters, notes? } }} args
  */
-export const completeAuditRequest = async ({
-  auditId,
-  latitude,
-  longitude,
-  accuracyMeters,
-  notes,
-}) => {
-  const response = await apiClient.post(`/audits/${auditId}/complete`, {
-    latitude,
-    longitude,
-    accuracyMeters,
-    notes,
-  });
+export const completeAuditRequest = async ({ auditId, payload }) => {
+  const response = await apiClient.post(`/audits/${auditId}/complete`, payload);
   return response.data;
 };
 
 /**
- * Cancel an audit visit with a reason
+ * Cancel an audit visit with a reason.
+ * @param {{ auditId: string, payload: { reason: string } }} args
  */
-export const cancelAuditRequest = async ({ auditId, reason }) => {
-  const response = await apiClient.post(`/audits/${auditId}/cancel`, {
-    reason,
-  });
+export const cancelAuditRequest = async ({ auditId, payload }) => {
+  const response = await apiClient.post(`/audits/${auditId}/cancel`, payload);
   return response.data;
 };
 
 /**
- * Mark audit for supervisor review (Manager/Admin only)
+ * Mark audit for supervisor review (Manager/Admin only).
+ * @param {{ auditId: string, payload: { reviewNote: string } }} args
  */
-export const markAuditReviewRequest = async ({ auditId, reviewNote }) => {
-  const response = await apiClient.post(`/audits/${auditId}/mark-review`, {
-    reviewNote,
-  });
+export const markAuditReviewRequest = async ({ auditId, payload }) => {
+  const response = await apiClient.post(`/audits/${auditId}/mark-review`, payload);
   return response.data;
 };

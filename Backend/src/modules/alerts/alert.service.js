@@ -201,10 +201,10 @@ export const getAlertById = async (alertId) => {
 /**
  * Lists alerts with pagination, sorting, and filters.
  */
-export const listAlerts = async (query) => {
+export const listAlerts = async (query = {}) => {
   const {
-    page = 1,
-    limit = 20,
+    page: rawPage = 1,
+    limit: rawLimit = 20,
     productId,
     surveyPeriodId,
     type,
@@ -214,18 +214,34 @@ export const listAlerts = async (query) => {
     to,
   } = query;
 
+  // Explicitly parse and sanitize pagination parameters to ensure integer types for Prisma
+  const page = Math.max(1, parseInt(rawPage, 10) || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(rawLimit, 10) || 20));
+
   const where = {};
 
   if (productId) where.productId = productId;
   if (surveyPeriodId) where.surveyPeriodId = surveyPeriodId;
   if (type) where.type = type;
   if (severity) where.severity = severity;
-  if (resolved !== undefined) where.resolved = resolved;
+
+  // Safely parse boolean whether passed as boolean or string ("true"/"false")
+  if (resolved !== undefined && resolved !== null) {
+    where.resolved = resolved === true || resolved === "true";
+  }
 
   if (from || to) {
     where.createdAt = {};
-    if (from) where.createdAt.gte = new Date(from);
-    if (to) where.createdAt.lte = new Date(to);
+    if (from) {
+      where.createdAt.gte = new Date(from);
+    }
+    if (to) {
+      const toDate = new Date(to);
+      if (typeof to === "string" && /^\d{4}-\d{2}-\d{2}$/.test(to)) {
+        toDate.setUTCHours(23, 59, 59, 999);
+      }
+      where.createdAt.lte = toDate;
+    }
   }
 
   const skip = (page - 1) * limit;
@@ -235,7 +251,7 @@ export const listAlerts = async (query) => {
     prisma.alert.findMany({
       where,
       skip,
-      take: limit,
+      take: limit, // Explicit integer ensures valid Prisma execution
       orderBy: { createdAt: "desc" },
       include: ALERT_INCLUDE_RELATIONS,
     }),

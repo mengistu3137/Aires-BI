@@ -41,7 +41,6 @@ router.get(
   "/history",
   validate(listAuditsQuerySchema, "query"),
   (req, res, next) => {
-    // Default history endpoint to completed visits if status not specified
     if (!req.query.status) {
       req.query.status = "COMPLETED";
     }
@@ -56,7 +55,7 @@ router.get(
   auditController.getAuditById,
 );
 
-// 5. Start audit visit (captures start GPS & moves to IN_PROGRESS)
+// 5. Start audit visit
 router.post(
   "/:auditId/start",
   validate(auditIdParamSchema, "params"),
@@ -64,7 +63,7 @@ router.post(
   auditController.startAudit,
 );
 
-// 6. Update permitted audit visit fields (notes only, while IN_PROGRESS)
+// 6. Update permitted audit visit fields
 router.patch(
   "/:auditId",
   validate(auditIdParamSchema, "params"),
@@ -72,7 +71,7 @@ router.patch(
   auditController.updateAudit,
 );
 
-// 7. Complete audit visit (captures end GPS & marks COMPLETED)
+// 7. Complete audit visit
 router.post(
   "/:auditId/complete",
   validate(auditIdParamSchema, "params"),
@@ -80,7 +79,7 @@ router.post(
   auditController.completeAudit,
 );
 
-// 8. Cancel audit visit (sets CANCELLED and appends reason)
+// 8. Cancel audit visit
 router.post(
   "/:auditId/cancel",
   validate(auditIdParamSchema, "params"),

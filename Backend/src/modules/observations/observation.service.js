@@ -206,10 +206,10 @@ export const getObservationById = async ({ observationId, user }) => {
 /**
  * List observations for a specific Audit with pagination, filters, and completeness counts.
  */
-export const listAuditObservations = async ({ auditId, user, query }) => {
+export const listAuditObservations = async ({ auditId, user, query = {} }) => {
   const {
-    page = 1,
-    limit = 20,
+    page: rawPage = 1,
+    limit: rawLimit = 20,
     productId,
     availability,
     reviewStatus,
@@ -217,6 +217,10 @@ export const listAuditObservations = async ({ auditId, user, query }) => {
     from,
     to,
   } = query;
+
+  // Sanitize and explicitly parse integer pagination to protect Prisma
+  const page = Math.max(1, parseInt(rawPage, 10) || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(rawLimit, 10) || 20));
 
   // 1. Verify Audit exists and belongs to auditor if FIELD_AUDITOR
   const audit = await prisma.audit.findUnique({
@@ -260,7 +264,7 @@ export const listAuditObservations = async ({ auditId, user, query }) => {
     if (from) where.capturedAt.gte = new Date(from);
     if (to) {
       const toDate = new Date(to);
-      if (/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+      if (typeof to === "string" && /^\d{4}-\d{2}-\d{2}$/.test(to)) {
         toDate.setUTCHours(23, 59, 59, 999);
       }
       where.capturedAt.lte = toDate;
@@ -276,7 +280,7 @@ export const listAuditObservations = async ({ auditId, user, query }) => {
       prisma.priceObservation.findMany({
         where,
         skip,
-        take: limit,
+        take: limit, // Explicit Int
         orderBy: { capturedAt: "desc" },
         include: OBSERVATION_INCLUDE_RELATIONS,
       }),
@@ -317,6 +321,75 @@ export const listAuditObservations = async ({ auditId, user, query }) => {
         missingProductsCount: missingProducts.length,
         missingProducts,
       },
+    },
+  };
+};
+
+/**
+ * Global observations list (Admin/Manager or self-scoped Field Auditor)
+ */
+export const listAllObservations = async ({ user, query = {} }) => {
+  const {
+    page: rawPage = 1,
+    limit: rawLimit = 20,
+    auditId,
+    productId,
+    availability,
+    reviewStatus,
+    syncStatus,
+    from,
+    to,
+  } = query;
+
+  const page = Math.max(1, parseInt(rawPage, 10) || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(rawLimit, 10) || 20));
+
+  const where = {};
+
+  if (user.role === "FIELD_AUDITOR") {
+    where.auditorId = user.id;
+  }
+
+  if (auditId) where.auditId = auditId;
+  if (productId) where.productId = productId;
+  if (availability) where.availability = availability;
+  if (reviewStatus) where.reviewStatus = reviewStatus;
+  if (syncStatus) where.syncStatus = syncStatus;
+
+  if (from || to) {
+    where.capturedAt = {};
+    if (from) where.capturedAt.gte = new Date(from);
+    if (to) {
+      const toDate = new Date(to);
+      if (typeof to === "string" && /^\d{4}-\d{2}-\d{2}$/.test(to)) {
+        toDate.setUTCHours(23, 59, 59, 999);
+      }
+      where.capturedAt.lte = toDate;
+    }
+  }
+
+  const skip = (page - 1) * limit;
+
+  const [total, observations] = await prisma.$transaction([
+    prisma.priceObservation.count({ where }),
+    prisma.priceObservation.findMany({
+      where,
+      skip,
+      take: limit,
+      orderBy: { capturedAt: "desc" },
+      include: OBSERVATION_INCLUDE_RELATIONS,
+    }),
+  ]);
+
+  const totalPages = Math.ceil(total / limit) || 1;
+
+  return {
+    data: observations.map(formatObservationResponse),
+    meta: {
+      page,
+      limit,
+      total,
+      totalPages,
     },
   };
 };
@@ -523,6 +596,7 @@ export const observationService = {
   createObservation,
   getObservationById,
   listAuditObservations,
+  listAllObservations,
   updateObservation,
   approveObservation,
   rejectObservation,

@@ -13,7 +13,7 @@ const fetchProducts = async (search) => {
   const response = await apiClient.get("/products", {
     params: { search: search || undefined, limit: 20, active: true },
   });
-  return response.data;
+  return response.data.data.products || response.data || [];
 };
 
 export const ProductSelector = ({
@@ -33,8 +33,8 @@ export const ProductSelector = ({
     staleTime: 60 * 1000,
     enabled: open || search.length > 0,
   });
+  const products = data?.data || data?.products || data || [];
 
-  const products = data?.data || [];
   const selectedProduct = useMemo(() => {
     if (lockedProduct) return lockedProduct;
     if (!value) return null;

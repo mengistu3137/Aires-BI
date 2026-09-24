@@ -59,3 +59,12 @@ export const requestObservationReviewRequest = async ({ observationId, reviewNot
   });
   return response.data;
 };
+
+/**
+ * List observations globally across all audits with filters and pagination.
+ * Backend: GET /observations
+ */
+export const listObservationsRequest = async (params = {}) => {
+  const response = await apiClient.get("/observations", { params });
+  return response.data;
+};

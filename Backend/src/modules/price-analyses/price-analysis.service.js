@@ -294,10 +294,10 @@ export const getProductSurveyPeriodAnalysis = async (
 /**
  * List Price Analyses with filtering and pagination.
  */
-export const listPriceAnalyses = async (query) => {
+export const listPriceAnalyses = async (query = {}) => {
   const {
-    page = 1,
-    limit = 20,
+    page: rawPage = 1,
+    limit: rawLimit = 20,
     surveyPeriodId,
     productId,
     action,
@@ -305,6 +305,10 @@ export const listPriceAnalyses = async (query) => {
     from,
     to,
   } = query;
+
+  // Sanitize and explicitly parse pagination parameters to ensure integer types for Prisma
+  const page = Math.max(1, parseInt(rawPage, 10) || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(rawLimit, 10) || 20));
 
   const where = {};
 
@@ -318,8 +322,16 @@ export const listPriceAnalyses = async (query) => {
 
   if (from || to) {
     where.calculatedAt = {};
-    if (from) where.calculatedAt.gte = new Date(from);
-    if (to) where.calculatedAt.lte = new Date(to);
+    if (from) {
+      where.calculatedAt.gte = new Date(from);
+    }
+    if (to) {
+      const toDate = new Date(to);
+      if (typeof to === "string" && /^\d{4}-\d{2}-\d{2}$/.test(to)) {
+        toDate.setUTCHours(23, 59, 59, 999);
+      }
+      where.calculatedAt.lte = toDate;
+    }
   }
 
   const skip = (page - 1) * limit;
@@ -329,7 +341,7 @@ export const listPriceAnalyses = async (query) => {
     prisma.priceAnalysis.findMany({
       where,
       skip,
-      take: limit,
+      take: limit, // Explicit Int prevents PrismaClientValidationError
       orderBy: { calculatedAt: "desc" },
       include: ANALYSIS_INCLUDE_RELATIONS,
     }),

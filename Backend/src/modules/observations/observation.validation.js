@@ -108,6 +108,7 @@ export const requestReviewObservationSchema = z.object({
 export const listObservationsQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().positive().max(100).default(20),
+  auditId: z.string().uuid().optional(),
   productId: z.string().trim().optional(),
   availability: z.enum(["AVAILABLE", "OUT_OF_STOCK", "NOT_FOUND"]).optional(),
   reviewStatus: z

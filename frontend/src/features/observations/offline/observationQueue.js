@@ -10,20 +10,14 @@ const STORE_NAME = "queue";
 
 let dbPromise = null;
 
-/**
- * Open (or create) the IndexedDB database
- */
 const openDB = () => {
   if (dbPromise) return dbPromise;
-
   dbPromise = new Promise((resolve, reject) => {
     if (!("indexedDB" in window)) {
       reject(new Error("IndexedDB is not supported on this device"));
       return;
     }
-
     const request = indexedDB.open(DB_NAME, DB_VERSION);
-
     request.onupgradeneeded = (event) => {
       const db = event.target.result;
       if (!db.objectStoreNames.contains(STORE_NAME)) {
@@ -33,17 +27,25 @@ const openDB = () => {
         store.createIndex("createdAt", "createdAt", { unique: false });
       }
     };
-
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
-
   return dbPromise;
 };
 
 /**
- * Add an observation to the offline queue
+ * Notify any listeners (e.g. React Query invalidation) that an
+ * observation changed sync state. Uses a DOM CustomEvent to avoid
+ * coupling the queue to React Query.
  */
+const emitObservationsChanged = (detail) => {
+  try {
+    window.dispatchEvent(new CustomEvent("aires:observations-changed", { detail }));
+  } catch {
+    // Non-critical — silently ignore if window is unavailable
+  }
+};
+
 export const enqueueObservation = async (observation) => {
   const db = await openDB();
   const record = {
@@ -55,20 +57,15 @@ export const enqueueObservation = async (observation) => {
     syncError: null,
     createdAt: observation.createdAt || new Date().toISOString(),
   };
-
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite");
     const store = tx.objectStore(STORE_NAME);
     const request = store.put(record);
-
     request.onsuccess = () => resolve(record);
     request.onerror = () => reject(request.error);
   });
 };
 
-/**
- * Get all pending observations
- */
 export const getPendingObservations = async () => {
   const db = await openDB();
   return new Promise((resolve, reject) => {
@@ -76,15 +73,11 @@ export const getPendingObservations = async () => {
     const store = tx.objectStore(STORE_NAME);
     const index = store.index("status");
     const request = index.getAll("PENDING");
-
     request.onsuccess = () => resolve(request.result || []);
     request.onerror = () => reject(request.error);
   });
 };
 
-/**
- * Get all observations for an audit
- */
 export const getObservationsForAudit = async (auditId) => {
   const db = await openDB();
   return new Promise((resolve, reject) => {
@@ -92,22 +85,17 @@ export const getObservationsForAudit = async (auditId) => {
     const store = tx.objectStore(STORE_NAME);
     const index = store.index("auditId");
     const request = index.getAll(auditId);
-
     request.onsuccess = () => resolve(request.result || []);
     request.onerror = () => reject(request.error);
   });
 };
 
-/**
- * Update a queued observation
- */
 export const updateQueuedObservation = async (id, updates) => {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite");
     const store = tx.objectStore(STORE_NAME);
     const getRequest = store.get(id);
-
     getRequest.onsuccess = () => {
       const existing = getRequest.result;
       if (!existing) {
@@ -123,33 +111,22 @@ export const updateQueuedObservation = async (id, updates) => {
   });
 };
 
-/**
- * Remove an observation from the queue after successful sync
- */
 export const removeQueuedObservation = async (id) => {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite");
     const store = tx.objectStore(STORE_NAME);
     const request = store.delete(id);
-
     request.onsuccess = () => resolve(true);
     request.onerror = () => reject(request.error);
   });
 };
 
-/**
- * Count pending observations
- */
 export const countPendingObservations = async () => {
   const pending = await getPendingObservations();
   return pending.length;
 };
 
-/**
- * Sync a single observation to the server
- * Returns { success: boolean, permanent: boolean }
- */
 export const syncObservation = async (observation) => {
   try {
     await updateQueuedObservation(observation.id, {
@@ -174,10 +151,17 @@ export const syncObservation = async (observation) => {
     });
 
     await removeQueuedObservation(observation.id);
+
+    // Notify UI subscribers so React Query can invalidate relevant keys.
+    emitObservationsChanged({
+      auditId: observation.auditId,
+      observationId: response?.data?.id,
+      status: "SYNCED",
+    });
+
     return { success: true, data: response.data };
   } catch (error) {
     const status = error?.response?.status;
-    // 4xx errors (except 408, 429) are permanent validation failures
     const isPermanent = status && status >= 400 && status < 500 && status !== 408 && status !== 429;
 
     await updateQueuedObservation(observation.id, {
@@ -185,28 +169,25 @@ export const syncObservation = async (observation) => {
       syncError: error?.response?.data?.message || error.message,
     });
 
+    emitObservationsChanged({
+      auditId: observation.auditId,
+      observationId: observation.id,
+      status: isPermanent ? "FAILED" : "PENDING",
+    });
+
     return { success: false, permanent: isPermanent, error };
   }
 };
 
-/**
- * Flush all pending observations to the server
- * Returns { synced: number, failed: number, pending: number }
- */
 export const flushQueue = async () => {
   const pending = await getPendingObservations();
   let synced = 0;
   let failed = 0;
-
   for (const obs of pending) {
     const result = await syncObservation(obs);
-    if (result.success) {
-      synced += 1;
-    } else if (result.permanent) {
-      failed += 1;
-    }
+    if (result.success) synced += 1;
+    else if (result.permanent) failed += 1;
   }
-
   const remaining = await countPendingObservations();
   return { synced, failed, pending: remaining };
 };
