@@ -1,4 +1,3 @@
-import React from "react";
 import {
   LayoutDashboard,
   ClipboardList,
@@ -15,91 +14,107 @@ import {
 
 /**
  * Central navigation configuration.
- * - `id`     — stable identifier used for active-tab detection
- * - `label`  — display text (Title Case)
- * - `path`   — route path (must match index.jsx)
- * - `icon`   — React element rendered in the sidebar
- * - `roles`  — which roles can SEE this item (visibility only)
- *              Actual authorization is enforced by ProtectedRoute in routes.
+ * - `id`        — stable identifier used for active-tab detection
+ * - `label`     — display text (Title Case)
+ * - `path`      — route path (must match index.jsx)
+ * - `icon`      — lucide-react icon COMPONENT (not a JSX element)
+ * - `iconSize`  — pixel size for the icon (defaults to 18 in the Sidebar)
+ * - `roles`     — which roles can SEE this item (visibility only)
+ *                 Actual authorization is enforced by ProtectedRoute in routes.
  *
  * Routes must still enforce access via ProtectedRoute regardless of this config.
+ *
+ * NOTE: `icon` holds the component itself (e.g. `LayoutDashboard`), not
+ * `<LayoutDashboard />`. The Sidebar renders it. This keeps this file as
+ * plain `.js` with no JSX syntax, which Vite/OXC requires.
  */
 export const NAVIGATION = [
   {
     id: "dashboard",
     label: "Dashboard",
     path: "/dashboard",
-    icon: <LayoutDashboard size={18} />,
+    icon: LayoutDashboard,
+    iconSize: 18,
     roles: ["ADMIN", "MANAGER", "FIELD_AUDITOR"],
   },
   {
     id: "survey",
     label: "Field Price Collection",
     path: "/survey",
-    icon: <ClipboardList size={18} />,
+    icon: ClipboardList,
+    iconSize: 18,
     roles: ["ADMIN", "MANAGER", "FIELD_AUDITOR"],
   },
   {
     id: "progress",
     label: "Assignments & Progress",
     path: "/progress",
-    icon: <TrendingUp size={18} />,
+    icon: TrendingUp,
+    iconSize: 18,
     roles: ["ADMIN", "MANAGER", "FIELD_AUDITOR"],
   },
   {
     id: "products",
     label: "Products",
     path: "/products",
-    icon: <Package size={18} />,
+    icon: Package,
+    iconSize: 18,
     roles: ["ADMIN", "MANAGER"],
   },
   {
     id: "stores",
     label: "Competitor Stores",
     path: "/stores",
-    icon: <Store size={18} />,
+    icon: Store,
+    iconSize: 18,
     roles: ["ADMIN", "MANAGER"],
   },
   {
     id: "audits",
     label: "Audit Visits",
     path: "/audits",
-    icon: <ShieldCheck size={18} />,
+    icon: ShieldCheck,
+    iconSize: 18,
     roles: ["ADMIN", "MANAGER", "FIELD_AUDITOR"],
   },
   {
     id: "observations",
     label: "Observations",
     path: "/observations",
-    icon: <Eye size={18} />,
+    icon: Eye,
+    iconSize: 18,
     roles: ["ADMIN", "MANAGER", "FIELD_AUDITOR"],
   },
   {
     id: "queens-prices",
     label: "Queens Prices",
     path: "/queens-prices",
-    icon: <Crown size={18} />,
+    icon: Crown,
+    iconSize: 18,
     roles: ["ADMIN", "MANAGER"],
   },
   {
     id: "price-analysis",
     label: "Price Analysis",
     path: "/price-analysis",
-    icon: <BarChart3 size={18} />,
+    icon: BarChart3,
+    iconSize: 18,
     roles: ["ADMIN", "MANAGER"],
   },
   {
     id: "alerts",
     label: "Alerts",
     path: "/alerts",
-    icon: <Bell size={18} />,
+    icon: Bell,
+    iconSize: 18,
     roles: ["ADMIN", "MANAGER"],
   },
   {
     id: "users",
     label: "Auditors & Staff",
     path: "/users",
-    icon: <Users size={18} />,
+    icon: Users,
+    iconSize: 18,
     roles: ["ADMIN"],
   },
 ];

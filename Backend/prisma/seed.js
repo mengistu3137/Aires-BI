@@ -297,7 +297,7 @@ async function main() {
       id: UID.users.admin,
       name: "Abraham Shiferaw",
       email: "abraham.admin@aires.et",
-      phone: "+251911000001",
+      phone: "+251910009094",
       role: "ADMIN",
     },
     {

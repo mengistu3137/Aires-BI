@@ -1,15 +1,15 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { PILOT_ASSIGNMENTS, PILOT_ENTRIES, PILOT_PRODUCTS, PILOT_COMPETITORS } from "@/data/pilotData.js";
 import { submitSurveyEntryRequest, syncBatchEntriesRequest } from "@/services/api/survey.api.js";
 
 export const useSurveyStore = create(
     persist(
         (set, get) => ({
-            assignments: PILOT_ASSIGNMENTS,
-            surveyEntries: PILOT_ENTRIES,
-            products: PILOT_PRODUCTS, 
-            competitors: PILOT_COMPETITORS,
+            // Real data only: initialized as empty arrays (NO mock data)
+            assignments: [],
+            surveyEntries: [],
+            products: [],
+            competitors: [],
             offlineQueue: [],
             isSyncing: false,
 
@@ -19,10 +19,10 @@ export const useSurveyStore = create(
 
             /**
              * Submits a survey entry:
-             * Tries API first; if offline or fails, saves to local offlineQueue.
+             * Tries backend API first; if offline or network fails, saves to local offlineQueue.
              */
             submitEntry: async (entryData) => {
-                const isOnline = navigator.onLine;
+                const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
 
                 if (isOnline) {
                     try {
@@ -39,7 +39,7 @@ export const useSurveyStore = create(
 
                         return { success: true, entry: savedEntry, offline: false };
                     } catch (err) {
-                        console.warn("Direct submission failed, adding to offline queue:", err);
+                        console.warn("Direct submission to API failed, queuing locally:", err.message);
                     }
                 }
 
@@ -71,7 +71,6 @@ export const useSurveyStore = create(
                     const res = await syncBatchEntriesRequest(offlineQueue);
                     const syncedCount = res?.data?.syncedCount || offlineQueue.length;
 
-                    // Mark entries in surveyEntries as SYNCED
                     set((state) => ({
                         offlineQueue: [],
                         surveyEntries: state.surveyEntries.map((e) =>
@@ -93,7 +92,6 @@ export const useSurveyStore = create(
             partialize: (state) => ({
                 offlineQueue: state.offlineQueue,
                 surveyEntries: state.surveyEntries,
-                assignments: state.assignments,
             }),
         }
     )
