@@ -125,7 +125,7 @@ export const UsersPage = () => {
           className="inline-flex items-center gap-2 rounded-xl bg-[#A41821] hover:bg-[#7F1219] px-4 py-2.5 text-xs font-bold text-white shadow-xs transition active:scale-95 cursor-pointer"
         >
           <span className="text-sm">+</span>
-          Add Staff / Auditor
+          Add User
         </button>
       </div>
 
@@ -255,7 +255,7 @@ export const UsersPage = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl border border-slate-100 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h2 className="text-base font-bold text-slate-900">Add Staff / Auditor</h2>
+              <h2 className="text-base font-bold text-slate-900">Add User</h2>
               <button
                 type="button"
                 onClick={() => setIsModalOpen(false)}

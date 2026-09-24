@@ -35,7 +35,7 @@ export const NAVIGATION = [
     path: "/dashboard",
     icon: LayoutDashboard,
     iconSize: 18,
-    roles: ["ADMIN", "MANAGER", "FIELD_AUDITOR"],
+    roles: ["ADMIN", "MANAGER"],
   },
   // {
   //   id: "survey",
@@ -101,17 +101,17 @@ export const NAVIGATION = [
     iconSize: 18,
     roles: ["ADMIN", "MANAGER"],
   },
-  {
+ /*  {
     id: "alerts",
     label: "Alerts",
     path: "/alerts",
     icon: Bell,
     iconSize: 18,
     roles: ["ADMIN", "MANAGER"],
-  },
+  }, */
   {
     id: "users",
-    label: "Auditors & Staff",
+    label: "Manage Users",
     path: "/users",
     icon: Users,
     iconSize: 18,

@@ -1,6 +1,10 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { getStoresRequest, createStoreRequest, updateStoreRequest } from "@/services/api/store.api.js";
-import { PILOT_STORES } from "@/data/pilotData.js";
+import {
+    getStoresRequest,
+    createStoreRequest,
+    updateStoreRequest,
+    deleteStoreRequest,
+} from "@/services/api/store.api.js";
 import toast from "react-hot-toast";
 
 export const useStores = (params = {}) => {
@@ -9,15 +13,11 @@ export const useStores = (params = {}) => {
     const storesQuery = useQuery({
         queryKey: ["stores", params],
         queryFn: async () => {
-            try {
-                const res = await getStoresRequest(params);
-                return res?.data?.stores || PILOT_STORES;
-            } catch (err) {
-                console.warn("API stores endpoint unreachable, fallback to pilot stores:", err.message);
-                return PILOT_STORES;
-            }
+            const res = await getStoresRequest(params);
+            // Backend returns: { status: "success", data: { stores: [...] } }
+            return res?.data?.stores || res?.stores || [];
         },
-        staleTime: 5 * 60 * 1000,
+        staleTime: 60 * 1000,
     });
 
     const createStoreMutation = useMutation({
@@ -27,7 +27,7 @@ export const useStores = (params = {}) => {
             queryClient.invalidateQueries({ queryKey: ["stores"] });
         },
         onError: (err) => {
-            toast.error(err.message || "Failed to register store");
+            toast.error(err?.response?.data?.message || err?.message || "Failed to register store");
         },
     });
 
@@ -38,14 +38,32 @@ export const useStores = (params = {}) => {
             queryClient.invalidateQueries({ queryKey: ["stores"] });
         },
         onError: (err) => {
-            toast.error(err.message || "Failed to update store");
+            toast.error(err?.response?.data?.message || err?.message || "Failed to update store");
+        },
+    });
+
+    const deleteStoreMutation = useMutation({
+        mutationFn: (id) => deleteStoreRequest(id),
+        onSuccess: (res) => {
+            if (res?.deactivated) {
+                toast(res.message, { icon: "ℹ️", duration: 5000 });
+            } else {
+                toast.success(res?.message || "Store removed successfully");
+            }
+            queryClient.invalidateQueries({ queryKey: ["stores"] });
+        },
+        onError: (err) => {
+            toast.error(err?.response?.data?.message || err?.message || "Failed to delete store");
         },
     });
 
     return {
         stores: storesQuery.data || [],
         isLoading: storesQuery.isLoading,
+        isError: storesQuery.isError,
         createStore: createStoreMutation.mutateAsync,
         updateStore: updateStoreMutation.mutateAsync,
+        deleteStore: deleteStoreMutation.mutateAsync,
+        isDeleting: deleteStoreMutation.isPending,
     };
 };
