@@ -6,10 +6,13 @@ export const SYNC_STATUSES = ["PENDING", "SYNCED", "FAILED"];
 export const createPeriodSchema = z.object({
     id: z
         .string({ required_error: "Period ID is required (e.g. 2026-W39)" })
-        .regex(/^\d{4}-W\d{2}$/, "Period ID must follow format YYYY-Www (e.g. 2026-W39)"),
+        .regex(/^\d{4}-W\d{2}$/, "Period ID must follow format YYYY-Www (e.g. 2026-W42)"),
+    name: z
+        .string({ required_error: "Cycle name / description is required" })
+        .min(2, "Description must be at least 2 characters"),
     startDate: z.string().datetime({ message: "Valid ISO startDate is required" }),
     endDate: z.string().datetime({ message: "Valid ISO endDate is required" }),
-    status: z.enum(["OPEN", "CLOSED"]).default("OPEN"),
+    status: z.enum(["DRAFT", "OPEN", "CLOSED"]).default("OPEN"),
 });
 
 export const createAssignmentSchema = z.object({

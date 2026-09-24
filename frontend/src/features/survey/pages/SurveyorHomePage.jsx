@@ -80,7 +80,7 @@ export const SurveyorHomePage = () => {
 					<div className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-[#017C4D] border border-emerald-200 mt-1">
 						<span className="h-1.5 w-1.5 rounded-full bg-[#017C4D] animate-pulse" />
 						<span>
-							{activeCycle.id}: {activeCycle.name}
+							 {activeCycle.name}
 						</span>
 					</div>
 				)}

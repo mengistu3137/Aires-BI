@@ -100,6 +100,7 @@ export const listQueensPricesQuerySchema = z.object({
     .enum(["true", "false"])
     .transform((val) => val === "true")
     .optional(),
+  search: z.string().trim().optional(),
   from: z.string().optional(),
   to: z.string().optional(),
 });
