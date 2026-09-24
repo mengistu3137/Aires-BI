@@ -4,6 +4,7 @@ import { formatPrice, formatCapturedAt } from "../utils/observation.utils.js";
 import { ObservationAvailabilityBadge } from "./ObservationAvailabilityBadge.jsx";
 import { ObservationReviewBadge } from "./ObservationReviewBadge.jsx";
 import { ObservationSyncBadge } from "./ObservationSyncBadge.jsx";
+import { formatProductName } from "@/utils/formatters.js";
 
 export const ObservationListItemGlobal = ({ observation }) => {
   const navigate = useNavigate();
@@ -20,7 +21,7 @@ export const ObservationListItemGlobal = ({ observation }) => {
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-bold text-slate-800">
-            {product?.name || "Unknown product"}
+            {formatProductName(product?.name) || "Unknown product"}
           </p>
           <p className="mt-0.5 truncate text-[11px] text-slate-500">
             {product?.category}

@@ -2,6 +2,7 @@ import React from "react";
 import { useNavigate } from "react-router-dom";
 import { formatDate, formatIndex, formatPrice } from "../utils/price-analysis.utils.js";
 import { PriceAnalysisActionBadge } from "./PriceAnalysisActionBadge.jsx";
+import { formatProductName } from "@/utils/formatters.js";
 
 /**
  * Mobile-optimized list item for a price analysis.
@@ -20,7 +21,7 @@ export const PriceAnalysisListItem = ({ analysis }) => {
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-bold text-slate-800">
-            {analysis.product?.name || "Unknown product"}
+            {formatProductName(analysis.product?.name) || "Unknown product"}
           </p>
           <p className="mt-0.5 truncate text-[11px] text-slate-500">
             {analysis.product?.category}

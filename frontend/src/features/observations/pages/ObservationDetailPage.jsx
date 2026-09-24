@@ -15,6 +15,7 @@ import {
 } from "../utils/observation.utils.js";
 import { ObservationSyncBadge } from "../components/ObservationSyncBadge.jsx";
 import { ObservationReviewBadge } from "../components/ObservationReviewBadge.jsx";
+import { formatProductName } from "@/utils/formatters.js";
 
 const rejectSchema = z.object({
   reviewNote: z
@@ -141,7 +142,7 @@ export const ObservationDetailPage = () => {
         {/* Hero — product + price */}
         <div className="border-b border-slate-200 px-4 pb-5 pt-4 sm:px-6 sm:pt-5">
           <h2 className="text-lg font-black  text-slate-900 sm:text-xl capitalize">
-            {product?.name || "Unknown product"}
+            {formatProductName(product?.name) || "Unknown product"}
           </h2>
           <p className="mt-1 text-xs text-slate-500">
             {product?.category}

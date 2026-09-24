@@ -4,6 +4,7 @@ import { formatPrice, formatCapturedAt } from "../utils/observation.utils.js";
 import { ObservationAvailabilityBadge } from "./ObservationAvailabilityBadge.jsx";
 import { ObservationReviewBadge } from "./ObservationReviewBadge.jsx";
 import { ObservationSyncBadge } from "./ObservationSyncBadge.jsx";
+import { formatProductName } from "@/utils/formatters.js";
 
 export const ObservationListTable = ({ observations = [] }) => {
   const navigate = useNavigate();
@@ -40,7 +41,9 @@ export const ObservationListTable = ({ observations = [] }) => {
                 onClick={() => navigate(`/observations/${o.id}`)}
               >
                 <td className="px-4 py-3">
-                  <div className="font-bold text-slate-800">{o.product?.name || "—"}</div>
+                  <div className="font-bold text-slate-800">
+                    {formatProductName(o.product?.name) || "—"}
+                  </div>
                   {o.product?.sku && (
                     <div className="text-[10px] text-slate-400">SKU {o.product.sku}</div>
                   )}

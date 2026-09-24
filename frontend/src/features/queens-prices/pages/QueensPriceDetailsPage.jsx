@@ -9,6 +9,7 @@ import {
 } from "../utils/queens-price.utils.js";
 import { QueensPriceStatusBadge } from "../components/QueensPriceStatusBadge.jsx";
 import { useAuth } from "@/hooks/useAuth.js";
+import { formatProductName } from "@/utils/formatters.js";
 
 export const QueensPriceDetailsPage = () => {
   const { id } = useParams();
@@ -62,7 +63,7 @@ export const QueensPriceDetailsPage = () => {
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
             <h1 className="text-base font-black text-slate-800">
-              {queensPrice.product?.name || "Unknown product"}
+              {formatProductName(queensPrice.product?.name) || "Unknown product"}
             </h1>
             <p className="mt-0.5 text-xs text-slate-500">
               {queensPrice.product?.category}

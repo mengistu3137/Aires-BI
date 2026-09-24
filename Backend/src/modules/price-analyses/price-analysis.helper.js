@@ -14,9 +14,9 @@ export const PRICE_ANALYSIS_CONFIG = {
     process.env.PRICE_INDEX_TARGET_DEFAULT || "100.00",
   ),
 
-  // Acceptable parity band around target index (e.g. +/- 3%)
+  // Acceptable parity band around target index (e.g. +/- 5%)
   TOLERANCE_BAND_PERCENT: new Decimal(
-    process.env.PRICE_INDEX_TOLERANCE_BAND || "3.00",
+    process.env.PRICE_INDEX_TOLERANCE_BAND || "5.00",
   ),
 
   // Minimum required approved competitor observations to make a confident action recommendation
