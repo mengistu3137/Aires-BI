@@ -1,8 +1,13 @@
-import React from "react";
+// frontend/src/components/Sidebar.jsx
+import React, { useState } from "react";
 import { useAuth } from "@/hooks/useAuth.js";
+import { usePeriods } from "@/features/survey/hooks/usePeriods.js";
+import { PeriodManagementModal } from "@/features/survey/components/PeriodManagementModal.jsx";
 
 export const Sidebar = ({ activeTab, onSelectTab, isOpen, onClose }) => {
 	const { isManager, isAuditor, isAdmin } = useAuth();
+	const { activePeriod } = usePeriods();
+	const [isPeriodModalOpen, setIsPeriodModalOpen] = useState(false);
 
 	const navItems = [
 		{
@@ -151,7 +156,7 @@ export const Sidebar = ({ activeTab, onSelectTab, isOpen, onClose }) => {
 					isOpen ? "translate-x-0" : "-translate-x-full"
 				}`}
 			>
-				<div className="flex h-16 items-center px-6 border-b border-slate-100">
+				<div className="flex h-16 items-center px-6 border-b border-slate-100 flex-none">
 					<div className="flex items-center gap-2">
 						<span className="h-3 w-3 rounded-full bg-[#A41821]" />
 						<span className="h-3 w-3 rounded-full bg-[#017C4D]" />
@@ -162,7 +167,7 @@ export const Sidebar = ({ activeTab, onSelectTab, isOpen, onClose }) => {
 					</div>
 				</div>
 
-				<nav className="flex-1 space-y-1.5 px-3 py-4">
+				<nav className="flex-1 space-y-1.5 px-3 py-4 overflow-y-auto">
 					{navItems
 						.filter((item) => item.visible)
 						.map((item) => {
@@ -203,19 +208,38 @@ export const Sidebar = ({ activeTab, onSelectTab, isOpen, onClose }) => {
 						})}
 				</nav>
 
-				{/* Survey Cycle Indicator */}
-				<div className="p-4 border-t border-slate-100 bg-slate-50/75">
+				{/* Survey Cycle Indicator Footer */}
+				<div className="p-4 border-t border-slate-100 bg-slate-50/75 flex-none">
 					<div className="flex items-center justify-between text-xs text-slate-600">
 						<span className="font-medium">Active Cycle:</span>
-						<span className="rounded-sm bg-slate-200 px-1.5 py-0.5 font-bold text-slate-800">
-							2026-W39
-						</span>
+						{isManager ? (
+							<button
+								type="button"
+								onClick={() => setIsPeriodModalOpen(true)}
+								className="rounded-md bg-slate-200 hover:bg-[#A41821] hover:text-white px-2 py-0.5 font-bold font-mono text-slate-800 transition cursor-pointer"
+								title="Click to manage survey cycles"
+							>
+								{activePeriod?.id || "2026-W39"} ⚙️
+							</button>
+						) : (
+							<span className="rounded-md bg-slate-200 px-1.5 py-0.5 font-bold font-mono text-slate-800">
+								{activePeriod?.id || "2026-W39"}
+							</span>
+						)}
 					</div>
 					<p className="mt-1 text-[11px] text-slate-400">
-						Target Benchmark: 95.0%
+						Benchmark Target: 95.0%
 					</p>
 				</div>
 			</aside>
+
+			{/* Render modal directly from sidebar for managers */}
+			{isManager && (
+				<PeriodManagementModal
+					isOpen={isPeriodModalOpen}
+					onClose={() => setIsPeriodModalOpen(false)}
+				/>
+			)}
 		</>
 	);
 };
