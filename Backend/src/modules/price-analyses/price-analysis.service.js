@@ -33,24 +33,43 @@ const ANALYSIS_INCLUDE_RELATIONS = {
 
 /**
  * Resolves the historical Queens benchmark price for a given product and survey period.
- * Selects benchmark effective on the survey period's startDate.
+ *
+ * Strategy:
+ *   1. Prefer the benchmark effective on the period's startDate (strict historical reference).
+ *   2. If none exists, fall back to the most recent benchmark that was effective
+ *      at any point during or before the period's endDate. This handles cases
+ *      where the benchmark was created after the period started — a common
+ *      operational pattern.
  */
 export const resolveBenchmarkForSurveyPeriod = async (
   productId,
   surveyPeriod,
 ) => {
-  const referenceDate = new Date(surveyPeriod.startDate);
+  const startDate = new Date(surveyPeriod.startDate);
+  const endDate = new Date(surveyPeriod.endDate);
 
-  const benchmark = await prisma.queensPrice.findFirst({
+  // 1. Strict historical: benchmark effective at start of period
+  let benchmark = await prisma.queensPrice.findFirst({
     where: {
       productId,
-      effectiveFrom: { lte: referenceDate },
-      OR: [{ effectiveTo: null }, { effectiveTo: { gt: referenceDate } }],
+      effectiveFrom: { lte: startDate },
+      OR: [{ effectiveTo: null }, { effectiveTo: { gt: startDate } }],
     },
     orderBy: { effectiveFrom: "desc" },
   });
 
-  return benchmark;
+  if (benchmark) return benchmark;
+
+  // 2. Fallback: most recent benchmark effective before the period ended
+  benchmark = await prisma.queensPrice.findFirst({
+    where: {
+      productId,
+      effectiveFrom: { lte: endDate },
+    },
+    orderBy: { effectiveFrom: "desc" },
+  });
+
+  return benchmark || null;
 };
 
 /**
@@ -88,7 +107,7 @@ export const calculateProductAnalysis = async ({
   if (!benchmark) {
     throw new ApiError(
       422,
-      `No applicable Queens benchmark price found for product [${product.name}] during survey period [${surveyPeriod.name}] (${surveyPeriod.startDate.toISOString()} - ${surveyPeriod.endDate.toISOString()})`,
+      `No Queens benchmark price found for product "${product.name}" (${productId}) covering survey period "${surveyPeriod.name}" (${surveyPeriod.startDate.toISOString()} → ${surveyPeriod.endDate.toISOString()}). Create a Queens price effective before ${surveyPeriod.startDate.toISOString().slice(0, 10)}.`,
     );
   }
 
@@ -306,9 +325,8 @@ export const listPriceAnalyses = async (query = {}) => {
     to,
   } = query;
 
-  // Sanitize and explicitly parse pagination parameters to ensure integer types for Prisma
   const page = Math.max(1, parseInt(rawPage, 10) || 1);
-  const limit = Math.min(100, Math.max(1, parseInt(rawLimit, 10) || 20));
+  const limit = Math.min(200, Math.max(1, parseInt(rawLimit, 10) || 20));
 
   const where = {};
 
@@ -316,8 +334,9 @@ export const listPriceAnalyses = async (query = {}) => {
   if (productId) where.productId = productId;
   if (action) where.action = action;
 
+  // Merge product-level filters instead of overwriting
   if (category) {
-    where.product = { category };
+    where.product = { ...(where.product || {}), category };
   }
 
   if (from || to) {
@@ -341,7 +360,7 @@ export const listPriceAnalyses = async (query = {}) => {
     prisma.priceAnalysis.findMany({
       where,
       skip,
-      take: limit, // Explicit Int prevents PrismaClientValidationError
+      take: limit,
       orderBy: { calculatedAt: "desc" },
       include: ANALYSIS_INCLUDE_RELATIONS,
     }),
@@ -351,12 +370,7 @@ export const listPriceAnalyses = async (query = {}) => {
 
   return {
     data: records.map(formatPriceAnalysisResponse),
-    meta: {
-      page,
-      limit,
-      total,
-      totalPages,
-    },
+    meta: { page, limit, total, totalPages },
   };
 };
 

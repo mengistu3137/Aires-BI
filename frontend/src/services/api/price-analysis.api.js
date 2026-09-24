@@ -5,6 +5,7 @@ import { apiClient } from "../client.js";
  */
 export const listPriceAnalysesRequest = async (params = {}) => {
   const response = await apiClient.get("/price-analysis", { params });
+  console.log("listPriceAnalysesRequest response", response);
   return response.data;
 };
 
@@ -18,7 +19,6 @@ export const getPriceAnalysisByIdRequest = async (id) => {
 
 /**
  * Get analysis for a specific product within a survey period
- * Returns null if not found (404 handled gracefully)
  */
 export const getProductSurveyPeriodAnalysisRequest = async ({ productId, surveyPeriodId }) => {
   try {
@@ -35,19 +35,36 @@ export const getProductSurveyPeriodAnalysisRequest = async ({ productId, surveyP
 };
 
 /**
- * Calculate or refresh analysis for a single product in a survey period
- * ADMIN & MANAGER only
+ * Calculate a single product's analysis.
+ * Single-product calls are quick — 60s is plenty.
  */
 export const calculateProductAnalysisRequest = async (payload) => {
-  const response = await apiClient.post("/price-analysis/calculate", payload);
+  const response = await apiClient.post("/price-analysis/calculate", payload, {
+    timeout: 60 * 1000,
+  });
   return response.data;
 };
 
 /**
- * Batch recalculate entire survey period
- * ADMIN & MANAGER only
+ * Batch recalculate an entire survey period.
+ *
+ * Body: { surveyPeriodId: string }
+ * Accepts either a raw string or `{ surveyPeriodId }`.
+ *
+ * Long-running: loops over every assigned product. Give it up to 5 minutes.
  */
-export const recalculateSurveyPeriodRequest = async (payload) => {
-  const response = await apiClient.post("/price-analysis/recalculate", payload);
+export const recalculateSurveyPeriodRequest = async (input) => {
+  const surveyPeriodId = typeof input === "string" ? input : input?.surveyPeriodId;
+
+  if (!surveyPeriodId) {
+    throw new Error("surveyPeriodId is required to recalculate analysis");
+  }
+
+  const response = await apiClient.post(
+    "/price-analysis/recalculate",
+    { surveyPeriodId },
+    { timeout: 5 * 60 * 1000 } // ← 5 minutes
+  );
+  console.log("response", response);
   return response.data;
 };
