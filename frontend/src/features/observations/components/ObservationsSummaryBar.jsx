@@ -1,9 +1,5 @@
 import React from "react";
 
-/**
- * Compact per-page summary of observations.
- * Counts only what's loaded on the current page.
- */
 export const ObservationsSummaryBar = ({ observations = [], meta = null }) => {
   const counts = {
     total: observations.length,

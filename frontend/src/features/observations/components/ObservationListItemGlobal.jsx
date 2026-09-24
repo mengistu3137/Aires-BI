@@ -5,13 +5,8 @@ import { ObservationAvailabilityBadge } from "./ObservationAvailabilityBadge.jsx
 import { ObservationReviewBadge } from "./ObservationReviewBadge.jsx";
 import { ObservationSyncBadge } from "./ObservationSyncBadge.jsx";
 
-/**
- * Mobile-optimized global list item.
- * Product · Store · Auditor · Availability · Price · Review · Sync · Captured
- */
 export const ObservationListItemGlobal = ({ observation }) => {
   const navigate = useNavigate();
-
   const product = observation.product;
   const store = observation.audit?.store;
   const auditor = observation.auditor;

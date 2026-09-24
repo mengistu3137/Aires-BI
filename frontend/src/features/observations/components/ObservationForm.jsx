@@ -1,21 +1,10 @@
-import React, { useEffect, useState } from "react";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
+import React, { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
-import { observationFormSchema } from "../schemas/observation.schema.js";
-import { AvailabilitySelector } from "./AvailabilitySelector.jsx";
-import { PriceInput } from "./PriceInput.jsx";
-import { EvidenceCapture } from "./EvidenceCapture.jsx";
+import { formatProductName } from "@/utils/formatters.js";
 import { generateClientObservationId } from "../utils/observation.utils.js";
 import { enqueueObservation, syncObservation } from "../offline/observationQueue.js";
 
-/**
- * Full observation entry form.
- * Handles local save + immediate sync attempt (falls back to queue if offline).
- * After a successful server sync, invalidates the audit observation queries
- * so the parent list refreshes without a page reload.
- */
 export const ObservationForm = ({
   auditId,
   product,
@@ -24,70 +13,37 @@ export const ObservationForm = ({
   onCancel,
 }) => {
   const queryClient = useQueryClient();
-  const [evidence, setEvidence] = useState(() => {
-    if (existingObservation?.evidencePhotoUrl) {
-      return {
-        url: existingObservation.evidencePhotoUrl,
-        previewUrl: existingObservation.evidencePhotoUrl,
-      };
-    }
-    return null;
-  });
+  const inputRef = useRef(null);
+  const [price, setPrice] = useState(
+    existingObservation?.price !== null && existingObservation?.price !== undefined
+      ? String(existingObservation.price)
+      : ""
+  );
+  const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const {
-    register,
-    handleSubmit,
-    watch,
-    setValue,
-    reset,
-    formState: { errors },
-  } = useForm({
-    resolver: zodResolver(observationFormSchema),
-    defaultValues: {
-      productId: product.id,
-      availability: existingObservation?.availability || "AVAILABLE",
-      price:
-        existingObservation?.price !== null && existingObservation?.price !== undefined
-          ? String(existingObservation.price)
-          : "",
-      observedUnit: existingObservation?.observedUnit || product.unit || "",
-      packageSize: existingObservation?.packageSize || "",
-      notes: existingObservation?.notes || "",
-    },
-  });
-
-  const availability = watch("availability");
-  const isAvailable = availability === "AVAILABLE";
-
-  // Clear price when availability changes away from AVAILABLE
   useEffect(() => {
-    if (!isAvailable) {
-      setValue("price", "");
-    }
-  }, [isAvailable, setValue]);
+    const timer = setTimeout(() => {
+      inputRef.current?.focus();
+      inputRef.current?.select?.();
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [product?.id]);
 
-  /**
-   * Invalidate every query the observation touches so the UI updates live.
-   */
   const invalidateObservationQueries = () => {
-    // Audit-scoped observation list (used by AuditObservationsPage)
     queryClient.invalidateQueries({
       queryKey: ["observations", "audit", auditId],
     });
-    // Global observation list (used by ObservationsPage)
     queryClient.invalidateQueries({ queryKey: ["observations", "list"] });
-    // Audit detail (contains observationsCount)
     queryClient.invalidateQueries({
       queryKey: ["audits", "detail", auditId],
     });
-    // Audit list (may show counts / progress)
     queryClient.invalidateQueries({ queryKey: ["audits"] });
-    // Dashboard KPIs (observation totals)
     queryClient.invalidateQueries({ queryKey: ["dashboard"] });
   };
 
-  const onSubmit = async (data) => {
+  const persist = async ({ availability, price: priceValue }) => {
+    if (isSubmitting) return;
     setIsSubmitting(true);
     try {
       const capturedAt = new Date().toISOString();
@@ -98,156 +54,157 @@ export const ObservationForm = ({
         clientObservationId,
         auditId,
         productId: product.id,
-        availability: data.availability,
-        price: data.availability === "AVAILABLE" && data.price !== null ? Number(data.price) : null,
-        observedUnit: data.observedUnit?.trim() || null,
-        packageSize: data.packageSize?.trim() || null,
+        availability,
+        price: priceValue,
+        observedUnit: existingObservation?.observedUnit || null,
+        packageSize: existingObservation?.packageSize || null,
         capturedAt,
-        evidencePhotoUrl: evidence?.url || null,
-        notes: data.notes?.trim() || null,
+        evidencePhotoUrl: existingObservation?.evidencePhotoUrl || null,
+        notes: existingObservation?.notes || null,
       };
 
-      // 1. Always persist locally first (offline-first)
       const queued = await enqueueObservation(payload);
 
-      // 2. Attempt immediate sync
-      const result = await syncObservation(queued);
+      syncObservation(queued).then((result) => {
+        if (result.permanent) {
+          toast.error(
+            result.error?.response?.data?.message || "This observation could not be saved"
+          );
+        }
+      });
 
-      if (result.success) {
-        toast.success("Observation saved");
-        invalidateObservationQueries();
-        reset();
-        onSaved?.();
-      } else if (result.permanent) {
-        toast.error(result.error?.response?.data?.message || "This observation could not be saved");
-        setIsSubmitting(false);
-        return;
-      } else {
-        // Saved offline — still invalidate so the queued observation
-        // appears in the list (its sync status will be PENDING).
-        toast.success("Observation saved offline");
-        invalidateObservationQueries();
-        reset();
-        onSaved?.();
-      }
-    } catch (error) {
-      console.error("[ObservationForm] Save failed:", error);
-      toast.error(error?.message || "Unable to save observation");
+      toast.success(
+        availability === "AVAILABLE"
+          ? `${formatProductName(product.name)}: ${Number(priceValue).toFixed(2)} ETB`
+          : `${formatProductName(product.name)}: ${availability.replace("_", " ")}`,
+        { id: "observation-toast", duration: 1500 }
+      );
+
+      invalidateObservationQueries();
+      onSaved?.();
+    } catch (err) {
+      console.error("[ObservationForm] Save failed:", err);
+      toast.error(err?.message || "Unable to save observation");
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  const handlePriceSubmit = (e) => {
+    e?.preventDefault();
+    setError("");
+
+    const numeric = parseFloat(price);
+    if (Number.isNaN(numeric) || numeric <= 0) {
+      setError("Enter a valid price greater than 0");
+      inputRef.current?.focus();
+      return;
+    }
+
+    persist({ availability: "AVAILABLE", price: numeric });
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      onCancel?.();
+    }
+  };
+
+  const handleOutOfStock = () => persist({ availability: "OUT_OF_STOCK", price: null });
+
+  const handleNotFound = () => persist({ availability: "NOT_FOUND", price: null });
+
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-      {/* Product header */}
-      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <h2 className="truncate text-base font-black text-slate-800">{product.name}</h2>
-            <p className="mt-0.5 truncate text-xs text-slate-500">
-              {product.category}
-              {product.sku && ` · SKU ${product.sku}`}
-              {product.unit && ` · ${product.unit}`}
-            </p>
+    <form
+      onSubmit={handlePriceSubmit}
+      className="rounded-2xl border-2 border-[#A41821] bg-white p-4 shadow-lg"
+    >
+      <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-3">
+        <div className="min-w-0 flex-1">
+          <span className="text-[10px] font-black uppercase tracking-wider text-[#A41821]">
+            Active item
+          </span>
+          <h3 className="mt-0.5 text-base font-bold leading-snug text-slate-900">
+            {formatProductName(product.name)}
+          </h3>
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 font-mono text-[11px] text-slate-500">
+            <span>CODE: {product.barcode || product.sku || product.id}</span>
+            <span>•</span>
+            <span>UNIT: {product.unit || "kg"}</span>
           </div>
-          {product.required && (
-            <span className="shrink-0 rounded-sm bg-amber-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[#FE7914]">
-              Required
-            </span>
-          )}
         </div>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+          title="Cancel (Esc)"
+          aria-label="Cancel"
+        >
+          ✕
+        </button>
       </div>
 
-      {/* Form body */}
-      <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
-        <AvailabilitySelector
-          value={availability}
-          onChange={(val) => setValue("availability", val, { shouldValidate: true })}
-          error={errors.availability?.message}
-        />
-
-        {isAvailable && (
-          <PriceInput
-            value={watch("price")}
-            onChange={(val) => setValue("price", val, { shouldValidate: true })}
-            error={errors.price?.message}
-          />
-        )}
-
-        {isAvailable && (
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                Observed unit
-              </label>
-              <input
-                type="text"
-                placeholder={product.unit || "kg"}
-                {...register("observedUnit")}
-                className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2 text-xs font-medium text-slate-800 placeholder:text-slate-400 focus:border-[#A41821] focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-[#A41821]"
-              />
-            </div>
-            <div>
-              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                Package size
-              </label>
-              <input
-                type="text"
-                placeholder="e.g. 500g"
-                {...register("packageSize")}
-                className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2 text-xs font-medium text-slate-800 placeholder:text-slate-400 focus:border-[#A41821] focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-[#A41821]"
-              />
-            </div>
-          </div>
-        )}
-
-        <EvidenceCapture
-          value={evidence}
-          onChange={setEvidence}
-          error={errors.evidencePhotoUrl?.message}
-        />
-
-        <div>
-          <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500">
-            Notes
-          </label>
-          <textarea
-            rows={2}
-            placeholder="Optional notes"
-            {...register("notes")}
-            className="mt-1.5 w-full resize-none rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2 text-xs font-medium text-slate-800 placeholder:text-slate-400 focus:border-[#A41821] focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-[#A41821]"
-          />
-          {errors.notes && (
-            <p className="mt-1 text-xs font-medium text-[#A41821]">{errors.notes.message}</p>
-          )}
-        </div>
-      </div>
-
-      {/* Actions */}
-      <div className="sticky bottom-0 -mx-4 border-t border-slate-200 bg-white px-4 py-3 sm:mx-0 sm:rounded-2xl sm:border sm:px-4">
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={onCancel}
+      <div className="mt-3">
+        <label className="mb-1 block text-xs font-bold text-slate-700">Competitor price</label>
+        <div className="relative">
+          <input
+            ref={inputRef}
+            type="text"
+            inputMode="decimal"
+            pattern="[0-9]*[.,]?[0-9]*"
+            autoComplete="off"
             disabled={isSubmitting}
-            className="flex-1 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="flex-1 rounded-xl bg-[#A41821] px-4 py-2.5 text-xs font-bold text-white transition hover:bg-[#7F1219] disabled:opacity-50"
-          >
-            {isSubmitting
-              ? "Saving..."
-              : existingObservation
-                ? "Update observation"
-                : "Save observation"}
-          </button>
+            value={price}
+            onChange={(e) => {
+              const val = e.target.value.replace(",", ".");
+              if (/^\d*\.?\d{0,2}$/.test(val)) {
+                setPrice(val);
+                setError("");
+              }
+            }}
+            onKeyDown={handleKeyDown}
+            placeholder="0.00"
+            className="w-full rounded-xl border border-slate-300 bg-slate-50/50 py-3.5 pl-4 pr-16 font-mono text-2xl font-black text-slate-900 placeholder:text-slate-300 outline-hidden transition focus:border-[#A41821] focus:bg-white focus:ring-2 focus:ring-[#A41821]/15"
+          />
+          <span className="absolute right-4 top-1/2 -translate-y-1/2 text-sm font-extrabold text-slate-500">
+            ETB
+          </span>
         </div>
+        {error && <p className="mt-1 text-xs font-semibold text-[#A41821]">{error}</p>}
       </div>
+
+      <button
+        type="submit"
+        disabled={isSubmitting || !price}
+        className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-[#A41821] py-3.5 text-sm font-bold text-white shadow-xs transition hover:bg-[#7F1219] active:scale-[0.99] disabled:opacity-40"
+      >
+        <span>Save & next</span>
+        <kbd className="rounded-md bg-white/20 px-2 py-0.5 font-mono text-xs font-bold">
+          ↵ Enter
+        </kbd>
+      </button>
+
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={handleOutOfStock}
+          disabled={isSubmitting}
+          className="flex-1 rounded-xl border border-amber-200 bg-amber-50/60 py-2 text-xs font-bold text-[#FE7914] transition hover:bg-amber-100/60 disabled:opacity-50"
+        >
+          OUT OF STOCK
+        </button>
+        <button
+          type="button"
+          onClick={handleNotFound}
+          disabled={isSubmitting}
+          className="flex-1 rounded-xl border border-slate-200 bg-slate-100 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-200 disabled:opacity-50"
+        >
+          NOT CARRIED
+        </button>
+      </div>
+
+      <p className="mt-3 text-center text-[10px] text-slate-400">Enter to save • Esc to cancel</p>
     </form>
   );
 };

@@ -4,26 +4,17 @@ const OPTIONS = [
   {
     value: "AVAILABLE",
     label: "Available",
-    color: {
-      active: "border-[#017C4D] bg-emerald-50 text-[#017C4D]",
-      idle: "border-slate-200 bg-white text-slate-600 hover:border-slate-300",
-    },
+    activeClasses: "border-[#017C4D] bg-emerald-50 text-[#017C4D]",
   },
   {
     value: "OUT_OF_STOCK",
     label: "Out of stock",
-    color: {
-      active: "border-[#A41821] bg-red-50 text-[#A41821]",
-      idle: "border-slate-200 bg-white text-slate-600 hover:border-slate-300",
-    },
+    activeClasses: "border-[#A41821] bg-red-50 text-[#A41821]",
   },
   {
     value: "NOT_FOUND",
     label: "Not found",
-    color: {
-      active: "border-slate-500 bg-slate-100 text-slate-800",
-      idle: "border-slate-200 bg-white text-slate-600 hover:border-slate-300",
-    },
+    activeClasses: "border-slate-500 bg-slate-100 text-slate-800",
   },
 ];
 
@@ -49,7 +40,9 @@ export const AvailabilitySelector = ({ value, onChange, disabled = false, error 
               disabled={disabled}
               onClick={() => onChange(option.value)}
               className={`flex min-h-[52px] items-center justify-center rounded-xl border px-2 py-2.5 text-xs font-semibold transition focus:outline-hidden focus:ring-2 focus:ring-[#A41821] focus:ring-offset-2 disabled:opacity-50 ${
-                isActive ? option.color.active : option.color.idle
+                isActive
+                  ? option.activeClasses
+                  : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
               }`}
             >
               {option.label}
