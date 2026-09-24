@@ -251,7 +251,7 @@ export const router = createBrowserRouter([
         ),
       },
 
-      // ── Alerts ──
+      /* // ── Alerts ──
       {
         path: "alerts",
         element: (
@@ -259,8 +259,8 @@ export const router = createBrowserRouter([
             <AlertsPage />
           </ProtectedRoute>
         ),
-      },
-      {
+      }, */
+     /*  {
         path: "alerts/:id",
         element: (
           <ProtectedRoute allowedRoles={["ADMIN", "MANAGER"]}>
@@ -268,7 +268,7 @@ export const router = createBrowserRouter([
           </ProtectedRoute>
         ),
       },
-
+ */
       // ── Users / Staff Management ──
       {
         path: "users",

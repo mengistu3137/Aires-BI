@@ -38,8 +38,13 @@ export const update = async (req, res, next) => {
 
 export const remove = async (req, res, next) => {
     try {
-        await storeService.remove(req.params.id);
-        res.status(200).json({ status: "success", message: "Store deleted" });
+        const result = await storeService.remove(req.params.id);
+        res.status(200).json({
+            status: "success",
+            message: result.message,
+            deactivated: Boolean(result.deactivated),
+            data: result.store || null,
+        });
     } catch (error) {
         next(error);
     }
