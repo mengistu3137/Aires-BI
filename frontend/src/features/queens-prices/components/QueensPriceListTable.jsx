@@ -2,6 +2,7 @@ import React from "react";
 import { useNavigate } from "react-router-dom";
 import { formatDate, formatPrice, getQueensPriceStatus } from "../utils/queens-price.utils.js";
 import { QueensPriceStatusBadge } from "./QueensPriceStatusBadge.jsx";
+import { formatProductName } from "@/utils/formatters.js";
 
 /**
  * Desktop table for Queens price records.
@@ -43,7 +44,9 @@ export const QueensPriceListTable = ({ prices = [] }) => {
                   onClick={() => navigate(`/queens-prices/${price.id}`)}
                 >
                   <td className="px-4 py-3">
-                    <div className="font-bold text-slate-800">{price.product?.name || "—"}</div>
+                    <div className="font-bold text-slate-800">
+                      {formatProductName(price.product?.name) || "—"}
+                    </div>
                     {price.product?.sku && (
                       <div className="text-[10px] text-slate-400">SKU {price.product.sku}</div>
                     )}

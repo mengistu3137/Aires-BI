@@ -2,6 +2,7 @@ import React from "react";
 import { useNavigate } from "react-router-dom";
 import { formatDateRange, formatPrice, getQueensPriceStatus } from "../utils/queens-price.utils.js";
 import { QueensPriceStatusBadge } from "./QueensPriceStatusBadge.jsx";
+import { formatProductName } from "@/utils/formatters.js";
 
 /**
  * Mobile list item for a Queens price record.
@@ -20,7 +21,7 @@ export const QueensPriceListItem = ({ price }) => {
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <p className="truncate text-sm font-bold text-slate-800">
-            {price.product?.name || "Unknown product"}
+            {formatProductName(price.product?.name) || "Unknown product"}
           </p>
           <QueensPriceStatusBadge status={status} />
         </div>

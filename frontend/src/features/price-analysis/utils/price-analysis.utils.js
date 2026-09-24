@@ -166,3 +166,19 @@ export const getAnalysisStatusLabel = (analysis) => {
   if (analysis.action === null) return "Not determined";
   return getActionLabel(analysis.action);
 };
+
+/**
+ * Format a captured-at timestamp (short form with time).
+ * Matches the observation module's convention.
+ */
+export const formatCapturedAt = (dateString) => {
+  if (!dateString) return "—";
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};

@@ -32,6 +32,104 @@ const ANALYSIS_INCLUDE_RELATIONS = {
 };
 
 /**
+ * Fetches APPROVED competitor prices for each (productId, surveyPeriodId)
+ * pair in the given analysis records. Returns a Map keyed by productId.
+ *
+ * Only observations with availability AVAILABLE, price > 0, and reviewStatus
+ * APPROVED are included — matching the same filter that feeds the analysis
+ * calculation.
+ *
+ * @param {Array<{ productId: string, surveyPeriodId: string }>} analyses
+ * @returns {Promise<Map<string, Array<{ storeName: string, storeId: string, price: number, capturedAt: Date }>>>}
+ */
+const fetchApprovedCompetitorPrices = async (analyses) => {
+  const productIds = [...new Set(analyses.map((a) => a.productId))];
+  const surveyPeriodId = analyses[0]?.surveyPeriodId;
+
+  if (productIds.length === 0 || !surveyPeriodId) {
+    return new Map();
+  }
+
+  const observations = await prisma.priceObservation.findMany({
+    where: {
+      productId: { in: productIds },
+      audit: { surveyPeriodId },
+      availability: "AVAILABLE",
+      price: { not: null, gt: 0 },
+      reviewStatus: "APPROVED",
+    },
+    select: {
+      id: true,
+      productId: true,
+      price: true,
+      capturedAt: true,
+      audit: {
+        select: {
+          storeId: true,
+          store: {
+            select: {
+              id: true,
+              name: true,
+              area: true,
+              competitor: {
+                select: { id: true, name: true },
+              },
+            },
+          },
+        },
+      },
+    },
+    orderBy: { capturedAt: "desc" },
+  });
+
+  // Group by productId. If a product has multiple approved observations from
+  // the same store, keep the latest one (the query is already sorted desc).
+  const byProduct = new Map();
+  const seenKeys = new Set();
+
+  for (const obs of observations) {
+    if (!byProduct.has(obs.productId)) {
+      byProduct.set(obs.productId, []);
+    }
+    const storeId = obs.audit?.storeId;
+    const dedupeKey = `${obs.productId}::${storeId}`;
+    if (seenKeys.has(dedupeKey)) continue;
+    seenKeys.add(dedupeKey);
+
+    byProduct.get(obs.productId).push({
+      observationId: obs.id,
+      storeId,
+      storeName: obs.audit?.store?.name || "Unknown store",
+      competitorName: obs.audit?.store?.competitor?.name || null,
+      area: obs.audit?.store?.area || null,
+      price: Number(obs.price),
+      capturedAt: obs.capturedAt,
+    });
+  }
+
+  // Sort each product's competitor list by store name for consistent display
+  for (const [, list] of byProduct) {
+    list.sort((a, b) => (a.storeName || "").localeCompare(b.storeName || ""));
+  }
+
+  return byProduct;
+};
+
+/**
+ * Formats an analysis record and attaches the approved competitor prices
+ * for that product/period.
+ */
+const formatAnalysisWithCompetitors = (analysis, competitorMap) => {
+  const base = formatPriceAnalysisResponse(analysis);
+  const competitors = competitorMap.get(analysis.productId) || [];
+
+  return {
+    ...base,
+    competitorPrices: competitors,
+  };
+};
+
+/**
  * Resolves the historical Queens benchmark price for a given product and survey period.
  *
  * Strategy:
@@ -280,7 +378,8 @@ export const getPriceAnalysisById = async (id) => {
     throw new ApiError(404, "Price Analysis record not found");
   }
 
-  return formatPriceAnalysisResponse(analysis);
+  const competitorMap = await fetchApprovedCompetitorPrices([analysis]);
+  return formatAnalysisWithCompetitors(analysis, competitorMap);
 };
 
 /**
@@ -292,10 +391,7 @@ export const getProductSurveyPeriodAnalysis = async (
 ) => {
   const analysis = await prisma.priceAnalysis.findUnique({
     where: {
-      productId_surveyPeriodId: {
-        productId,
-        surveyPeriodId,
-      },
+      productId_surveyPeriodId: { productId, surveyPeriodId },
     },
     include: ANALYSIS_INCLUDE_RELATIONS,
   });
@@ -307,7 +403,8 @@ export const getProductSurveyPeriodAnalysis = async (
     );
   }
 
-  return formatPriceAnalysisResponse(analysis);
+  const competitorMap = await fetchApprovedCompetitorPrices([analysis]);
+  return formatAnalysisWithCompetitors(analysis, competitorMap);
 };
 
 /**
@@ -334,16 +431,13 @@ export const listPriceAnalyses = async (query = {}) => {
   if (productId) where.productId = productId;
   if (action) where.action = action;
 
-  // Merge product-level filters instead of overwriting
   if (category) {
     where.product = { ...(where.product || {}), category };
   }
 
   if (from || to) {
     where.calculatedAt = {};
-    if (from) {
-      where.calculatedAt.gte = new Date(from);
-    }
+    if (from) where.calculatedAt.gte = new Date(from);
     if (to) {
       const toDate = new Date(to);
       if (typeof to === "string" && /^\d{4}-\d{2}-\d{2}$/.test(to)) {
@@ -366,10 +460,13 @@ export const listPriceAnalyses = async (query = {}) => {
     }),
   ]);
 
+  // Attach approved competitor prices for all analyses on this page
+  const competitorMap = await fetchApprovedCompetitorPrices(records);
+
   const totalPages = Math.ceil(total / limit) || 1;
 
   return {
-    data: records.map(formatPriceAnalysisResponse),
+    data: records.map((r) => formatAnalysisWithCompetitors(r, competitorMap)),
     meta: { page, limit, total, totalPages },
   };
 };

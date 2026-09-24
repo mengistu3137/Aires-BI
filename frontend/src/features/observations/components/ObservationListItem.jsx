@@ -5,6 +5,7 @@ import {
   formatPrice,
 } from "../utils/observation.utils.js";
 import { ObservationSyncBadge } from "./ObservationSyncBadge.jsx";
+import { formatProductName } from "@/utils/formatters.js";
 
 export const ObservationListItem = ({ product, observation, onSelect }) => {
   const isObserved = Boolean(observation);
@@ -44,7 +45,9 @@ export const ObservationListItem = ({ product, observation, onSelect }) => {
 
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <p className="truncate text-sm font-bold text-slate-800">{product.name}</p>
+          <p className="truncate text-sm font-bold text-slate-800">
+            {formatProductName(product.name)}
+          </p>
           {product.required && !isObserved && (
             <span className="shrink-0 rounded-sm bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[#FE7914]">
               Required

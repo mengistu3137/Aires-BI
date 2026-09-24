@@ -2,6 +2,7 @@ import React from "react";
 import { useNavigate } from "react-router-dom";
 import { formatDate, formatIndex, formatPrice } from "../utils/price-analysis.utils.js";
 import { PriceAnalysisActionBadge } from "./PriceAnalysisActionBadge.jsx";
+import { formatProductName } from "@/utils/formatters.js";
 
 /**
  * Desktop table for price analysis records.
@@ -41,7 +42,9 @@ export const PriceAnalysisListTable = ({ analyses = [] }) => {
                 onClick={() => navigate(`/price-analysis/${analysis.id}`)}
               >
                 <td className="px-4 py-3">
-                  <div className="font-bold text-slate-800">{analysis.product?.name || "—"}</div>
+                  <div className="font-bold text-slate-800">
+                    {formatProductName(analysis.product?.name) || "—"}
+                  </div>
                   {analysis.product?.sku && (
                     <div className="text-[10px] text-slate-400">SKU {analysis.product.sku}</div>
                   )}
