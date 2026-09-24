@@ -330,19 +330,17 @@ export const listAuditObservations = async ({ auditId, user, query = {} }) => {
  */
 export const listAllObservations = async ({ user, query = {} }) => {
   const {
-    page: rawPage = 1,
-    limit: rawLimit = 20,
-    auditId,
+    page = 1,
+    limit = 20,
     productId,
     availability,
     reviewStatus,
     syncStatus,
+    storeId, // ← NEW
+    surveyPeriodId, // ← NEW
     from,
     to,
   } = query;
-
-  const page = Math.max(1, parseInt(rawPage, 10) || 1);
-  const limit = Math.min(100, Math.max(1, parseInt(rawLimit, 10) || 20));
 
   const where = {};
 
@@ -350,47 +348,54 @@ export const listAllObservations = async ({ user, query = {} }) => {
     where.auditorId = user.id;
   }
 
-  if (auditId) where.auditId = auditId;
   if (productId) where.productId = productId;
   if (availability) where.availability = availability;
   if (reviewStatus) where.reviewStatus = reviewStatus;
   if (syncStatus) where.syncStatus = syncStatus;
+
+  // ← NEW: scope by store and survey period via the related Audit
+  if (storeId) {
+    where.audit = { ...(where.audit || {}), storeId };
+  }
+  if (surveyPeriodId) {
+    where.audit = {
+      ...(where.audit || {}),
+      surveyPeriodId,
+    };
+  }
 
   if (from || to) {
     where.capturedAt = {};
     if (from) where.capturedAt.gte = new Date(from);
     if (to) {
       const toDate = new Date(to);
-      if (typeof to === "string" && /^\d{4}-\d{2}-\d{2}$/.test(to)) {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(to)) {
         toDate.setUTCHours(23, 59, 59, 999);
       }
       where.capturedAt.lte = toDate;
     }
   }
 
-  const skip = (page - 1) * limit;
+  const safePage = Math.max(1, parseInt(page, 10) || 1);
+  const safeLimit = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+  const skip = (safePage - 1) * safeLimit;
 
   const [total, observations] = await prisma.$transaction([
     prisma.priceObservation.count({ where }),
     prisma.priceObservation.findMany({
       where,
       skip,
-      take: limit,
+      take: safeLimit,
       orderBy: { capturedAt: "desc" },
       include: OBSERVATION_INCLUDE_RELATIONS,
     }),
   ]);
 
-  const totalPages = Math.ceil(total / limit) || 1;
+  const totalPages = Math.ceil(total / safeLimit) || 1;
 
   return {
     data: observations.map(formatObservationResponse),
-    meta: {
-      page,
-      limit,
-      total,
-      totalPages,
-    },
+    meta: { page: safePage, limit: safeLimit, total, totalPages },
   };
 };
 

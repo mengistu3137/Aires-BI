@@ -108,13 +108,14 @@ export const requestReviewObservationSchema = z.object({
 export const listObservationsQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().positive().max(100).default(20),
-  auditId: z.string().uuid().optional(),
   productId: z.string().trim().optional(),
   availability: z.enum(["AVAILABLE", "OUT_OF_STOCK", "NOT_FOUND"]).optional(),
   reviewStatus: z
     .enum(["PENDING", "APPROVED", "REJECTED", "NEEDS_REVIEW"])
     .optional(),
   syncStatus: z.enum(["PENDING", "SYNCING", "SYNCED", "FAILED"]).optional(),
+  storeId: z.string().trim().optional(), // ← NEW
+  surveyPeriodId: z.string().trim().optional(), // ← NEW
   from: z.string().optional(),
   to: z.string().optional(),
 });
