@@ -308,6 +308,7 @@ export const listQueensPrices = async (query = {}) => {
     page: rawPage = 1,
     limit: rawLimit = 20,
     productId,
+    search,
     current,
     from,
     to,
@@ -322,25 +323,34 @@ export const listQueensPrices = async (query = {}) => {
     where.productId = productId;
   }
 
+  // Cross-page search across Product Name, SKU, Barcode, and Category
+  if (search && search.trim()) {
+    const term = search.trim();
+    where.product = {
+      OR: [
+        { name: { contains: term, mode: "insensitive" } },
+        { sku: { contains: term, mode: "insensitive" } },
+        { barcode: { contains: term, mode: "insensitive" } },
+        { category: { contains: term, mode: "insensitive" } },
+      ],
+    };
+  }
+
   const now = new Date();
   const isCurrentFilter = current === true || current === "true";
 
   if (isCurrentFilter) {
     where.effectiveFrom = { lte: now };
     where.OR = [{ effectiveTo: null }, { effectiveTo: { gt: now } }];
-  } else {
-    if (from || to) {
-      where.effectiveFrom = {};
-      if (from) {
-        where.effectiveFrom.gte = new Date(from);
+  } else if (from || to) {
+    where.effectiveFrom = {};
+    if (from) where.effectiveFrom.gte = new Date(from);
+    if (to) {
+      const toDate = new Date(to);
+      if (typeof to === "string" && /^\d{4}-\d{2}-\d{2}$/.test(to)) {
+        toDate.setUTCHours(23, 59, 59, 999);
       }
-      if (to) {
-        const toDate = new Date(to);
-        if (typeof to === "string" && /^\d{4}-\d{2}-\d{2}$/.test(to)) {
-          toDate.setUTCHours(23, 59, 59, 999);
-        }
-        where.effectiveFrom.lte = toDate;
-      }
+      where.effectiveFrom.lte = toDate;
     }
   }
 

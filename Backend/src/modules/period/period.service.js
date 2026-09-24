@@ -38,15 +38,20 @@ export const getById = async (id) => {
 };
 
 export const create = async (payload) => {
-    const exists = await prisma.surveyPeriod.findUnique({ where: { id: payload.id } });
+    const exists = await prisma.surveyPeriod.findUnique({
+        where: { id: payload.id },
+    });
     if (exists) {
         throw new ApiError(409, `Survey period '${payload.id}' already exists.`);
     }
 
-    // If opening, ensure previous open periods are safely managed if desired
+    const periodName = payload.name || payload.description || `Survey Cycle ${payload.id}`;
+
     return prisma.surveyPeriod.create({
         data: {
-            ...payload,
+            id: payload.id,
+            name: periodName,
+            status: payload.status || "OPEN",
             startDate: new Date(payload.startDate),
             endDate: new Date(payload.endDate),
         },

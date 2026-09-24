@@ -3,18 +3,24 @@ import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Header } from "@/components/Header.jsx";
 import { Sidebar } from "@/components/Sidebar.jsx";
 import { PwaInstallBanner } from "@/pwa/PwaInstallBanner.jsx";
-import { NAVIGATION, resolveActiveNavigationId } from "@/app/config/navigation.js";
+import { resolveActiveNavigationId, NAVIGATION } from "@/app/config/navigation.js";
 
 export const MainLayout = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
 
-  const activeTab = resolveActiveNavigationId(location.pathname);
+  // Resolve active tab using your navigation config
+  const activeTab = resolveActiveNavigationId(location.pathname) || "dashboard";
 
   const handleSelectTab = (tabId) => {
-    const item = NAVIGATION.find((n) => n.id === tabId);
-    if (item) navigate(item.path);
+    // Look up item path in NAVIGATION
+    const navItem = NAVIGATION.find((item) => item.id === tabId);
+    if (navItem?.path) {
+      navigate(navItem.path);
+    } else {
+      navigate(`/${tabId}`);
+    }
   };
 
   return (
@@ -25,12 +31,14 @@ export const MainLayout = () => {
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
       />
-      <div className="flex flex-1 flex-col overflow-x-hidden">
+
+      <div className="flex flex-1 flex-col overflow-x-hidden min-w-0">
         <Header onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
         <main className="flex-1 p-4 sm:p-6 lg:p-8">
           <Outlet />
         </main>
       </div>
+
       <PwaInstallBanner />
     </div>
   );

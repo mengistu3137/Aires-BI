@@ -10,27 +10,32 @@ import { StoresPage } from "@/features/stores/pages/StoresPage.jsx";
 import { ProductsPage } from "@/features/products/pages/ProductsPage.jsx";
 import { useAuth } from "@/hooks/useAuth.js";
 
+// BI Dashboard Component Import
+import { Dashboard } from "@/features/bi/pages/Dashboard.jsx";
+import { DashboardPage } from "@/features/dashboard/pages/DashboardPage.jsx";
+
+// Audits & Observations Components
 import { AuditListPage } from "@/features/audits/pages/AuditListPage.jsx";
 import { AuditDetailPage } from "@/features/audits/pages/AuditDetailPage.jsx";
 import { AuditHistoryPage } from "@/features/audits/pages/AuditHistoryPage.jsx";
-
 import { AuditObservationsPage } from "@/features/observations/pages/AuditObservationsPage.jsx";
 import { ObservationDetailPage } from "@/features/observations/pages/ObservationDetailPage.jsx";
+import { ObservationsPage } from "@/features/observations/pages/ObservationsPage.jsx";
 
+// Queens Prices Components
 import { QueensPricesPage } from "@/features/queens-prices/pages/QueensPricesPage.jsx";
 import { CreateQueensPricePage } from "@/features/queens-prices/pages/CreateQueensPricePage.jsx";
 import { EditQueensPricePage } from "@/features/queens-prices/pages/EditQueensPricePage.jsx";
 import { QueensPriceDetailsPage } from "@/features/queens-prices/pages/QueensPriceDetailsPage.jsx";
 import { ProductQueensPricesPage } from "@/features/queens-prices/pages/ProductQueensPricesPage.jsx";
 
+// Price Analysis Components
 import { PriceAnalysisPage } from "@/features/price-analysis/pages/PriceAnalysisPage.jsx";
 import { PriceAnalysisDetailPage } from "@/features/price-analysis/pages/PriceAnalysisDetailPage.jsx";
 
+// Alerts Components
 import { AlertsPage } from "@/features/alerts/pages/AlertsPage.jsx";
 import { AlertDetailPage } from "@/features/alerts/pages/AlertDetailPage.jsx";
-import { ObservationsPage } from "@/features/observations/pages/ObservationsPage.jsx";
-
-import { DashboardPage } from "@/features/dashboard/pages/DashboardPage.jsx";
 
 const ProtectedRoute = ({ children, allowedRoles }) => {
   const { isAuthenticated, role } = useAuth();
@@ -40,11 +45,20 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
   }
 
   if (allowedRoles && !allowedRoles.includes(role)) {
-    // Fall back to Dashboard — the safest neutral destination for all roles
-    return <Navigate to="/dashboard" replace />;
+    // Redirect field auditors to survey home, everyone else to dashboard
+    return <Navigate to={role === "FIELD_AUDITOR" ? "/survey" : "/dashboard"} replace />;
   }
 
   return children;
+};
+
+// Role-based default landing resolver
+const DefaultRedirect = () => {
+  const { role } = useAuth();
+  if (role === "FIELD_AUDITOR") {
+    return <Navigate to="/survey" replace />;
+  }
+  return <Navigate to="/dashboard" replace />;
 };
 
 export const router = createBrowserRouter([
@@ -62,10 +76,10 @@ export const router = createBrowserRouter([
     children: [
       {
         index: true,
-        element: <Navigate to="/dashboard" replace />,
+        element: <DefaultRedirect />,
       },
 
-      // ── Dashboard ──
+      // ── Dashboards ──
       {
         path: "dashboard",
         element: (
@@ -74,10 +88,26 @@ export const router = createBrowserRouter([
           </ProtectedRoute>
         ),
       },
+      {
+        path: "bi-dashboard",
+        element: (
+          <ProtectedRoute allowedRoles={["ADMIN", "MANAGER"]}>
+            <Dashboard />
+          </ProtectedRoute>
+        ),
+      },
 
-      // ── Field data collection ──
+      // ── Field Data Collection & Rapid Audits ──
       {
         path: "survey",
+        element: (
+          <ProtectedRoute allowedRoles={["ADMIN", "MANAGER", "FIELD_AUDITOR"]}>
+            <SurveyorHomePage />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: "survey/audit/:assignmentId",
         element: (
           <ProtectedRoute allowedRoles={["ADMIN", "MANAGER", "FIELD_AUDITOR"]}>
             <Survey />
@@ -87,13 +117,13 @@ export const router = createBrowserRouter([
       {
         path: "progress",
         element: (
-          <ProtectedRoute allowedRoles={["ADMIN", "MANAGER", "FIELD_AUDITOR"]}>
+          <ProtectedRoute allowedRoles={["ADMIN", "MANAGER"]}>
             <SurveyProgress />
           </ProtectedRoute>
         ),
       },
 
-      // ── Master data ──
+      // ── Master Data ──
       {
         path: "products",
         element: (
@@ -111,7 +141,7 @@ export const router = createBrowserRouter([
         ),
       },
 
-      // ── Audits ──
+      // ── Audits & Observations ──
       {
         path: "audits",
         element: (
@@ -239,7 +269,7 @@ export const router = createBrowserRouter([
         ),
       },
 
-      // ── Users / Staff (Admin only) ──
+      // ── Users / Staff Management ──
       {
         path: "users",
         element: (
