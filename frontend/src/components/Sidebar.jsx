@@ -79,11 +79,11 @@ export const Sidebar = ({ activeTab, onSelectTab, isOpen, onClose }) => {
 								className="rounded-md bg-slate-200 hover:bg-[#A41821] hover:text-white px-2 py-0.5 font-bold font-mono text-slate-800 transition cursor-pointer"
 								title="Click to manage survey cycles"
 							>
-								{activePeriod?.id || "2026-W39"} ⚙️
+								{activePeriod?.name || "2026-W39"} ⚙️
 							</button>
 						) : (
 							<span className="rounded-md bg-slate-200 px-1.5 py-0.5 font-bold font-mono text-slate-800">
-								{activePeriod?.id || "2026-W39"}
+								{activePeriod?.name || "2026-W39"}
 							</span>
 						)}
 					</div>
