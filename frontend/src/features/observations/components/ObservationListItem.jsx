@@ -10,8 +10,6 @@ export const ObservationListItem = ({ product, observation, onSelect }) => {
   const isObserved = Boolean(observation);
   const colors = observation ? getAvailabilityColors(observation.availability) : null;
 
-  // API returns sync status nested at `observation.sync.status`.
-  // Fall back to flat `syncStatus` for any legacy shape.
   const syncStatus = observation?.sync?.status || observation?.syncStatus || "SYNCED";
 
   return (

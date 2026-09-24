@@ -5,9 +5,6 @@ import { ObservationAvailabilityBadge } from "./ObservationAvailabilityBadge.jsx
 import { ObservationReviewBadge } from "./ObservationReviewBadge.jsx";
 import { ObservationSyncBadge } from "./ObservationSyncBadge.jsx";
 
-/**
- * Desktop table for the global observations list.
- */
 export const ObservationListTable = ({ observations = [] }) => {
   const navigate = useNavigate();
 

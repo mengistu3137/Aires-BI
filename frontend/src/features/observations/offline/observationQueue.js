@@ -152,14 +152,14 @@ export const syncObservation = async (observation) => {
 
     await removeQueuedObservation(observation.id);
 
-    // Notify UI subscribers so React Query can invalidate relevant keys.
     emitObservationsChanged({
       auditId: observation.auditId,
       observationId: response?.data?.id,
       status: "SYNCED",
     });
 
-    return { success: true, data: response.data };
+    // Return the formatted observation so the page can write it to cache
+    return { success: true, data: response?.data };
   } catch (error) {
     const status = error?.response?.status;
     const isPermanent = status && status >= 400 && status < 500 && status !== 408 && status !== 429;

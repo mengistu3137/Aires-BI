@@ -38,16 +38,6 @@ export const AuditListPage = () => {
             Field audit visits and price collection records across survey periods.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => navigate("/progress")}
-          className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#A41821] px-3.5 py-2.5 text-xs font-bold text-white transition hover:bg-[#7F1219]"
-        >
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          New audit
-        </button>
       </div>
 
       {/* Summary */}

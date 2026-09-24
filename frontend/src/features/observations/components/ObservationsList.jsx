@@ -5,7 +5,6 @@ import { getLatestObservationForProduct } from "../utils/observation.utils.js";
 export const ObservationsList = ({ products = [], observations = [], onSelectProduct }) => {
   const [search, setSearch] = useState("");
 
-  // Merge products with their latest observation
   const mergedItems = useMemo(() => {
     return products.map((product) => ({
       product,
@@ -28,7 +27,6 @@ export const ObservationsList = ({ products = [], observations = [], onSelectPro
 
   return (
     <div>
-      {/* Search */}
       {products.length > 6 && (
         <div className="relative mb-3">
           <input
@@ -54,7 +52,6 @@ export const ObservationsList = ({ products = [], observations = [], onSelectPro
         </div>
       )}
 
-      {/* List */}
       {filteredItems.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-200 bg-white px-4 py-8 text-center">
           <p className="text-xs font-medium text-slate-400">No products match your search</p>

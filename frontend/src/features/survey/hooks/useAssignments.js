@@ -1,73 +1,106 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-    getMyAssignmentsRequest,
-    getAllAssignmentsRequest,
-    createAssignmentRequest,
-    updateAssignmentStatusRequest,
+  getMyAssignmentsRequest,
+  getAllAssignmentsRequest,
+  createAssignmentRequest,
+  updateAssignmentRequest,
+  updateAssignmentStatusRequest,
+  deleteAssignmentRequest,
 } from "@/services/api/assignment.api.js";
 import { useAuth } from "@/hooks/useAuth.js";
 import toast from "react-hot-toast";
 
 /**
- * Hook for fetching and managing survey assignments based on user role
+ * Fetch assignments. Role-aware:
+ *   - FIELD_AUDITOR → GET /assignments/mine
+ *   - ADMIN/MANAGER → GET /assignments with filters
  */
 export const useAssignments = (filters = {}) => {
-    const queryClient = useQueryClient();
-    const { isAuditor } = useAuth();
+  const { isAuditor } = useAuth();
 
-    // 1. Query: Auditors fetch /mine, Managers fetch /
-    const queryKey = isAuditor ? ["assignments", "mine"] : ["assignments", "all", filters];
+  const queryKey = isAuditor ? ["assignments", "mine"] : ["assignments", "all", filters];
 
-    const assignmentsQuery = useQuery({
-        queryKey,
-        queryFn: async () => {
-            try {
-                if (isAuditor) {
-                    const res = await getMyAssignmentsRequest();
-                    return res?.data?.assignments || [];
-                }
-                const res = await getAllAssignmentsRequest(filters);
-                return res?.data?.assignments || [];
-            } catch (err) {
-                console.warn("Failed to fetch assignments from API:", err.message);
-                return [];
-            }
-        },
-        staleTime: 60 * 1000,
-    });
+  return useQuery({
+    queryKey,
+    queryFn: async () => {
+      if (isAuditor) {
+        const res = await getMyAssignmentsRequest();
+        return res?.data?.assignments || [];
+      }
+      const res = await getAllAssignmentsRequest(filters);
+      return res?.data?.assignments || [];
+    },
+    staleTime: 60 * 1000,
+  });
+};
 
-    // 2. Mutation: Dispatch new assignment (Manager/Admin)
-    const createAssignmentMutation = useMutation({
-        mutationFn: createAssignmentRequest,
-        onSuccess: () => {
-            toast.success("Assignment dispatched successfully");
-            queryClient.invalidateQueries({ queryKey: ["assignments"] });
-        },
-        onError: (err) => {
-            toast.error(err.message || "Failed to create assignment");
-        },
-    });
+const invalidate = (queryClient) => {
+  queryClient.invalidateQueries({ queryKey: ["assignments"] });
+  queryClient.invalidateQueries({ queryKey: ["audits"] });
+  queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+};
 
-    // 3. Mutation: Update assignment status
-    const updateStatusMutation = useMutation({
-        mutationFn: ({ id, status }) => updateAssignmentStatusRequest(id, status),
-        onSuccess: () => {
-            toast.success("Assignment status updated");
-            queryClient.invalidateQueries({ queryKey: ["assignments"] });
-        },
-        onError: (err) => {
-            toast.error(err.message || "Failed to update assignment status");
-        },
-    });
+/**
+ * Dispatch a new assignment (Admin / Manager).
+ */
+export const useCreateAssignment = () => {
+  const queryClient = useQueryClient();
 
-    return {
-        assignments: assignmentsQuery.data || [],
-        isLoading: assignmentsQuery.isLoading,
-        isError: assignmentsQuery.isError,
-        createAssignment: createAssignmentMutation.mutateAsync,
-        isCreating: createAssignmentMutation.isPending,
-        updateStatus: updateStatusMutation.mutateAsync,
-        isUpdating: updateStatusMutation.isPending,
-        refetch: assignmentsQuery.refetch,
-    };
+  return useMutation({
+    mutationFn: createAssignmentRequest,
+    onSuccess: () => {
+      toast.success("Assignment dispatched");
+      invalidate(queryClient);
+    },
+    meta: { skipGlobalToast: true },
+  });
+};
+
+/**
+ * Update an existing assignment (Admin / Manager).
+ */
+export const useUpdateAssignment = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: updateAssignmentRequest,
+    onSuccess: () => {
+      toast.success("Assignment updated");
+      invalidate(queryClient);
+    },
+    meta: { skipGlobalToast: true },
+  });
+};
+
+/**
+ * Update only assignment status (field auditor or manager).
+ */
+export const useUpdateAssignmentStatus = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ id, status }) => updateAssignmentStatusRequest(id, status),
+    onSuccess: () => {
+      toast.success("Assignment status updated");
+      invalidate(queryClient);
+    },
+    meta: { skipGlobalToast: true },
+  });
+};
+
+/**
+ * Delete an assignment (Admin / Manager).
+ * Only allowed when no visit has started.
+ */
+export const useDeleteAssignment = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: deleteAssignmentRequest,
+    onSuccess: () => {
+      toast.success("Assignment deleted");
+      invalidate(queryClient);
+    },
+    meta: { skipGlobalToast: true },
+  });
 };
