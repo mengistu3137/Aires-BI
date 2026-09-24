@@ -11,6 +11,7 @@ import { PriceAnalysisMobileList } from "../components/PriceAnalysisMobileList.j
 import { PriceAnalysisEmptyState } from "../components/PriceAnalysisEmptyState.jsx";
 import { PriceAnalysisSummaryBar } from "../components/PriceAnalysisSummaryBar.jsx";
 import { RecalculateConfirmModal } from "../components/RecalculateConfirmModal.jsx";
+import { exportPriceAnalysisExcelRequest } from "@/services/api/price-analysis.api.js";
 
 export const PriceAnalysisPage = () => {
   const navigate = useNavigate();
@@ -20,6 +21,7 @@ export const PriceAnalysisPage = () => {
   const [search, setSearch] = useState("");
   const [showRecalcModal, setShowRecalcModal] = useState(false);
   const [recalcSummary, setRecalcSummary] = useState(null);
+  const [isExporting, setIsExporting] = useState(false);
 
   const surveyPeriodId = searchParams.get("surveyPeriodId") || "";
   const action = searchParams.get("action") || "";
@@ -109,6 +111,36 @@ export const PriceAnalysisPage = () => {
     }
   };
 
+  const handleExport = async () => {
+    setIsExporting(true);
+    try {
+      const { blob, filename } = await exportPriceAnalysisExcelRequest({
+        surveyPeriodId: surveyPeriodId || undefined,
+      });
+
+      // Trigger the browser download
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+      toast.success("Export ready");
+    } catch (err) {
+      console.error("[Export] Failed:", err);
+      toast.error(
+        err?.response?.status === 404
+          ? "No records to export for the selected filter"
+          : err?.message || "Failed to export"
+      );
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -119,15 +151,43 @@ export const PriceAnalysisPage = () => {
             Compare Queens benchmark prices with competitor prices across survey periods.
           </p>
         </div>
-        {isManager && surveyPeriodId && (
-          <button
-            type="button"
-            onClick={() => setShowRecalcModal(true)}
-            className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs font-bold text-slate-700 transition hover:bg-slate-50"
-          >
-            Recalculate analysis
-          </button>
-        )}
+
+        <div className="flex flex-wrap items-center gap-2">
+          {isManager && (
+            <button
+              type="button"
+              onClick={handleExport}
+              disabled={isExporting}
+              className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+            >
+              <svg
+                className="h-4 w-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                />
+              </svg>
+              {isExporting ? "Exporting..." : "Export to Excel"}
+            </button>
+          )}
+
+          {isManager && surveyPeriodId && (
+            <button
+              type="button"
+              onClick={() => setShowRecalcModal(true)}
+              className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs font-bold text-slate-700 transition hover:bg-slate-50"
+            >
+              Recalculate analysis
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Filters */}
