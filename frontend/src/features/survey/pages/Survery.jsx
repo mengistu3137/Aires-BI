@@ -1,26 +1,41 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { useSurveySessionStore } from "@/stores/survey/surveySession.store.js";
-import { useAssignments } from "../hooks/useAssignments.js";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth.js";
+import { useAssignments } from "../hooks/useAssignments.js";
+import { useSurveySessionStore } from "@/stores/survey/surveySession.store.js";
 import { useSurveyStore } from "@/stores/survey/survey.store.js";
+
+// Developer 2's API Clients
+import {
+  createAuditRequest,
+  startAuditRequest,
+  completeAuditRequest,
+} from "@/services/api/audit.api.js";
+import {
+  createObservationRequest,
+  listAuditObservationsRequest,
+} from "@/services/api/observations.api.js";
+
+// Components
 import { FastProductSearch } from "../components/FastProductSearch.jsx";
 import { RapidPriceInput } from "../components/RapidPriceInput.jsx";
 import { SyncStatusBanner } from "../components/SyncStatusBanner.jsx";
 import { ObservationAuditDrawer } from "../components/ObservationAuditDrawer.jsx";
-import { calculateDistanceMeters, isWithinStoreRadius } from "@/features/stores/utils/distance.js";
 import { formatProductName } from "@/utils/formatters.js";
 import toast from "react-hot-toast";
 
 export const Survey = () => {
   const { assignmentId } = useParams();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { user } = useAuth();
-  const { assignments, isLoading: assignmentsLoading, refetch } = useAssignments();
+
+  const { assignments, isLoading: assignmentsLoading } = useAssignments();
   const { activeAssignment, setActiveAssignment, getSessionContext } = useSurveySessionStore();
   const { submitEntry } = useSurveyStore();
 
-  // 1. Resolve Assignment: URL param -> activeSession -> first available assignment from backend
+  // 1. Resolve Assignment from URL param or active session
   const currentAssignment = useMemo(() => {
     if (assignmentId) {
       return assignments.find((a) => a.id === assignmentId) || activeAssignment;
@@ -28,14 +43,12 @@ export const Survey = () => {
     if (activeAssignment) {
       return activeAssignment;
     }
-    // If accessed directly without param, auto-select auditor's first assignment
     if (assignments.length > 0) {
       return assignments[0];
     }
     return null;
   }, [assignmentId, activeAssignment, assignments]);
 
-  // Sync to session store once resolved
   useEffect(() => {
     if (currentAssignment && currentAssignment.id !== activeAssignment?.id) {
       setActiveAssignment(currentAssignment);
@@ -44,16 +57,14 @@ export const Survey = () => {
 
   const sessionContext = getSessionContext();
 
-  // Real assigned items from the database (e.g. 120 investigation products)
+  // Real assigned items from database (120 Queen's investigation items)
   const assignedProducts = useMemo(() => {
     return currentAssignment?.items || [];
   }, [currentAssignment]);
 
-  const [observations, setObservations] = useState({});
-  const [selectedProduct, setSelectedProduct] = useState(null);
-  const [filterMode, setFilterMode] = useState("ALL");
-  const [isSaving, setIsSaving] = useState(false);
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  // Active Audit State
+  const [activeAudit, setActiveAudit] = useState(null);
+  const [isInitializingAudit, setIsInitializingAudit] = useState(false);
 
   // Background GPS coordinates
   const [gps, setGps] = useState({
@@ -89,8 +100,89 @@ export const Survey = () => {
     }
   }, [sessionContext]);
 
-  // Live progress metrics
-  const completedIds = useMemo(() => new Set(Object.keys(observations)), [observations]);
+  // 2. Initialize or Recover Audit for this assignment
+  useEffect(() => {
+    if (!currentAssignment?.id || activeAudit?.id) return;
+
+    let isMounted = true;
+    setIsInitializingAudit(true);
+
+    const initAudit = async () => {
+      try {
+        // createAuditForAssignment is idempotent: returns active audit if one already exists
+        const res = await createAuditRequest({
+          assignmentId: currentAssignment.id,
+          notes: "In-store retail price audit session",
+        });
+
+        const audit = res?.data;
+        if (!isMounted) return;
+
+        // If the visit hasn't been started yet, start it with GPS coordinates
+        if (audit && audit.status === "NOT_STARTED") {
+          const startedRes = await startAuditRequest({
+            auditId: audit.id,
+            payload: {
+              latitude: gps.latitude,
+              longitude: gps.longitude,
+              accuracyMeters: gps.accuracy,
+            },
+          });
+          if (isMounted) setActiveAudit(startedRes?.data || audit);
+        } else if (audit) {
+          if (isMounted) setActiveAudit(audit);
+        }
+      } catch (err) {
+        console.warn("Audit initialization note:", err.message);
+      } finally {
+        if (isMounted) setIsInitializingAudit(false);
+      }
+    };
+
+    initAudit();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentAssignment?.id, activeAudit?.id, gps.latitude, gps.longitude, gps.accuracy]);
+
+  // 3. Fetch Real Observations from Backend for this Audit (PERSISTS ACROSS REFRESH)
+  const {
+    data: observationsResponse,
+    isLoading: observationsLoading,
+  } = useQuery({
+    queryKey: ["auditObservations", activeAudit?.id],
+    queryFn: () =>
+      listAuditObservationsRequest({
+        auditId: activeAudit.id,
+        params: { limit: 150 },
+      }),
+    enabled: Boolean(activeAudit?.id),
+    staleTime: 30 * 1000,
+  });
+
+  // Map real backend observations by productId for instant O(1) status lookup
+  const observationsMap = useMemo(() => {
+    const map = {};
+    const records = observationsResponse?.data || [];
+    records.forEach((obs) => {
+      map[obs.productId] = {
+        id: obs.id,
+        price: obs.price !== null ? Number(obs.price) : null,
+        availability: obs.availability,
+        timestamp: obs.capturedAt,
+      };
+    });
+    return map;
+  }, [observationsResponse]);
+
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [filterMode, setFilterMode] = useState("ALL");
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+
+  // Completed metrics derived directly from real backend records
+  const completedIds = useMemo(() => new Set(Object.keys(observationsMap)), [observationsMap]);
   const totalCount = assignedProducts.length;
   const completedCount = completedIds.size;
   const remainingCount = Math.max(0, totalCount - completedCount);
@@ -106,8 +198,13 @@ export const Survey = () => {
     return assignedProducts;
   }, [assignedProducts, completedIds, filterMode]);
 
-  // Observation submission
+  // 4. Save Observation directly to Developer 2's PriceObservation table
   const handleSaveObservation = async ({ productId, price, availability }) => {
+    if (!activeAudit?.id) {
+      toast.error("Active store audit is not ready yet. Please wait...");
+      return;
+    }
+
     setIsSaving(true);
     const prod = assignedProducts.find((p) => (p.productId || p.id) === productId);
 
@@ -115,33 +212,35 @@ export const Survey = () => {
 
     const payload = {
       clientObservationId,
-      itemId: productId,
       productId,
-      competitorId: sessionContext?.competitorId || "allmart",
-      storeId: sessionContext?.storeId,
-      marketName: sessionContext?.storeName || "Retail Store",
-      surveyPeriodId: sessionContext?.surveyPeriodId || "2026-W39",
-      auditorId: user?.id,
-      price: availability === "AVAILABLE" ? price : null,
       availability,
-      unit: prod?.unit || "kg",
-      latitude: gps.latitude,
-      longitude: gps.longitude,
-      accuracy: gps.accuracy,
+      price: availability === "AVAILABLE" ? price : null,
+      observedUnit: prod?.unit || "kg",
       capturedAt: new Date().toISOString(),
+      notes: null,
     };
 
     try {
-      await submitEntry(payload);
+      // 1. Post to Developer 2's backend PriceObservation API
+      await createObservationRequest({
+        auditId: activeAudit.id,
+        payload,
+      });
 
-      setObservations((prev) => ({
-        ...prev,
-        [productId]: {
-          price: availability === "AVAILABLE" ? price : null,
-          availability,
-          timestamp: payload.capturedAt,
-        },
-      }));
+      // 2. Also keep offline backup in surveyStore if connection fails in the future
+      await submitEntry({
+        ...payload,
+        itemId: productId,
+        competitorId: sessionContext?.competitorId || "allmart",
+        storeId: sessionContext?.storeId,
+        surveyPeriodId: sessionContext?.surveyPeriodId || "2026-W39",
+        latitude: gps.latitude,
+        longitude: gps.longitude,
+        accuracy: gps.accuracy,
+      });
+
+      // Invalidate query to pull the latest list from PostgreSQL
+      queryClient.invalidateQueries({ queryKey: ["auditObservations", activeAudit.id] });
 
       toast.success(
         availability === "AVAILABLE"
@@ -151,33 +250,52 @@ export const Survey = () => {
       );
 
       setSelectedProduct(null);
-    } catch {
-      toast.error("Failed to record observation");
+    } catch (err) {
+      const msg = err.response?.data?.message || err.message || "Failed to record observation";
+      toast.error(msg);
     } finally {
       setIsSaving(false);
     }
   };
 
-  const handleFinishAudit = () => {
-    toast.success("Store Audit Completed!");
-    navigate("/survey");
+  // Complete Audit Visit
+  const handleFinishAudit = async () => {
+    if (!activeAudit?.id) return;
+
+    try {
+      await completeAuditRequest({
+        auditId: activeAudit.id,
+        payload: {
+          latitude: gps.latitude,
+          longitude: gps.longitude,
+          accuracyMeters: gps.accuracy,
+          notes: `Audit completed with ${completedCount}/${totalCount} observed items.`,
+        },
+      });
+
+      toast.success("Store Audit Completed Successfully!");
+      navigate("/survey");
+    } catch (err) {
+      const msg = err.response?.data?.message || "Failed to complete audit.";
+      toast.error(msg);
+    }
   };
 
-  // 1. Loading State: Do NOT flash "No Store Audit Selected" while backend is fetching
-  if (assignmentsLoading) {
+  if (assignmentsLoading || isInitializingAudit) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
         <div className="flex flex-col items-center gap-3">
           <div className="h-9 w-9 animate-spin rounded-full border-3 border-[#A41821] border-t-transparent" />
           <p className="text-xs font-semibold text-slate-500">
-            Loading assigned store from server...
+            {isInitializingAudit
+              ? "Connecting to active store audit..."
+              : "Loading assigned store from server..."}
           </p>
         </div>
       </div>
     );
   }
 
-  // 2. Genuine Empty State: Loaded, but user has zero assignments in the database
   if (!currentAssignment) {
     return (
       <div className="mx-auto max-w-lg rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-xs space-y-4 my-8">
@@ -197,13 +315,6 @@ export const Survey = () => {
         <div className="flex items-center justify-center gap-2 pt-2">
           <button
             type="button"
-            onClick={() => refetch()}
-            className="rounded-xl border border-slate-300 bg-white hover:bg-slate-50 px-4 py-2.5 text-xs font-bold text-slate-700 transition cursor-pointer"
-          >
-            ↻ Check for New Assignments
-          </button>
-          <button
-            type="button"
             onClick={() => navigate("/survey")}
             className="rounded-xl bg-[#A41821] hover:bg-[#7F1219] px-4 py-2.5 text-xs font-bold text-white shadow-xs transition cursor-pointer"
           >
@@ -214,7 +325,6 @@ export const Survey = () => {
     );
   }
 
-  // 3. Active Collection UI
   return (
     <div className="mx-auto max-w-xl space-y-4 pb-24">
       <SyncStatusBanner />
@@ -261,7 +371,8 @@ export const Survey = () => {
         <div>
           <div className="flex items-center justify-between text-xs font-bold text-slate-700 mb-1">
             <span>
-              Collected: <span className="text-[#017C4D]">{completedCount}</span> / {totalCount}
+              Collected:{" "}
+              <span className="text-[#017C4D]">{completedCount}</span> / {totalCount}
             </span>
             <span className="font-mono text-slate-500">
               {remainingCount} Left ({percentDone}%)
@@ -333,63 +444,70 @@ export const Survey = () => {
 
         {/* Product Items List */}
         <div className="divide-y divide-slate-100 max-h-[50vh] overflow-y-auto">
-          {visibleProducts.map((p) => {
-            const pId = p.productId || p.id;
-            const observation = observations[pId];
-            const isDone = Boolean(observation);
-            const isSelected = selectedProduct && (selectedProduct.productId || selectedProduct.id) === pId;
+          {observationsLoading ? (
+            <p className="text-xs text-slate-400 text-center py-6">
+              Checking database for previously collected prices...
+            </p>
+          ) : (
+            visibleProducts.map((p) => {
+              const pId = p.productId || p.id;
+              const observation = observationsMap[pId];
+              const isDone = Boolean(observation);
+              const isSelected = selectedProduct && (selectedProduct.productId || selectedProduct.id) === pId;
 
-            return (
-              <div
-                key={pId}
-                onClick={() => setSelectedProduct(p)}
-                className={`flex items-center justify-between p-3 transition cursor-pointer rounded-xl ${
-                  isSelected
-                    ? "bg-red-50/50"
-                    : isDone
-                    ? "bg-emerald-50/20 hover:bg-emerald-50/40"
-                    : "hover:bg-slate-50"
-                }`}
-              >
-                <div className="min-w-0 flex-1 pr-3">
-                  <span className={`text-sm font-bold block truncate ${isDone ? "text-slate-800" : "text-slate-900"}`}>
-                    {formatProductName(p.name)}
-                  </span>
-                  <div className="text-[11px] text-slate-400 font-mono mt-0.5">
-                    {p.barcode || p.sku || pId} • {p.category} ({p.unit})
+              return (
+                <div
+                  key={pId}
+                  onClick={() => setSelectedProduct(p)}
+                  className={`flex items-center justify-between p-3 transition cursor-pointer rounded-xl ${
+                    isSelected
+                      ? "bg-red-50/50"
+                      : isDone
+                      ? "bg-emerald-50/20 hover:bg-emerald-50/40"
+                      : "hover:bg-slate-50"
+                  }`}
+                >
+                  <div className="min-w-0 flex-1 pr-3">
+                    <span className={`text-sm font-bold block truncate ${isDone ? "text-slate-800" : "text-slate-900"}`}>
+                      {formatProductName(p.name)}
+                    </span>
+                    <div className="text-[11px] text-slate-400 font-mono mt-0.5">
+                      {p.barcode || p.sku || pId} • {p.category} ({p.unit})
+                    </div>
+                  </div>
+
+                  <div className="flex-none text-right">
+                    {isDone ? (
+                      <div>
+                        {observation.availability === "AVAILABLE" ? (
+                          <span className="font-mono font-black text-sm text-[#017C4D]">
+                            {Number(observation.price).toFixed(2)} ETB
+                          </span>
+                        ) : (
+                          <span className="rounded-md bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-[#FE7914] border border-amber-200">
+                            {observation.availability.replace("_", " ")}
+                          </span>
+                        )}
+                        <span className="block text-[9px] text-emerald-600 font-bold">✓ Saved</span>
+                      </div>
+                    ) : (
+                      <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600 hover:bg-[#A41821] hover:text-white transition">
+                        + Price
+                      </span>
+                    )}
                   </div>
                 </div>
-
-                <div className="flex-none text-right">
-                  {isDone ? (
-                    <div>
-                      {observation.availability === "AVAILABLE" ? (
-                        <span className="font-mono font-black text-sm text-[#017C4D]">
-                          {Number(observation.price).toFixed(2)} ETB
-                        </span>
-                      ) : (
-                        <span className="rounded-md bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-[#FE7914] border border-amber-200">
-                          {observation.availability.replace("_", " ")}
-                        </span>
-                      )}
-                      <span className="block text-[9px] text-emerald-600 font-bold">✓ Saved</span>
-                    </div>
-                  ) : (
-                    <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600 hover:bg-[#A41821] hover:text-white transition">
-                      + Price
-                    </span>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+              );
+            })
+          )}
         </div>
       </div>
 
+      {/* In-Field Observation Review Drawer */}
       <ObservationAuditDrawer
         isOpen={isDrawerOpen}
         onClose={() => setIsDrawerOpen(false)}
-        observations={observations}
+        observations={observationsMap}
         products={assignedProducts}
         onEditPrice={handleSaveObservation}
       />

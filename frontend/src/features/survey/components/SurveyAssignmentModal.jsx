@@ -138,7 +138,7 @@ export const SurveyAssignmentModal = ({ isOpen, onClose }) => {
 							>
 								{openPeriods.map((p) => (
 									<option key={p.id} value={p.id}>
-										{p.id} — {p.name} (OPEN)
+										{p.name} (OPEN)
 									</option>
 								))}
 							</select>
