@@ -4,86 +4,59 @@ on:
   push:
     branches:
       - main
-
   workflow_dispatch:
+    inputs:
+      run_seed:
+        description: "Run database seed?"
+        type: boolean
+        default: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-      # ============================================================
-      # 1. Checkout Repository
-      # ============================================================
       - name: ⬇️ Checkout Repository
         uses: actions/checkout@v4
 
-      # ============================================================
-      # 2. Setup Node.js
-      # ============================================================
       - name: ⚙️ Setup Node.js 22
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      # ============================================================
-      # 3. Build Frontend
-      # ============================================================
-      - name: 🏗️ Build Frontend
-        working-directory: frontend
+      - name: 🏗️ Build Frontend (React)
         run: |
+          cd frontend
           npm ci
           npm run build
 
-      # ============================================================
-      # 4. Setup SSH Key for rsync
-      # ============================================================
-      - name: 🔐 Setup SSH Key
+      - name: 🔐 Setup & Unlock SSH Key
         run: |
           mkdir -p ~/.ssh
-
           echo "${{ secrets.SSH_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
+          ssh-keygen -p -P "${{ secrets.SSH_PASSPHRASE }}" -N "" -f ~/.ssh/id_rsa
 
-          ssh-keygen \
-            -p \
-            -P "${{ secrets.SSH_PASSPHRASE }}" \
-            -N "" \
-            -f ~/.ssh/id_rsa
-
-      # ============================================================
-      # 5. Deploy Frontend
-      # ============================================================
       - name: 🚀 Deploy Frontend to cPanel
         run: |
-          rsync -avz --delete \
-            -e "ssh -p ${{ secrets.SSH_PORT }} \
-            -o StrictHostKeyChecking=no \
-            -o ConnectTimeout=30" \
-            frontend/dist/ \
-            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/home/airescad/airesbi/
+          rsync -avz --delete -e "ssh -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=no -o ConnectTimeout=30" frontend/dist/ ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/home/airescad/airesbi/
 
-      # ============================================================
-      # 6. Deploy Backend
-      # ============================================================
       - name: 🚀 Deploy Backend to cPanel
         run: |
-          rsync -avz --delete \
-            --exclude 'node_modules' \
-            --exclude '.env' \
-            --exclude '.htaccess' \
-            --exclude 'uploads' \
-            --exclude 'tmp' \
-            -e "ssh -p ${{ secrets.SSH_PORT }} \
-            -o StrictHostKeyChecking=no \
-            -o ConnectTimeout=30" \
-            Backend/ \
-            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/home/airescad/biapi/
+          rsync -avz --delete --exclude 'node_modules' --exclude '.env' --exclude '.htaccess' --exclude 'uploads' -e "ssh -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=no -o ConnectTimeout=30" Backend/ ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/home/airescad/biapi/
 
-      # ============================================================
-      # 7. Install Dependencies + Prisma Migration + Restart
-      # ============================================================
-      - name: 🔄 Install Dependencies, Run Prisma Migrations & Restart Node
+      - name: 🧭 Determine whether to seed
+        id: seed_check
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.run_seed }}" = "true" ]; then
+            echo "should_seed=true" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.event.head_commit.message }}" == *"[seed]"* ]]; then
+            echo "should_seed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_seed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 🔄 Install Dependencies, Sync Prisma DB & Restart Node
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SSH_HOST }}
@@ -91,45 +64,21 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           passphrase: ${{ secrets.SSH_PASSPHRASE }}
           port: ${{ secrets.SSH_PORT }}
-
+          envs: SHOULD_SEED
           script: |
-            set -e
-
-            echo "========================================"
-            echo "🚀 Starting Aires-BI deployment"
-            echo "========================================"
-
-            # --------------------------------------------------------
-            # Activate cPanel Node.js environment
-            # --------------------------------------------------------
-            source /home/airescad/nodevenv/biapi/22/bin/activate
-
-            # --------------------------------------------------------
-            # Go to backend
-            # --------------------------------------------------------
-            cd /home/airescad/biapi
-
-            echo ""
-            echo "📦 Installing production dependencies..."
+            source /home/airescad/nodevenv/biapi/22/bin/activate && cd /home/airescad/biapi
             npm install --omit=dev
-
-            echo ""
-            echo "🔧 Generating Prisma Client..."
             npx prisma generate
+            npx prisma db push --accept-data-loss
 
-            echo ""
-            echo "🗄️ Applying Prisma migrations..."
-            npx prisma migrate deploy
+            if [ "$SHOULD_SEED" = "true" ]; then
+              echo "Running seed..."
+              node prisma/seed.js
+            else
+              echo "Skipping seed (not requested)."
+            fi
 
-            echo ""
-            echo "📁 Ensuring tmp directory exists..."
             mkdir -p /home/airescad/biapi/tmp
-
-            echo ""
-            echo "🔄 Restarting Node.js application..."
             touch /home/airescad/biapi/tmp/restart.txt
-
-            echo ""
-            echo "========================================"
-            echo "✅ Aires-BI deployment completed"
-            echo "========================================"
+        env:
+          SHOULD_SEED: ${{ steps.seed_check.outputs.should_seed }}
