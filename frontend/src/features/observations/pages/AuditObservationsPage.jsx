@@ -5,6 +5,7 @@ import toast from "react-hot-toast";
 import { useAudit } from "@/features/audits/hooks/useAudit.js";
 import { useAuditObservations } from "../hooks/useAuditObservations.js";
 import { useUpdateObservation } from "../hooks/useObservationMutations.js";
+import { useLocalQueue } from "../hooks/useLocalQueue.js";
 import { useAuth } from "@/hooks/useAuth.js";
 import { FastProductSearch } from "../components/FastProductSearch.jsx";
 import { RapidPriceInput } from "../components/RapidPriceInput.jsx";
@@ -14,7 +15,7 @@ import { ObservationAvailabilityBadge } from "../components/ObservationAvailabil
 import { ObservationReviewBadge } from "../components/ObservationReviewBadge.jsx";
 import { ObservationSyncBadge } from "../components/ObservationSyncBadge.jsx";
 import { formatPrice, formatCapturedAt } from "../utils/observation.utils.js";
-import { enqueueObservation, syncObservation } from "../offline/observationQueue.js";
+import { enqueueObservation, syncObservation, flushQueue } from "../offline/observationQueue.js";
 import { formatProductName } from "@/utils/formatters.js";
 
 /**
@@ -66,7 +67,11 @@ export const AuditObservationsPage = () => {
     );
   }
 
-  if (observations.length === 0 && !canCollect) {
+  if (isAssignedAuditor) {
+    return <CollectionView audit={audit} observations={observations} auditId={auditId} />;
+  }
+
+  if (observations.length === 0) {
     return (
       <div className="mx-auto max-w-2xl space-y-4 px-4 pb-24 pt-4 sm:px-6">
         <BackButton navigate={navigate} auditId={auditId} />
@@ -76,10 +81,6 @@ export const AuditObservationsPage = () => {
         />
       </div>
     );
-  }
-
-  if (isAssignedAuditor) {
-    return <CollectionView audit={audit} observations={observations} auditId={auditId} />;
   }
 
   return (
@@ -95,7 +96,7 @@ export const AuditObservationsPage = () => {
 };
 
 // ============================================================
-// READ-ONLY VIEW (Admin / Manager) — with dropdown filter panel
+// READ-ONLY VIEW (Admin / Manager)
 // ============================================================
 const ReadOnlyObservationsView = ({
   audit,
@@ -116,7 +117,6 @@ const ReadOnlyObservationsView = ({
   const filterPanelRef = useRef(null);
   const filterButtonRef = useRef(null);
 
-  // Latest observation per product (used for progress display)
   const observationsByProduct = useMemo(() => {
     const map = {};
     for (const o of observations) {
@@ -169,7 +169,6 @@ const ReadOnlyObservationsView = ({
   }, [observations, availability, reviewStatus, syncStatus, search]);
 
   const activeFilterCount = [availability, reviewStatus, syncStatus].filter(Boolean).length;
-
   const hasActiveFilters = Boolean(search.trim() || availability || reviewStatus || syncStatus);
 
   const clearFilters = () => {
@@ -179,7 +178,6 @@ const ReadOnlyObservationsView = ({
     setSyncStatus("");
   };
 
-  // Close dropdown on outside click
   useEffect(() => {
     if (!isFilterOpen) return;
 
@@ -203,7 +201,6 @@ const ReadOnlyObservationsView = ({
     };
   }, [isFilterOpen]);
 
-  // Close on Escape
   useEffect(() => {
     if (!isFilterOpen) return;
     const handleKey = (e) => {
@@ -218,7 +215,6 @@ const ReadOnlyObservationsView = ({
 
   return (
     <div className="pb-24">
-      {/* Sticky header */}
       <div className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur-md supports-[backdrop-filter]:bg-white/80">
         <div className="mx-auto max-w-4xl px-3 pt-2.5 sm:px-6 sm:pt-4">
           <BackButton navigate={navigate} auditId={auditId} />
@@ -250,11 +246,8 @@ const ReadOnlyObservationsView = ({
         </div>
       </div>
 
-      {/* Content wrapper */}
       <div className="mx-auto max-w-4xl space-y-3 px-3 pt-3 sm:space-y-4 sm:px-6 sm:pt-4">
-        {/* Search + Filters — single row */}
         <div className="flex items-stretch gap-2">
-          {/* Search — takes remaining space */}
           <div className="relative flex-1">
             <input
               type="text"
@@ -289,7 +282,6 @@ const ReadOnlyObservationsView = ({
             )}
           </div>
 
-          {/* Filters dropdown trigger */}
           <div className="relative shrink-0">
             <button
               ref={filterButtonRef}
@@ -330,7 +322,6 @@ const ReadOnlyObservationsView = ({
               )}
             </button>
 
-            {/* Dropdown panel */}
             {isFilterOpen && (
               <div
                 ref={filterPanelRef}
@@ -415,7 +406,6 @@ const ReadOnlyObservationsView = ({
           </div>
         </div>
 
-        {/* Active filter chips */}
         {hasActiveFilters && (
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
@@ -452,7 +442,6 @@ const ReadOnlyObservationsView = ({
           </div>
         )}
 
-        {/* Count summary */}
         <div className="flex items-center justify-between text-[11px] font-medium text-slate-500">
           <span>
             Showing <span className="font-black text-slate-900">{filteredObservations.length}</span>{" "}
@@ -460,7 +449,6 @@ const ReadOnlyObservationsView = ({
           </span>
         </div>
 
-        {/* Observations list */}
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs">
           <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
             <h2 className="text-[11px] font-black uppercase tracking-wider text-slate-700 sm:text-xs">
@@ -621,12 +609,15 @@ const prettyEnum = (value) => {
 };
 
 // ============================================================
-// COLLECTION VIEW (assigned auditor) — unchanged from prior version
+// COLLECTION VIEW (assigned auditor)
 // ============================================================
 const CollectionView = ({ audit, observations, auditId }) => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const updateObservation = useUpdateObservation();
+
+  // Local offline queue
+  const { localObservations } = useLocalQueue(auditId);
 
   const queryKey = useMemo(() => ["observations", "audit", auditId, {}], [auditId]);
 
@@ -635,19 +626,67 @@ const CollectionView = ({ audit, observations, auditId }) => {
     [audit]
   );
 
+  // ────────────────────────────────────────────────────────────
+  // Merge server + local queue observations.
+  //
+  // 1. Server rows first, tagged __local: false.
+  // 2. Local queue rows only added if the clientObservationId is not
+  //    already present from the server (dedupe).
+  // 3. Group by productId, keeping the latest capturedAt. On ties,
+  //    prefer the non-local (server) record.
+  // ────────────────────────────────────────────────────────────
   const observationsByProduct = useMemo(() => {
-    const map = {};
+    const productMap = new Map(products.map((p) => [p.id, p]));
+    const merged = new Map();
+
+    // Server rows. Note: this list can also contain optimistic rows we
+    // wrote into the React Query cache ourselves (see upsertObservationInCache),
+    // so respect each row's own __local flag instead of forcing it to
+    // false — otherwise a still-PENDING offline row briefly reports itself
+    // as synced/server-confirmed, which is what made the status appear to
+    // "flip" before reverting.
     for (const o of observations) {
-      const existing = map[o.productId];
-      if (
-        !existing ||
-        new Date(o.capturedAt).getTime() >= new Date(existing.capturedAt).getTime()
-      ) {
-        map[o.productId] = o;
+      const key = o.clientObservationId || o.id;
+      merged.set(key, {
+        ...o,
+        __local: Boolean(o.__local),
+        product: o.product || productMap.get(o.productId),
+      });
+    }
+
+    // Local queue rows — add only if not already present from server
+    for (const o of localObservations) {
+      const key = o.clientObservationId || o.id;
+      if (!merged.has(key)) {
+        merged.set(key, {
+          ...o,
+          __local: true,
+          product: o.product || productMap.get(o.productId),
+        });
       }
     }
-    return map;
-  }, [observations]);
+
+    // Group by product, keep latest. Tie-break prefers server.
+    const byProduct = {};
+    for (const o of merged.values()) {
+      const existing = byProduct[o.productId];
+      if (!existing) {
+        byProduct[o.productId] = o;
+        continue;
+      }
+
+      const oTime = new Date(o.capturedAt).getTime();
+      const eTime = new Date(existing.capturedAt).getTime();
+
+      if (oTime > eTime) {
+        byProduct[o.productId] = o;
+      } else if (oTime === eTime && existing.__local && !o.__local) {
+        byProduct[o.productId] = o;
+      }
+    }
+
+    return byProduct;
+  }, [observations, localObservations, products]);
 
   const observationsByProductRef = useRef(observationsByProduct);
   useEffect(() => {
@@ -677,6 +716,10 @@ const CollectionView = ({ audit, observations, auditId }) => {
   const [filterMode, setFilterMode] = useState("PENDING");
   const [showCompletionBanner, setShowCompletionBanner] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isOnline, setIsOnline] = useState(
+    typeof navigator !== "undefined" ? navigator.onLine : true
+  );
+  const [isSyncingQueue, setIsSyncingQueue] = useState(false);
 
   const completionShownRef = useRef(false);
   const inFlightProductsRef = useRef(new Set());
@@ -693,6 +736,46 @@ const CollectionView = ({ audit, observations, auditId }) => {
     queryClient.invalidateQueries({ queryKey: ["audits"] });
     queryClient.invalidateQueries({ queryKey: ["dashboard"] });
   }, [queryClient, auditId]);
+
+  // The app shell already mounts useObservationQueueFlush (auto-flushes the
+  // offline queue on reconnect) and useObservationQueueInvalidator (refetches
+  // these queries whenever the queue reports a sync event). So this view
+  // does NOT call flushQueue() itself on the "online" event — doing so here
+  // too would race the app-shell flush and could double-POST the same
+  // pending observation. "Sync now" below is a manual, user-initiated retry
+  // only (e.g. the auto-flush was missed while the tab was backgrounded).
+  const runQueueFlush = useCallback(async () => {
+    setIsSyncingQueue(true);
+    try {
+      const result = await flushQueue();
+      if (result.synced > 0) {
+        toast.success(
+          `Synced ${result.synced} offline observation${result.synced === 1 ? "" : "s"}`,
+          { id: "queue-sync-toast", duration: 2000 }
+        );
+      }
+      if (result.failed > 0) {
+        toast.error(
+          `${result.failed} offline observation${result.failed === 1 ? "" : "s"} could not be saved`,
+          { id: "queue-sync-toast-failed", duration: 3000 }
+        );
+      }
+    } finally {
+      setIsSyncingQueue(false);
+      invalidateDependentQueries();
+    }
+  }, [invalidateDependentQueries]);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
 
   const upsertObservationInCache = useCallback(
     (formattedObservation) => {
@@ -738,11 +821,21 @@ const CollectionView = ({ audit, observations, auditId }) => {
       const existing = observationsByProductRef.current[productId];
       const currentAuditStatus = auditStatusRef.current;
       const currentProducts = productsRef.current;
+      const online = navigator.onLine;
 
-      const isEditableExisting =
-        existing && existing.review?.status === "PENDING" && currentAuditStatus === "IN_PROGRESS";
+      const productName = formatProductName(
+        currentProducts.find((p) => p.id === productId)?.name || "Item"
+      );
 
-      if (isEditableExisting) {
+      // Update server-side directly only when we're online AND the existing
+      // row is a server row. If we're offline, an edit to an already-synced
+      // row falls through to the offline-queue path below (as an UPDATE)
+      // instead of firing a doomed network mutation that fails and reverts
+      // the row back to its old value.
+      const isServerRow = existing && !existing.__local && existing.review?.status === "PENDING";
+      const isEditableExisting = isServerRow && currentAuditStatus === "IN_PROGRESS";
+
+      if (isEditableExisting && online) {
         const optimistic = {
           ...existing,
           availability,
@@ -775,6 +868,9 @@ const CollectionView = ({ audit, observations, auditId }) => {
       }
 
       const clientObservationId = buildClientObservationId(auditId, productId);
+      // An offline edit to a row that already exists on the server needs to
+      // sync as an UPDATE against that server id, not a new CREATE.
+      const isOfflineEditOfServerRow = isEditableExisting && !online;
 
       const payload = {
         clientObservationId,
@@ -787,10 +883,12 @@ const CollectionView = ({ audit, observations, auditId }) => {
         capturedAt: new Date().toISOString(),
         evidencePhotoUrl: existing?.evidencePhotoUrl || null,
         notes: existing?.notes || null,
+        operation: isOfflineEditOfServerRow ? "UPDATE" : "CREATE",
+        serverObservationId: isOfflineEditOfServerRow ? existing.id : null,
       };
 
       const optimisticObservation = {
-        id: clientObservationId,
+        id: isOfflineEditOfServerRow ? existing.id : clientObservationId,
         clientObservationId,
         auditId,
         productId,
@@ -798,17 +896,41 @@ const CollectionView = ({ audit, observations, auditId }) => {
         price: payload.price,
         capturedAt: payload.capturedAt,
         sync: { status: "PENDING", attempts: 0 },
-        review: { status: "PENDING" },
+        review: {
+          status: isOfflineEditOfServerRow ? existing.review?.status || "PENDING" : "PENDING",
+        },
         product: currentProducts.find((p) => p.id === productId) || undefined,
+        __local: true,
       };
       upsertObservationInCache(optimisticObservation);
 
       try {
         const queued = await enqueueObservation(payload);
+
+        // Offline: stop here. Don't attempt the network call at all — that
+        // is exactly what produced the "shows a status, then reverts"
+        // behavior (a doomed request that eventually fails and flips the
+        // row back). The row stays visibly PENDING/offline until
+        // runQueueFlush() pushes it once we're back online.
+        if (!online) {
+          toast.success(`${productName} saved offline — will sync when online`, {
+            id: "observation-toast",
+            duration: 1800,
+          });
+          return;
+        }
+
         const result = await syncObservation(queued);
+
         if (result.success && result.data) {
           upsertObservationInCache(result.data);
           invalidateDependentQueries();
+          toast.success(
+            availability === "AVAILABLE"
+              ? `${productName}: ${Number(price).toFixed(2)} ETB`
+              : `${productName}: ${availability.replace("_", " ")}`,
+            { id: "observation-toast", duration: 1200 }
+          );
         } else if (result.permanent) {
           toast.error(
             result.error?.response?.data?.message || "This observation could not be saved"
@@ -823,18 +945,13 @@ const CollectionView = ({ audit, observations, auditId }) => {
             };
           });
         } else {
-          invalidateDependentQueries();
+          // Transient failure (connection dropped mid-request, etc). Leave
+          // it queued as PENDING — the next reconnect flush will retry it.
+          toast.success(`${productName} saved offline — will sync when online`, {
+            id: "observation-toast",
+            duration: 1800,
+          });
         }
-        toast.success(
-          availability === "AVAILABLE"
-            ? `${formatProductName(
-                currentProducts.find((p) => p.id === productId)?.name || "Item"
-              )}: ${Number(price).toFixed(2)} ETB`
-            : `${formatProductName(
-                currentProducts.find((p) => p.id === productId)?.name || "Item"
-              )}: ${availability.replace("_", " ")}`,
-          { id: "observation-toast", duration: 1200 }
-        );
       } catch (err) {
         queryClient.setQueryData(queryKey, (previous) => {
           if (!previous) return previous;
@@ -928,6 +1045,12 @@ const CollectionView = ({ audit, observations, auditId }) => {
     );
   }
 
+  const pendingSyncCount = localObservations.length;
+  // Reflects real progress whether triggered by our own "Sync now" button
+  // or by the app shell's automatic reconnect flush.
+  const queueIsSyncing =
+    isSyncingQueue || localObservations.some((o) => o.sync?.status === "SYNCING");
+
   return (
     <div className="mx-auto max-w-2xl space-y-3 pb-24">
       <div className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur-md supports-[backdrop-filter]:bg-white/80">
@@ -965,6 +1088,45 @@ const CollectionView = ({ audit, observations, auditId }) => {
       </div>
 
       <div className="space-y-3 px-3 pt-3 sm:space-y-4 sm:px-4 sm:pt-4">
+        {(!isOnline || pendingSyncCount > 0 || queueIsSyncing) && (
+          <div
+            className={`rounded-xl border px-3 py-2 text-[11px] ${
+              !isOnline
+                ? "border-amber-200 bg-amber-50 text-amber-800"
+                : "border-slate-200 bg-slate-50 text-slate-600"
+            }`}
+          >
+            {!isOnline ? (
+              <p>
+                <span className="font-bold">Offline mode:</span>{" "}
+                {pendingSyncCount > 0
+                  ? `${pendingSyncCount} observation${pendingSyncCount === 1 ? "" : "s"} saved locally. `
+                  : ""}
+                They will sync automatically when the connection returns.
+              </p>
+            ) : queueIsSyncing ? (
+              <p>
+                <span className="font-bold">Syncing…</span> pushing {pendingSyncCount || ""} offline
+                observation{pendingSyncCount === 1 ? "" : "s"} now.
+              </p>
+            ) : (
+              <div className="flex items-center justify-between gap-2">
+                <p>
+                  <span className="font-bold">{pendingSyncCount}</span> observation
+                  {pendingSyncCount === 1 ? "" : "s"} pending sync.
+                </p>
+                <button
+                  type="button"
+                  onClick={runQueueFlush}
+                  className="shrink-0 rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-[10px] font-bold text-slate-700 hover:bg-slate-100"
+                >
+                  Sync now
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
         {showCompletionBanner && (
           <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
             <div className="flex items-start gap-3">
