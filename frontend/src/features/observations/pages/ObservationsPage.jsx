@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useObservations } from "../hooks/useObservations.js";
 import { useAuth } from "@/hooks/useAuth.js";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus.js";
 import { ObservationFilters } from "../components/ObservationFilters.jsx";
 import { ObservationListTable } from "../components/ObservationListTable.jsx";
 import { ObservationListItemGlobal } from "../components/ObservationListItemGlobal.jsx";
@@ -13,6 +14,7 @@ import { useStores } from "@/features/survey/hooks/useStores.js";
 export const ObservationsPage = () => {
   const navigate = useNavigate();
   const { isManager } = useAuth();
+  const isOnline = useOnlineStatus();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [search, setSearch] = useState("");
@@ -90,6 +92,14 @@ export const ObservationsPage = () => {
           </p>
         </div>
       </div>
+
+      {/* Offline banner */}
+      {!isOnline && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+          <span className="font-bold">Offline:</span> showing the last loaded data. This list will
+          refresh automatically once you're back online.
+        </div>
+      )}
 
       {/* Context filters: Store + Survey period */}
       <div className="grid grid-cols-1 gap-3 rounded-2xl border border-slate-200 bg-white p-3.5 shadow-xs sm:grid-cols-2">
@@ -207,9 +217,15 @@ export const ObservationsPage = () => {
 
       {/* Error */}
       {isError && (
-        <div className="rounded-2xl border border-red-200 bg-red-50 p-4">
-          <p className="text-xs font-medium text-[#A41821]">
-            {error?.message || "Unable to load observations"}
+        <div
+          className={`rounded-2xl border p-4 ${
+            isOnline ? "border-red-200 bg-red-50" : "border-amber-200 bg-amber-50"
+          }`}
+        >
+          <p className={`text-xs font-medium ${isOnline ? "text-[#A41821]" : "text-amber-800"}`}>
+            {isOnline
+              ? error?.message || "Unable to load observations"
+              : "You're offline and this list hasn't loaded yet. It will load automatically once you're back online."}
           </p>
         </div>
       )}
