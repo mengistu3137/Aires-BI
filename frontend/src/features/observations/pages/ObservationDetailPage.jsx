@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -7,6 +7,8 @@ import toast from "react-hot-toast";
 import { useObservation } from "../hooks/useObservation.js";
 import { useApproveObservation, useRejectObservation } from "../hooks/useObservationMutations.js";
 import { useAuth } from "@/hooks/useAuth.js";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus.js";
+import { getQueuedObservationById, formatQueuedObservation } from "../offline/observationQueue.js";
 import {
   getAvailabilityBadgeLabel,
   getAvailabilityColors,
@@ -29,8 +31,35 @@ export const ObservationDetailPage = () => {
   const { observationId } = useParams();
   const navigate = useNavigate();
   const { isManager } = useAuth();
+  const isOnline = useOnlineStatus();
 
-  const { data: observation, isLoading, isError, error } = useObservation(observationId);
+  const { data: serverObservation, isLoading, isError, error } = useObservation(observationId);
+
+  // If the server doesn't have this observation (e.g. it hasn't synced yet,
+  // or we're offline and it was never cached), fall back to the local
+  // offline queue so a device that just captured this reading can still
+  // open its own detail page instead of seeing "not found".
+  const [queuedFallback, setQueuedFallback] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!observationId || serverObservation) {
+      setQueuedFallback(null);
+      return undefined;
+    }
+    getQueuedObservationById(observationId)
+      .then((record) => {
+        if (!cancelled) setQueuedFallback(formatQueuedObservation(record));
+      })
+      .catch(() => {
+        if (!cancelled) setQueuedFallback(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [observationId, serverObservation]);
+
+  const observation = serverObservation || queuedFallback;
+  const isUnsynced = !serverObservation && Boolean(queuedFallback);
 
   const approveMutation = useApproveObservation();
   const rejectMutation = useRejectObservation();
@@ -47,12 +76,18 @@ export const ObservationDetailPage = () => {
     );
   }
 
-  if (isError || !observation) {
+  if ((isError || !serverObservation) && !observation) {
     return (
       <div className="mx-auto max-w-3xl px-4 py-8">
-        <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-center">
-          <p className="text-sm font-bold text-[#A41821]">
-            {error?.message || "Observation not found"}
+        <div
+          className={`rounded-xl border p-6 text-center ${
+            !isOnline ? "border-amber-200 bg-amber-50" : "border-red-200 bg-red-50"
+          }`}
+        >
+          <p className={`text-sm font-bold ${!isOnline ? "text-amber-800" : "text-[#A41821]"}`}>
+            {!isOnline
+              ? "You're offline and this observation hasn't loaded yet. It will load automatically once you're back online."
+              : error?.message || "Observation not found"}
           </p>
           <button
             type="button"
@@ -74,10 +109,14 @@ export const ObservationDetailPage = () => {
   const sync = observation.sync;
 
   const isPending = review?.status === "PENDING";
-  const canApprove = isManager && isPending;
-  const canReject = isManager && isPending;
+  const canApprove = isManager && isPending && !isUnsynced;
+  const canReject = isManager && isPending && !isUnsynced;
 
   const handleApprove = async () => {
+    if (!navigator.onLine) {
+      toast.error("You're offline — reconnect to approve this observation.");
+      return;
+    }
     try {
       await approveMutation.mutateAsync(observationId);
     } catch (err) {
@@ -86,6 +125,10 @@ export const ObservationDetailPage = () => {
   };
 
   const handleReject = async (data) => {
+    if (!navigator.onLine) {
+      toast.error("You're offline — reconnect to reject this observation.");
+      return;
+    }
     try {
       await rejectMutation.mutateAsync({
         observationId,
@@ -139,6 +182,20 @@ export const ObservationDetailPage = () => {
       </div>
 
       <div className="mx-auto max-w-3xl">
+        {!isOnline && (
+          <div className="mx-4 mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800 sm:mx-6">
+            <span className="font-bold">Offline:</span> showing the last loaded data. Review actions
+            are unavailable until you're back online.
+          </div>
+        )}
+        {isUnsynced && (
+          <div className="mx-4 mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600 sm:mx-6">
+            <span className="font-bold">Not yet synced:</span> this observation is still saved
+            locally on the collecting device and hasn't reached the server. Details below may be
+            incomplete until it syncs.
+          </div>
+        )}
+
         {/* Hero — product + price */}
         <div className="border-b border-slate-200 px-4 pb-5 pt-4 sm:px-6 sm:pt-5">
           <h2 className="text-lg font-black  text-slate-900 sm:text-xl capitalize">
@@ -305,12 +362,17 @@ export const ObservationDetailPage = () => {
       {isManager && (canApprove || canReject) && (
         <div className="sticky bottom-0 z-20 border-t border-slate-200">
           <div className="mx-auto max-w-3xl px-4 py-3 sm:px-6">
+            {!isOnline && (
+              <p className="mb-2 text-center text-[10px] font-semibold text-amber-700">
+                You're offline — reconnect to approve or reject.
+              </p>
+            )}
             <div className="flex flex-col gap-2 sm:flex-row">
               {canApprove && (
                 <button
                   type="button"
                   onClick={handleApprove}
-                  disabled={approveMutation.isPending}
+                  disabled={approveMutation.isPending || !isOnline}
                   className="flex-1 rounded-xl bg-[#017C4D] px-4 py-3 text-sm font-bold text-white transition hover:bg-[#015E3A] active:scale-[0.99] disabled:opacity-50 sm:py-2.5 sm:text-xs"
                 >
                   {approveMutation.isPending ? "Approving..." : "Approve"}
@@ -320,7 +382,8 @@ export const ObservationDetailPage = () => {
                 <button
                   type="button"
                   onClick={() => setShowRejectModal(true)}
-                  className="flex-1 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-[#A41821] transition hover:bg-red-100 active:scale-[0.99] sm:py-2.5 sm:text-xs"
+                  disabled={!isOnline}
+                  className="flex-1 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-[#A41821] transition hover:bg-red-100 active:scale-[0.99] disabled:opacity-50 sm:py-2.5 sm:text-xs"
                 >
                   Reject
                 </button>
