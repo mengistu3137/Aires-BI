@@ -148,17 +148,25 @@ export const update = async (id, payload) => {
     }
   }
 
+  const data = { ...payload };
+
+  if (payload.email !== undefined) {
+    data.email = payload.email ? payload.email.toLowerCase() : null;
+  }
+
+  
+  if (payload.password && payload.password.trim().length >= 6) {
+    data.passwordHash = await bcrypt.hash(payload.password.trim(), 10);
+  }
+  delete data.password;
+
   const updatedUser = await prisma.user.update({
     where: { id },
-    data: {
-      ...payload,
-      email: payload.email ? payload.email.toLowerCase() : undefined,
-    },
+    data,
   });
 
   return sanitizeUserRecord(updatedUser);
 };
-
 export const remove = async (id) => {
   const user = await getById(id);
 

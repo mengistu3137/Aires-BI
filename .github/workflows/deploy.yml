@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       run_seed:
-        description: "Run database seed?"
+        description: "⚠️ DANGER: Run database seed? (Only check if you intentionally want to run seed)"
         type: boolean
         default: false
 
@@ -45,12 +45,12 @@ jobs:
         run: |
           rsync -avz --delete --exclude 'node_modules' --exclude '.env' --exclude '.htaccess' --exclude 'uploads' -e "ssh -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=no -o ConnectTimeout=30" Backend/ ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/home/airescad/biapi/
 
+      # SAFE: Seeding can NEVER happen on a normal push.
+      # It ONLY happens if an admin manually triggers it from GitHub Actions with run_seed = true.
       - name: 🧭 Determine whether to seed
         id: seed_check
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.run_seed }}" = "true" ]; then
-            echo "should_seed=true" >> "$GITHUB_OUTPUT"
-          elif [[ "${{ github.event.head_commit.message }}" == *"[seed]"* ]]; then
             echo "should_seed=true" >> "$GITHUB_OUTPUT"
           else
             echo "should_seed=false" >> "$GITHUB_OUTPUT"
@@ -72,10 +72,10 @@ jobs:
             npx prisma migrate deploy
 
             if [ "$SHOULD_SEED" = "true" ]; then
-              echo "Running seed..."
+              echo "⚠️ Running seed as requested via manual workflow dispatch..."
               node prisma/seed.js
             else
-              echo "Skipping seed (not requested)."
+              echo "✅ Skipping seed. Live production data preserved."
             fi
 
             mkdir -p /home/airescad/biapi/tmp

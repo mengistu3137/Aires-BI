@@ -1,7 +1,7 @@
 import { io } from "socket.io-client";
 import { useAuthStore } from "@/stores/auth/auth.store.js";
 
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || "http://localhost:5000";
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || "https://biapi.airescommunications.com";
 
 let socket = null;
 const listeners = new Map(); // eventName -> Set<callbacks>

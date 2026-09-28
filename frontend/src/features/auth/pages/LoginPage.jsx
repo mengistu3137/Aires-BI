@@ -3,6 +3,35 @@ import { useNavigate } from "react-router-dom";
 import { useLogin } from "../hooks/useLogin.js";
 import { useAuth } from "@/hooks/useAuth.js";
 import { PwaInstallBanner } from "@/pwa/PwaInstallBanner.jsx";
+import { normalizeEthiopianPhone } from "@/utils/phone.utils.js";
+
+/**
+ * Intelligently formats the login identifier:
+ * - If input contains letters or '@', it is treated as an email (no phone formatting).
+ * - If input is phone-like (starts with 0, +, 9, 7, or contains digits only),
+ *   it automatically applies +251, strips leading 0, and truncates extra digits to 9.
+ */
+const handleIdentifierChange = (value) => {
+	if (!value) return "";
+	const trimmed = value.trim();
+
+	// If user is typing an email (contains letters or '@'), keep as plain text
+	if (trimmed.includes("@") || /[a-zA-Z]/.test(trimmed)) {
+		return value;
+	}
+
+	// If user is typing or pasting a phone number
+	const digitsOnly = trimmed.replace(/\D/g, "");
+	if (
+		trimmed.startsWith("+") ||
+		trimmed.startsWith("0") ||
+		digitsOnly.length > 0
+	) {
+		return normalizeEthiopianPhone(trimmed);
+	}
+
+	return value;
+};
 
 export const LoginPage = () => {
 	const navigate = useNavigate();
@@ -27,7 +56,7 @@ export const LoginPage = () => {
 	useEffect(() => {
 		if (isAuthenticated) {
 			if (role === "FIELD_AUDITOR") {
-				navigate("/survey", { replace: true });
+				navigate("/audits", { replace: true });
 			} else {
 				navigate("/dashboard", { replace: true });
 			}
@@ -38,7 +67,8 @@ export const LoginPage = () => {
 		e.preventDefault();
 		setErrorMessage("");
 
-		if (!identifier.trim()) {
+		const cleanIdentifier = identifier.trim();
+		if (!cleanIdentifier) {
 			setErrorMessage("Please enter your phone number or email.");
 			return;
 		}
@@ -48,8 +78,15 @@ export const LoginPage = () => {
 			return;
 		}
 
+		// Final normalization check before network call
+		const isEmail =
+			cleanIdentifier.includes("@") || /[a-zA-Z]/.test(cleanIdentifier);
+		const finalIdentifier = isEmail
+			? cleanIdentifier.toLowerCase()
+			: normalizeEthiopianPhone(cleanIdentifier);
+
 		loginMutation.mutate(
-			{ identifier: identifier.trim(), password },
+			{ identifier: finalIdentifier, password },
 			{
 				onError: (err) => {
 					setErrorMessage(
@@ -65,30 +102,30 @@ export const LoginPage = () => {
 		<div className="flex min-h-screen flex-col justify-center bg-slate-50 px-4 py-8 sm:px-6 sm:py-12">
 			<div className="mx-auto w-full max-w-sm">
 				{/* Brand Header */}
-<div className="text-center space-y-3 mb-6">
-  <div className="flex justify-center">
-    <img
-      src="/aires-logo.svg"
-      alt="Aires Communication"
-      className="h-16 w-auto object-contain drop-shadow-xs"
-    />
-  </div>
-  <div>
-    {/* Connected AIRESBI Brand Header */}
-    <div className="flex items-baseline justify-center font-black tracking-tight leading-none select-none">
-      <span className="text-2xl sm:text-3xl tracking-tight text-[#A41821]">
-        AIRES
-      </span>
-      <span className="text-3xl sm:text-4xl font-black tracking-tighter text-[#017C4D] -ml-0.5">
-        BI
-      </span>
-    </div>
-    
-    <p className="text-xs font-medium text-slate-400 mt-2">
-      Aires Business intelligence
-    </p>
-  </div>
-</div>
+				<div className="text-center space-y-3 mb-6">
+					<div className="flex justify-center">
+						<img
+							src="/aires-logo.svg"
+							alt="Aires Communication"
+							className="h-16 w-auto object-contain drop-shadow-xs"
+						/>
+					</div>
+					<div>
+						{/* Connected AIRESBI Brand Header */}
+						<div className="flex items-baseline justify-center font-black tracking-tight leading-none select-none">
+							<span className="text-2xl sm:text-3xl tracking-tight text-[#A41821]">
+								AIRES
+							</span>
+							<span className="text-3xl sm:text-4xl font-black tracking-tighter text-[#017C4D] -ml-0.5">
+								BI
+							</span>
+						</div>
+
+						<p className="text-xs font-medium text-slate-400 mt-2">
+							Aires Business Intelligence
+						</p>
+					</div>
+				</div>
 
 				{/* Login Form Card */}
 				<div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-xs">
@@ -118,14 +155,19 @@ export const LoginPage = () => {
 							</div>
 						)}
 
-						{/* Identifier Input (Phone or Email) */}
+						{/* Identifier Input (Smart Phone or Email Normalizer) */}
 						<div>
-							<label
-								htmlFor="identifier"
-								className="block text-xs font-bold text-slate-700 mb-1.5"
-							>
-								Phone Number or Email
-							</label>
+							<div className="flex items-center justify-between mb-1.5">
+								<label
+									htmlFor="identifier"
+									className="block text-xs font-bold text-slate-700"
+								>
+									Phone Number or Email
+								</label>
+								<span className="text-[10px] text-slate-400 font-mono">
+									+251 9... / user@aires.et
+								</span>
+							</div>
 							<input
 								ref={identifierInputRef}
 								id="identifier"
@@ -134,9 +176,11 @@ export const LoginPage = () => {
 								autoComplete="username"
 								inputMode="text"
 								required
-								placeholder="+2519... or user@aires.et"
+								placeholder="+251911223344 or name@aires.et"
 								value={identifier}
-								onChange={(e) => setIdentifier(e.target.value)}
+								onChange={(e) =>
+									setIdentifier(handleIdentifierChange(e.target.value))
+								}
 								disabled={loginMutation.isPending}
 								className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-3 text-sm font-medium text-slate-900 placeholder:text-slate-400 focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] outline-hidden transition disabled:bg-slate-100"
 							/>
@@ -221,7 +265,7 @@ export const LoginPage = () => {
 									<span>Signing in...</span>
 								</>
 							) : (
-								<span>Sign In </span>
+								<span>Sign In</span>
 							)}
 						</button>
 					</form>
@@ -229,10 +273,10 @@ export const LoginPage = () => {
 
 				{/* Security / System Footer */}
 				<p className="text-center text-[11px] text-slate-400 mt-6">
-					 Aires Business intelligence
+					Aires Business Intelligence
 				</p>
 			</div>
-			 <PwaInstallBanner />
+			<PwaInstallBanner />
 		</div>
 	);
 };
