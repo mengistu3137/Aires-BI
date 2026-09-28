@@ -164,9 +164,7 @@ export const LoginPage = () => {
 								>
 									Phone Number or Email
 								</label>
-								<span className="text-[10px] text-slate-400 font-mono">
-									+251 9... / user@aires.et
-								</span>
+								
 							</div>
 							<input
 								ref={identifierInputRef}

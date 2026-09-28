@@ -28,7 +28,7 @@ const LocationPermissionBadge = ({ role, permission }) => {
 	} else if (isDenied) {
 		badgeStyle = "bg-red-50 text-[#A41821] border-red-200";
 		dotStyle = "bg-[#A41821]";
-		label = "Denied / Blocked";
+		label = "Denied";
 	} else if (isPrompt) {
 		badgeStyle = "bg-amber-50 text-amber-700 border-amber-200";
 		dotStyle = "bg-amber-500";
@@ -54,7 +54,7 @@ const DEFAULT_CREATE_FORM = {
 };
 
 export const UsersPage = () => {
-	const { user: currentUser, isAdmin, isAuditor } = useAuth();
+	const { isAdmin, isAuditor } = useAuth();
 	const { users, isLoading, createUser, updateUser, deleteUser } = useUsers();
 
 	// 1. Strict Admin-Only Authorization Guard
@@ -66,6 +66,10 @@ export const UsersPage = () => {
 	const [editingUser, setEditingUser] = useState(null);
 	const [deleteCandidate, setDeleteCandidate] = useState(null);
 
+	// Password visibility states
+	const [showCreatePassword, setShowCreatePassword] = useState(false);
+	const [showEditPassword, setShowEditPassword] = useState(false);
+
 	const [createFormData, setCreateFormData] = useState(DEFAULT_CREATE_FORM);
 	const [editFormData, setEditFormData] = useState({
 		name: "",
@@ -76,20 +80,19 @@ export const UsersPage = () => {
 		active: true,
 	});
 
-	// Open Edit Modal
 	const handleOpenEditModal = (u) => {
 		setEditingUser(u);
+		setShowEditPassword(false);
 		setEditFormData({
 			name: u.name || "",
 			phone: normalizeEthiopianPhone(u.phone || ""),
 			email: u.email || "",
-			password: "", // Left blank unless admin wishes to reset
+			password: "", // Left blank unless admin chooses to reset
 			role: u.role || "FIELD_AUDITOR",
 			active: u.active !== false,
 		});
 	};
 
-	// Toggle active state in table
 	const handleToggleActive = async (u) => {
 		try {
 			await updateUser({
@@ -101,7 +104,6 @@ export const UsersPage = () => {
 		}
 	};
 
-	// Confirm delete/deactivate
 	const handleConfirmDelete = async () => {
 		if (!deleteCandidate) return;
 		try {
@@ -117,7 +119,6 @@ export const UsersPage = () => {
 		}
 	};
 
-	// Submit Create User
 	const handleCreateSubmit = async (e) => {
 		e.preventDefault();
 
@@ -134,13 +135,13 @@ export const UsersPage = () => {
 				email: createFormData.email?.trim() || undefined,
 			});
 			setIsCreateModalOpen(false);
+			setShowCreatePassword(false);
 			setCreateFormData(DEFAULT_CREATE_FORM);
 		} catch {
 			// Error handled in hook
 		}
 	};
 
-	// Submit Edit User
 	const handleEditSubmit = async (e) => {
 		e.preventDefault();
 		if (!editingUser) return;
@@ -161,7 +162,6 @@ export const UsersPage = () => {
 				active: editFormData.active,
 			};
 
-			// Only pass password if admin typed a new one
 			if (editFormData.password.trim()) {
 				updates.password = editFormData.password.trim();
 			}
@@ -172,6 +172,7 @@ export const UsersPage = () => {
 			});
 
 			setEditingUser(null);
+			setShowEditPassword(false);
 		} catch {
 			// Error handled in hook
 		}
@@ -186,15 +187,15 @@ export const UsersPage = () => {
 	}
 
 	return (
-		<div className="mx-auto max-w-6xl space-y-6 pb-12">
+		<div className="mx-auto max-w-6xl space-y-5 pb-16 px-1 sm:px-0">
 			{/* Top Banner */}
-			<div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+			<div className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 shadow-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
 				<div>
 					<div className="flex items-center gap-2">
-						<h1 className="text-xl font-black text-slate-900 tracking-tight">
+						<h1 className="text-lg sm:text-xl font-black text-slate-900 tracking-tight">
 							Auditors & Staff Management
 						</h1>
-						<span className="rounded-md bg-red-50 border border-red-200 px-2 py-0.5 text-[10px] font-bold text-[#A41821] uppercase tracking-wider">
+						<span className="rounded-md bg-red-50 border border-red-200 px-2 py-0.5 text-[9px] sm:text-[10px] font-bold text-[#A41821] uppercase tracking-wider">
 							Admin Only
 						</span>
 					</div>
@@ -208,17 +209,18 @@ export const UsersPage = () => {
 					type="button"
 					onClick={() => {
 						setCreateFormData(DEFAULT_CREATE_FORM);
+						setShowCreatePassword(false);
 						setIsCreateModalOpen(true);
 					}}
-					className="inline-flex items-center gap-2 rounded-xl bg-[#A41821] hover:bg-[#7F1219] px-4 py-2.5 text-xs font-bold text-white shadow-xs transition active:scale-95 cursor-pointer"
+					className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-xl bg-[#A41821] hover:bg-[#7F1219] px-4 py-2.5 text-xs font-bold text-white shadow-xs transition active:scale-95 cursor-pointer"
 				>
-					<span className="text-sm">+</span>
+					<span className="text-sm font-bold">+</span>
 					Add User
 				</button>
 			</div>
 
-			{/* Users Table */}
-			<div className="rounded-2xl border border-slate-200 bg-white shadow-xs overflow-hidden">
+			{/* Desktop Table View (Visible md and above) */}
+			<div className="hidden md:block rounded-2xl border border-slate-200 bg-white shadow-xs overflow-hidden">
 				<div className="overflow-x-auto">
 					<table className="w-full text-left text-xs">
 						<thead className="bg-slate-50 text-slate-500 border-b border-slate-100 uppercase tracking-wider font-semibold text-[10px]">
@@ -319,24 +321,131 @@ export const UsersPage = () => {
 				</div>
 			</div>
 
-			{/* 2. Add User Modal */}
+			{/* Mobile Card List View (Visible on small screens < md) */}
+			<div className="space-y-3 md:hidden">
+				{users.map((u) => (
+					<div
+						key={u.id}
+						className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs space-y-3 transition"
+					>
+						{/* User Title & Badges */}
+						<div className="flex items-start justify-between gap-2">
+							<div className="min-w-0 flex-1">
+								<div className="font-bold text-slate-900 text-sm truncate">
+									{u.name}
+								</div>
+								<div className="text-[11px] text-slate-400 truncate">
+									{u.email || "No email assigned"}
+								</div>
+							</div>
+
+							<div className="flex flex-col items-end gap-1 flex-none">
+								<span
+									className={`inline-flex rounded-md px-2 py-0.5 text-[9px] font-bold ${
+										u.role === "ADMIN"
+											? "bg-slate-800 text-white"
+											: u.role === "MANAGER"
+												? "bg-emerald-50 text-[#017C4D] border border-emerald-200"
+												: "bg-red-50 text-[#A41821] border border-red-200"
+									}`}
+								>
+									{u.role.replace("_", " ")}
+								</span>
+								<span
+									className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold ${
+										u.active
+											? "bg-emerald-50 text-[#017C4D]"
+											: "bg-slate-100 text-slate-400"
+									}`}
+								>
+									<span
+										className={`h-1.5 w-1.5 rounded-full ${
+											u.active ? "bg-[#017C4D]" : "bg-slate-400"
+										}`}
+									/>
+									{u.active ? "Active" : "Inactive"}
+								</span>
+							</div>
+						</div>
+
+						{/* Quick Metadata Matrix */}
+						<div className="grid grid-cols-2 gap-2 text-xs bg-slate-50/70 rounded-xl p-2.5 border border-slate-100">
+							<div>
+								<span className="text-slate-400 block text-[9px] uppercase font-bold tracking-wider">
+									Phone
+								</span>
+								<span className="font-mono font-semibold text-slate-700">
+									{u.phone}
+								</span>
+							</div>
+							<div>
+								<span className="text-slate-400 block text-[9px] uppercase font-bold tracking-wider">
+									GPS Permission
+								</span>
+								<div className="mt-0.5">
+									<LocationPermissionBadge
+										role={u.role}
+										permission={u.locationPermission}
+									/>
+								</div>
+							</div>
+						</div>
+
+						{/* Stats Summary */}
+						<div className="text-[11px] text-slate-500 font-medium">
+							{u.stats?.assignments || 0} assignments •{" "}
+							{u.stats?.createdAudits || 0} audits
+						</div>
+
+						{/* Mobile Actions */}
+						<div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+							<button
+								type="button"
+								onClick={() => handleOpenEditModal(u)}
+								className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition cursor-pointer"
+							>
+								Edit
+							</button>
+							<button
+								type="button"
+								onClick={() => handleToggleActive(u)}
+								className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition cursor-pointer"
+							>
+								{u.active ? "Deactivate" : "Activate"}
+							</button>
+							<button
+								type="button"
+								onClick={() => setDeleteCandidate(u)}
+								className="rounded-lg bg-red-50 border border-red-200 px-3 py-1.5 text-xs font-semibold text-[#A41821] hover:bg-red-100 transition cursor-pointer"
+							>
+								Delete
+							</button>
+						</div>
+					</div>
+				))}
+			</div>
+
+			{/* Add User Modal */}
 			{isCreateModalOpen && (
-				<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
-					<div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl border border-slate-100 space-y-4">
-						<div className="flex items-center justify-between border-b border-slate-100 pb-3">
+				<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4 overflow-y-auto">
+					<div className="w-full max-w-md rounded-2xl bg-white p-5 sm:p-6 shadow-xl border border-slate-100 space-y-4 my-auto max-h-[90vh] flex flex-col">
+						<div className="flex items-center justify-between border-b border-slate-100 pb-3 flex-none">
 							<h2 className="text-base font-bold text-slate-900">
 								Add Staff / Auditor
 							</h2>
 							<button
 								type="button"
 								onClick={() => setIsCreateModalOpen(false)}
-								className="text-slate-400 hover:text-slate-600 cursor-pointer"
+								className="text-slate-400 hover:text-slate-600 cursor-pointer p-1"
 							>
 								✕
 							</button>
 						</div>
 
-						<form onSubmit={handleCreateSubmit} className="space-y-3 text-xs">
+						<form
+							onSubmit={handleCreateSubmit}
+							className="space-y-3.5 text-xs overflow-y-auto flex-1 pr-1"
+						>
 							<div>
 								<label className="block font-semibold text-slate-700 mb-1">
 									Full Name
@@ -352,18 +461,17 @@ export const UsersPage = () => {
 											name: e.target.value,
 										})
 									}
-									className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] outline-hidden"
+									className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm text-slate-800 focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] outline-hidden"
 								/>
 							</div>
 
-							{/* Phone with Auto +251 & Paste Truncate */}
 							<div>
 								<div className="flex items-center justify-between mb-1">
 									<label className="font-semibold text-slate-700">
 										Phone Number
 									</label>
 									<span className="text-[10px] text-slate-400 font-mono">
-										Format: +251 9XXXXXXXX
+										+251 9XXXXXXXX
 									</span>
 								</div>
 								<input
@@ -377,7 +485,7 @@ export const UsersPage = () => {
 											phone: normalizeEthiopianPhone(e.target.value),
 										})
 									}
-									className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm font-mono font-semibold text-slate-800 focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] outline-hidden"
+									className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm font-mono font-semibold text-slate-800 focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] outline-hidden"
 								/>
 							</div>
 
@@ -395,27 +503,75 @@ export const UsersPage = () => {
 											email: e.target.value,
 										})
 									}
-									className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] outline-hidden"
+									className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm text-slate-800 focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] outline-hidden"
 								/>
 							</div>
 
+							{/* Password with Eye Show/Hide Toggle */}
 							<div>
 								<label className="block font-semibold text-slate-700 mb-1">
 									Password
 								</label>
-								<input
-									type="password"
-									required
-									placeholder="••••••••"
-									value={createFormData.password}
-									onChange={(e) =>
-										setCreateFormData({
-											...createFormData,
-											password: e.target.value,
-										})
-									}
-									className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] outline-hidden"
-								/>
+								<div className="relative">
+									<input
+										type={showCreatePassword ? "text" : "password"}
+										required
+										placeholder="••••••••"
+										value={createFormData.password}
+										onChange={(e) =>
+											setCreateFormData({
+												...createFormData,
+												password: e.target.value,
+											})
+										}
+										className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 pr-11 text-sm text-slate-800 focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] outline-hidden"
+									/>
+									<button
+										type="button"
+										tabIndex={-1}
+										onClick={() => setShowCreatePassword(!showCreatePassword)}
+										className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 transition cursor-pointer"
+										aria-label={
+											showCreatePassword ? "Hide password" : "Show password"
+										}
+									>
+										{showCreatePassword ? (
+											<svg
+												className="h-4 w-4"
+												fill="none"
+												viewBox="0 0 24 24"
+												stroke="currentColor"
+											>
+												<path
+													strokeLinecap="round"
+													strokeLinejoin="round"
+													strokeWidth={1.8}
+													d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l18 18"
+												/>
+											</svg>
+										) : (
+											<svg
+												className="h-4 w-4"
+												fill="none"
+												viewBox="0 0 24 24"
+												stroke="currentColor"
+											>
+												<path
+													strokeLinecap="round"
+													strokeLinejoin="round"
+													strokeWidth={1.8}
+													d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+												/>
+												<path
+													strokeLinecap="round"
+													strokeLinejoin="round"
+													strokeWidth={1.8}
+													d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+												/>
+											</svg>
+										)}
+									</button>
+								</div>
 							</div>
 
 							<div>
@@ -430,7 +586,7 @@ export const UsersPage = () => {
 											role: e.target.value,
 										})
 									}
-									className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] outline-hidden"
+									className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm text-slate-800 focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] outline-hidden"
 								>
 									<option value="FIELD_AUDITOR">Field Auditor</option>
 									<option value="MANAGER">Pricing Manager</option>
@@ -438,7 +594,7 @@ export const UsersPage = () => {
 								</select>
 							</div>
 
-							<div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+							<div className="flex justify-end gap-2 pt-3 border-t border-slate-100 flex-none">
 								<button
 									type="button"
 									onClick={() => setIsCreateModalOpen(false)}
@@ -458,29 +614,32 @@ export const UsersPage = () => {
 				</div>
 			)}
 
-			{/* 3. Edit User Modal */}
+			{/* Edit User Modal */}
 			{editingUser && (
-				<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
-					<div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl border border-slate-100 space-y-4">
-						<div className="flex items-center justify-between border-b border-slate-100 pb-3">
+				<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4 overflow-y-auto">
+					<div className="w-full max-w-md rounded-2xl bg-white p-5 sm:p-6 shadow-xl border border-slate-100 space-y-4 my-auto max-h-[90vh] flex flex-col">
+						<div className="flex items-center justify-between border-b border-slate-100 pb-3 flex-none">
 							<div>
 								<h2 className="text-base font-bold text-slate-900">
 									Edit User Profile
 								</h2>
-								<p className="text-[11px] text-slate-500 font-mono">
+								<p className="text-[10px] text-slate-400 font-mono truncate max-w-[200px]">
 									ID: {editingUser.id}
 								</p>
 							</div>
 							<button
 								type="button"
 								onClick={() => setEditingUser(null)}
-								className="text-slate-400 hover:text-slate-600 cursor-pointer"
+								className="text-slate-400 hover:text-slate-600 cursor-pointer p-1"
 							>
 								✕
 							</button>
 						</div>
 
-						<form onSubmit={handleEditSubmit} className="space-y-3 text-xs">
+						<form
+							onSubmit={handleEditSubmit}
+							className="space-y-3.5 text-xs overflow-y-auto flex-1 pr-1"
+						>
 							<div>
 								<label className="block font-semibold text-slate-700 mb-1">
 									Full Name
@@ -492,18 +651,17 @@ export const UsersPage = () => {
 									onChange={(e) =>
 										setEditFormData({ ...editFormData, name: e.target.value })
 									}
-									className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] outline-hidden"
+									className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm text-slate-800 focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] outline-hidden"
 								/>
 							</div>
 
-							{/* Phone with Auto +251 & Paste Truncate */}
 							<div>
 								<div className="flex items-center justify-between mb-1">
 									<label className="font-semibold text-slate-700">
 										Phone Number
 									</label>
 									<span className="text-[10px] text-slate-400 font-mono">
-										Format: +251 9XXXXXXXX
+										+251 9XXXXXXXX
 									</span>
 								</div>
 								<input
@@ -516,7 +674,7 @@ export const UsersPage = () => {
 											phone: normalizeEthiopianPhone(e.target.value),
 										})
 									}
-									className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm font-mono font-semibold text-slate-800 focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] outline-hidden"
+									className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm font-mono font-semibold text-slate-800 focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] outline-hidden"
 								/>
 							</div>
 
@@ -531,31 +689,79 @@ export const UsersPage = () => {
 									onChange={(e) =>
 										setEditFormData({ ...editFormData, email: e.target.value })
 									}
-									className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] outline-hidden"
+									className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm text-slate-800 focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] outline-hidden"
 								/>
 							</div>
 
+							{/* Reset Password with Eye Show/Hide Toggle */}
 							<div>
 								<div className="flex items-center justify-between mb-1">
 									<label className="font-semibold text-slate-700">
 										Reset Password
 									</label>
 									<span className="text-[10px] text-slate-400">
-										Leave blank to keep unchanged
+										Leave blank to keep current
 									</span>
 								</div>
-								<input
-									type="password"
-									placeholder="Enter new password to reset"
-									value={editFormData.password}
-									onChange={(e) =>
-										setEditFormData({
-											...editFormData,
-											password: e.target.value,
-										})
-									}
-									className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] outline-hidden"
-								/>
+								<div className="relative">
+									<input
+										type={showEditPassword ? "text" : "password"}
+										placeholder="Enter new password to reset"
+										value={editFormData.password}
+										onChange={(e) =>
+											setEditFormData({
+												...editFormData,
+												password: e.target.value,
+											})
+										}
+										className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 pr-11 text-sm text-slate-800 focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] outline-hidden"
+									/>
+									<button
+										type="button"
+										tabIndex={-1}
+										onClick={() => setShowEditPassword(!showEditPassword)}
+										className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 transition cursor-pointer"
+										aria-label={
+											showEditPassword ? "Hide password" : "Show password"
+										}
+									>
+										{showEditPassword ? (
+											<svg
+												className="h-4 w-4"
+												fill="none"
+												viewBox="0 0 24 24"
+												stroke="currentColor"
+											>
+												<path
+													strokeLinecap="round"
+													strokeLinejoin="round"
+													strokeWidth={1.8}
+													d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l18 18"
+												/>
+											</svg>
+										) : (
+											<svg
+												className="h-4 w-4"
+												fill="none"
+												viewBox="0 0 24 24"
+												stroke="currentColor"
+											>
+												<path
+													strokeLinecap="round"
+													strokeLinejoin="round"
+													strokeWidth={1.8}
+													d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+												/>
+												<path
+													strokeLinecap="round"
+													strokeLinejoin="round"
+													strokeWidth={1.8}
+													d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+												/>
+											</svg>
+										)}
+									</button>
+								</div>
 							</div>
 
 							<div>
@@ -567,7 +773,7 @@ export const UsersPage = () => {
 									onChange={(e) =>
 										setEditFormData({ ...editFormData, role: e.target.value })
 									}
-									className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] outline-hidden"
+									className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm text-slate-800 focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] outline-hidden"
 								>
 									<option value="FIELD_AUDITOR">Field Auditor</option>
 									<option value="MANAGER">Pricing Manager</option>
@@ -587,14 +793,14 @@ export const UsersPage = () => {
 											active: e.target.value === "true",
 										})
 									}
-									className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] outline-hidden"
+									className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm text-slate-800 focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] outline-hidden"
 								>
 									<option value="true">Active (Can log in)</option>
 									<option value="false">Inactive (Suspended)</option>
 								</select>
 							</div>
 
-							<div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+							<div className="flex justify-end gap-2 pt-3 border-t border-slate-100 flex-none">
 								<button
 									type="button"
 									onClick={() => setEditingUser(null)}
@@ -617,7 +823,7 @@ export const UsersPage = () => {
 			{/* Confirmation Modal for User Deletion */}
 			{deleteCandidate && (
 				<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
-					<div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl border border-slate-100 space-y-4">
+					<div className="w-full max-w-sm rounded-2xl bg-white p-5 sm:p-6 shadow-xl border border-slate-100 space-y-4 my-auto">
 						<h3 className="text-base font-bold text-slate-900">
 							Confirm Deletion
 						</h3>
