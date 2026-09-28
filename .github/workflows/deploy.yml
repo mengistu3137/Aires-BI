@@ -7,7 +7,11 @@ on:
   workflow_dispatch:
     inputs:
       run_seed:
-        description: "⚠️ DANGER: Run database seed? (Only check if you intentionally want to run seed)"
+        description: "Run database seed?"
+        type: boolean
+        default: false
+      force_all:
+        description: "Force rebuild and deploy everything?"
         type: boolean
         default: false
 
@@ -19,35 +23,61 @@ jobs:
       - name: ⬇️ Checkout Repository
         uses: actions/checkout@v4
 
-      - name: ⚙️ Setup Node.js 22
+      # 1. ⚡ Detect exactly which files changed in this push
+      - name: 🔍 Check for Modified Paths
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            frontend:
+              - 'frontend/**'
+            backend:
+              - 'Backend/**'
+            backend_deps:
+              - 'Backend/package.json'
+              - 'Backend/package-lock.json'
+            prisma:
+              - 'Backend/prisma/**'
+
+      # 2. ⚡ Setup Node with caching enabled for frontend (cuts npm ci from 40s to 5s)
+      - name: ⚙️ Setup Node.js 22 with Cache
+        if: steps.filter.outputs.frontend == 'true' || github.event.inputs.force_all == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: 'npm'
+          cache-dependency-path: 'frontend/package-lock.json'
 
+      # 3. ⚡ Only build frontend if frontend files changed
       - name: 🏗️ Build Frontend (React)
+        if: steps.filter.outputs.frontend == 'true' || github.event.inputs.force_all == 'true'
         run: |
           cd frontend
-          npm ci
+          npm ci --prefer-offline
           npm run build
 
+      # Setup SSH key (only if deploying frontend or backend)
       - name: 🔐 Setup & Unlock SSH Key
+        if: steps.filter.outputs.frontend == 'true' || steps.filter.outputs.backend == 'true' || github.event.inputs.force_all == 'true'
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keygen -p -P "${{ secrets.SSH_PASSPHRASE }}" -N "" -f ~/.ssh/id_rsa
 
+      # 4. ⚡ Only upload frontend if dist was rebuilt
       - name: 🚀 Deploy Frontend to cPanel
+        if: steps.filter.outputs.frontend == 'true' || github.event.inputs.force_all == 'true'
         run: |
           rsync -avz --delete -e "ssh -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=no -o ConnectTimeout=30" frontend/dist/ ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/home/airescad/airesbi/
 
+      # 5. ⚡ Only upload backend if backend files changed
       - name: 🚀 Deploy Backend to cPanel
+        if: steps.filter.outputs.backend == 'true' || github.event.inputs.force_all == 'true'
         run: |
           rsync -avz --delete --exclude 'node_modules' --exclude '.env' --exclude '.htaccess' --exclude 'uploads' -e "ssh -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=no -o ConnectTimeout=30" Backend/ ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/home/airescad/biapi/
 
-      # SAFE: Seeding can NEVER happen on a normal push.
-      # It ONLY happens if an admin manually triggers it from GitHub Actions with run_seed = true.
-      - name: 🧭 Determine whether to seed
+      - name: 🧭 Determine Seed Execution
         id: seed_check
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.run_seed }}" = "true" ]; then
@@ -56,7 +86,12 @@ jobs:
             echo "should_seed=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: 🔄 Install Dependencies, Run Migrations, Seed (optional) & Restart Node
+      # 6. ⚡ Smart Remote Execution on cPanel:
+      # - Only runs npm install if Backend/package.json changed
+      # - Only runs prisma migrations if Backend/prisma/ changed
+      # - Only restarts server if backend changed
+      - name: 🔄 Smart Server Execution & Node Restart
+        if: steps.filter.outputs.backend == 'true' || steps.seed_check.outputs.should_seed == 'true' || github.event.inputs.force_all == 'true'
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SSH_HOST }}
@@ -64,21 +99,39 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           passphrase: ${{ secrets.SSH_PASSPHRASE }}
           port: ${{ secrets.SSH_PORT }}
-          envs: SHOULD_SEED
+          envs: DEPS_CHANGED,PRISMA_CHANGED,SHOULD_SEED,FORCE_ALL
           script: |
             source /home/airescad/nodevenv/biapi/22/bin/activate && cd /home/airescad/biapi
-            npm install --omit=dev
-            npx prisma generate
-            npx prisma migrate deploy
 
-            if [ "$SHOULD_SEED" = "true" ]; then
-              echo "⚠️ Running seed as requested via manual workflow dispatch..."
-              node prisma/seed.js
+            # 1. Skip slow npm install unless dependencies actually changed
+            if [ "$DEPS_CHANGED" = "true" ] || [ "$FORCE_ALL" = "true" ]; then
+              echo "📦 package.json changed. Running npm install on server..."
+              npm install --omit=dev
             else
-              echo "✅ Skipping seed. Live production data preserved."
+              echo "⚡ Dependencies unchanged. Skipping server npm install."
             fi
 
+            # 2. Skip Prisma generate/migrate unless schema changed
+            if [ "$PRISMA_CHANGED" = "true" ] || [ "$DEPS_CHANGED" = "true" ] || [ "$FORCE_ALL" = "true" ]; then
+              echo "🗄️ Schema changed. Running Prisma generate and migrate..."
+              npx prisma generate
+              npx prisma migrate deploy
+            else
+              echo "⚡ Prisma schema unchanged. Skipping migrations."
+            fi
+
+            # 3. Seed only when explicitly requested
+            if [ "$SHOULD_SEED" = "true" ]; then
+              echo "🌱 Running database seed..."
+              node prisma/seed.js
+            fi
+
+            # 4. Restart cPanel Phusion Passenger / Node.js
+            echo "🔄 Refreshing application..."
             mkdir -p /home/airescad/biapi/tmp
             touch /home/airescad/biapi/tmp/restart.txt
         env:
+          DEPS_CHANGED: ${{ steps.filter.outputs.backend_deps }}
+          PRISMA_CHANGED: ${{ steps.filter.outputs.prisma }}
           SHOULD_SEED: ${{ steps.seed_check.outputs.should_seed }}
+          FORCE_ALL: ${{ github.event.inputs.force_all }}
