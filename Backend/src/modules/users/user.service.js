@@ -124,37 +124,62 @@ export const create = async (payload) => {
 
   const passwordHash = await bcrypt.hash(payload.password, 10);
   const { password, ...data } = payload;
+  const cleanPhone = payload.phone && payload.phone !== "+251" ? payload.phone.trim() : null;
+  const cleanEmail = payload.email && payload.email.trim() !== "" ? payload.email.trim().toLowerCase() : null;
 
   const newUser = await prisma.user.create({
     data: {
       ...data,
-      email: data.email ? data.email.toLowerCase() : null,
+      phone: cleanPhone,
+      email: cleanEmail,
       passwordHash,
     },
   });
 
   return sanitizeUserRecord(newUser);
 };
-
 export const update = async (id, payload) => {
   await getById(id);
 
-  if (payload.phone) {
+  // Clean phone and email upfront if present in payload
+  const cleanPhone = payload.phone !== undefined
+    ? (payload.phone && payload.phone !== "+251" ? payload.phone.trim() : null)
+    : undefined;
+
+  const cleanEmail = payload.email !== undefined
+    ? (payload.email && payload.email.trim() !== "" ? payload.email.trim().toLowerCase() : null)
+    : undefined;
+
+  // Duplicate check using cleaned phone
+  if (cleanPhone) {
     const duplicate = await prisma.user.findFirst({
-      where: { phone: payload.phone, NOT: { id } },
+      where: { phone: cleanPhone, NOT: { id } },
     });
     if (duplicate) {
-      throw new ApiError(409, `Phone number '${payload.phone}' is already in use by another user.`);
+      throw new ApiError(409, `Phone number '${cleanPhone}' is already in use by another user.`);
+    }
+  }
+
+  // Duplicate check using cleaned email
+  if (cleanEmail) {
+    const duplicateEmail = await prisma.user.findFirst({
+      where: { email: cleanEmail, NOT: { id } },
+    });
+    if (duplicateEmail) {
+      throw new ApiError(409, `Email '${cleanEmail}' is already in use by another user.`);
     }
   }
 
   const data = { ...payload };
 
-  if (payload.email !== undefined) {
-    data.email = payload.email ? payload.email.toLowerCase() : null;
+  if (cleanPhone !== undefined) {
+    data.phone = cleanPhone;
   }
 
-  
+  if (cleanEmail !== undefined) {
+    data.email = cleanEmail;
+  }
+
   if (payload.password && payload.password.trim().length >= 6) {
     data.passwordHash = await bcrypt.hash(payload.password.trim(), 10);
   }

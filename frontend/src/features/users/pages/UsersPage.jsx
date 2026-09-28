@@ -474,7 +474,7 @@ export const UsersPage = () => {
 								</div>
 								<input
 									type="tel"
-									required
+								
 									placeholder="+251911223344"
 									value={createFormData.phone}
 									onChange={(e) =>
@@ -489,7 +489,7 @@ export const UsersPage = () => {
 
 							<div>
 								<label className="block font-semibold text-slate-700 mb-1">
-									Email (Optional)
+									Email 
 								</label>
 								<input
 									type="email"
