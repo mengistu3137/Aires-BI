@@ -470,9 +470,7 @@ export const UsersPage = () => {
 									<label className="font-semibold text-slate-700">
 										Phone Number
 									</label>
-									<span className="text-[10px] text-slate-400 font-mono">
-										+251 9XXXXXXXX
-									</span>
+								
 								</div>
 								<input
 									type="tel"
