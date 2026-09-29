@@ -1,5 +1,59 @@
 import { assignmentService } from "./assignment.service.js";
 
+
+export const createBatch = async (req, res, next) => {
+  try {
+    const assignments = await assignmentService.createBatch(req.body);
+    res.status(201).json({
+      status: "success",
+      message: `Batch dispatched ${assignments.length} assignments successfully`,
+      data: { assignments },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getStoreAllocations = async (req, res, next) => {
+  try {
+    const allocations = await assignmentService.getStoreAllocations(
+      req.params.storeId,
+      req.params.surveyPeriodId
+    );
+    res.status(200).json({ status: "success", data: allocations });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const updateStoreAllocations = async (req, res, next) => {
+  try {
+    const assignments = await assignmentService.updateStoreAllocations(req.body);
+    res.status(200).json({
+      status: "success",
+      message: "Store auditor allocations updated successfully",
+      data: { assignments },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getStoreProgress = async (req, res, next) => {
+  try {
+    const progress = await assignmentService.getStoreProgress(
+      req.params.storeId,
+      req.params.surveyPeriodId
+    );
+    res.status(200).json({
+      status: "success",
+      data: progress,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 /**
  * Get assignments belonging to the authenticated auditor
  */
@@ -105,7 +159,11 @@ export const assignmentController = {
   getMine,
   getAll,
   getById,
+  getStoreProgress,
   create,
+  createBatch,
+  getStoreAllocations,
+  updateStoreAllocations,
   update,
   remove,
 };

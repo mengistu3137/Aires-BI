@@ -6,10 +6,38 @@ import {
   updateAssignmentRequest,
   updateAssignmentStatusRequest,
   deleteAssignmentRequest,
+  createBatchAssignmentRequest,
+  updateStoreAllocationsRequest,
 } from "@/services/api/assignment.api.js";
 import { useAuth } from "@/hooks/useAuth.js";
 import toast from "react-hot-toast";
+export const useCreateBatchAssignment = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: createBatchAssignmentRequest,
+    onSuccess: () => {
+      toast.success("All assignments dispatched successfully");
+      invalidate(queryClient);
+    },
+    onError: (err) => {
+      toast.error(err.response?.data?.message || err.message || "Failed to dispatch assignments");
+    },
+  });
+};
 
+export const useUpdateStoreAllocations = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: updateStoreAllocationsRequest,
+    onSuccess: () => {
+      toast.success("Store allocations updated successfully");
+      invalidate(queryClient);
+    },
+    onError: (err) => {
+      toast.error(err.response?.data?.message || err.message || "Failed to update allocations");
+    },
+  });
+};
 /**
  * Fetch assignments. Role-aware:
  *   - FIELD_AUDITOR → GET /assignments/mine

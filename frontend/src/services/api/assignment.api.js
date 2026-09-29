@@ -1,5 +1,22 @@
 import { apiClient } from "@/services/client.js";
 
+
+export const createBatchAssignmentRequest = async (payload) => {
+  const response = await apiClient.post("/assignments/batch", payload);
+  return response.data;
+};
+
+export const getStoreAllocationsRequest = async ({ storeId, surveyPeriodId }) => {
+  const response = await apiClient.get(
+    `/assignments/store/${storeId}/period/${surveyPeriodId}/allocations`
+  );
+  return response.data;
+};
+
+export const updateStoreAllocationsRequest = async (payload) => {
+  const response = await apiClient.put("/assignments/store/allocations", payload);
+  return response.data;
+};
 /**
  * Get assignments for the authenticated field auditor.
  * Backend: GET /assignments/mine
