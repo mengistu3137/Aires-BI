@@ -31,8 +31,334 @@ const ASSIGNMENT_INCLUDE_RELATIONS = {
       startedAt: true,
       completedAt: true,
       createdAt: true,
+      _count: { select: { observations: true } },
     },
   },
+};
+// Append to Backend/src/modules/assignment/assignment.service.js:
+
+/**
+ * Creates batch assignments across multiple auditors for a single store in one transaction.
+ */
+export const createBatch = async (payload) => {
+  const { storeId, surveyPeriodId, allocations } = payload;
+
+  const store = await prisma.store.findUnique({ where: { id: storeId } });
+  if (!store || !store.active) {
+    throw new ApiError(400, "Target physical store does not exist or is inactive.");
+  }
+
+  const period = await prisma.surveyPeriod.findUnique({ where: { id: surveyPeriodId } });
+  if (!period || period.status === "CLOSED") {
+    throw new ApiError(400, "Survey cycle does not exist or is closed.");
+  }
+
+  // Verify all auditors
+  const auditorIds = allocations.map((a) => a.auditorId);
+  const distinctAuditors = new Set(auditorIds);
+  if (distinctAuditors.size !== auditorIds.length) {
+    throw new ApiError(400, "Duplicate auditors found in dispatch list.");
+  }
+
+  const validAuditors = await prisma.user.findMany({
+    where: { id: { in: auditorIds }, active: true, role: "FIELD_AUDITOR" },
+    select: { id: true, name: true },
+  });
+
+  if (validAuditors.length !== auditorIds.length) {
+    throw new ApiError(400, "One or more assigned users are not active field auditors.");
+  }
+
+  // Atomic creation of all assignments
+  const createdAssignments = await prisma.$transaction(async (tx) => {
+    const results = [];
+
+    for (const alloc of allocations) {
+      // Check existing
+      const existing = await tx.surveyAssignment.findUnique({
+        where: {
+          auditorId_storeId_surveyPeriodId: {
+            auditorId: alloc.auditorId,
+            storeId,
+            surveyPeriodId,
+          },
+        },
+      });
+
+      if (existing) {
+        throw new ApiError(
+          409,
+          `An assignment already exists for auditor [${alloc.auditorId}] at this store for this cycle.`
+        );
+      }
+
+      // 1. Create Survey Assignment
+      const asn = await tx.surveyAssignment.create({
+        data: {
+          auditorId: alloc.auditorId,
+          storeId,
+          surveyPeriodId,
+          status: "NOT_STARTED",
+        },
+      });
+
+      // 2. Create Assignment Items
+      if (alloc.productIds.length > 0) {
+        await tx.assignmentItem.createMany({
+          data: alloc.productIds.map((pId) => ({
+            assignmentId: asn.id,
+            productId: pId,
+            required: true,
+          })),
+        });
+      }
+
+      // 3. Create linked initial Audit
+      await tx.audit.create({
+        data: {
+          assignmentId: asn.id,
+          auditorId: asn.auditorId,
+          storeId: asn.storeId,
+          surveyPeriodId: asn.surveyPeriodId,
+          status: "NOT_STARTED",
+        },
+      });
+
+      results.push(asn.id);
+    }
+
+    return tx.surveyAssignment.findMany({
+      where: { id: { in: results } },
+      include: ASSIGNMENT_INCLUDE_RELATIONS,
+    });
+  });
+
+  return createdAssignments.map(formatAssignmentResponse);
+};
+
+/**
+ * Retrieves all current auditor allocations for a specific store and survey period.
+ */
+export const getStoreAllocations = async (storeId, surveyPeriodId) => {
+  const assignments = await prisma.surveyAssignment.findMany({
+    where: { storeId, surveyPeriodId },
+    include: {
+      auditor: { select: { id: true, name: true, phone: true } },
+      items: {
+        include: {
+          product: { select: { id: true, name: true, sku: true, category: true, unit: true } },
+        },
+      },
+      audits: {
+        include: {
+          _count: { select: { observations: true } },
+          observations: { select: { productId: true } },
+        },
+      },
+    },
+    orderBy: { assignedAt: "asc" },
+  });
+
+  return assignments.map((asn) => {
+    const totalObservations = asn.audits.reduce(
+      (sum, a) => sum + (a._count?.observations || 0),
+      0
+    );
+    const observedProductIds = new Set(
+      asn.audits.flatMap((a) => a.observations.map((o) => o.productId))
+    );
+
+    const hasStarted = asn.status !== "NOT_STARTED" || totalObservations > 0;
+
+    return {
+      assignmentId: asn.id,
+      auditorId: asn.auditorId,
+      auditor: asn.auditor,
+      status: asn.status,
+      totalItems: asn.items.length,
+      productIds: asn.items.map((i) => i.productId),
+      observedCount: observedProductIds.size,
+      hasStarted,
+      canModify: !hasStarted,
+    };
+  });
+};
+
+/**
+ * Updates or rebalances store allocations.
+ * Protects already started audits and observed items.
+ */
+export const updateStoreAllocations = async (payload) => {
+  const { storeId, surveyPeriodId, allocations } = payload;
+
+  const currentAssignments = await prisma.surveyAssignment.findMany({
+    where: { storeId, surveyPeriodId },
+    include: {
+      auditor: { select: { id: true, name: true } },
+      audits: {
+        include: {
+          observations: { select: { productId: true } },
+          _count: { select: { observations: true } },
+        },
+      },
+      items: true,
+    },
+  });
+
+  const newAllocationsMap = new Map(allocations.map((a) => [a.auditorId, a]));
+
+  return prisma.$transaction(async (tx) => {
+    // 1. Check for removed auditors
+    for (const current of currentAssignments) {
+      if (!newAllocationsMap.has(current.auditorId)) {
+        const observationsCount = current.audits.reduce(
+          (sum, a) => sum + (a._count?.observations || 0),
+          0
+        );
+
+        if (observationsCount > 0 || current.status !== "NOT_STARTED") {
+          throw new ApiError(
+            409,
+            `Cannot remove auditor [${current.auditor.name}]: observations have already been recorded.`
+          );
+        }
+
+        // Safe delete unstarted assignment
+        await tx.audit.deleteMany({ where: { assignmentId: current.id, status: "NOT_STARTED" } });
+        await tx.assignmentItem.deleteMany({ where: { assignmentId: current.id } });
+        await tx.surveyAssignment.delete({ where: { id: current.id } });
+      }
+    }
+
+    // 2. Update existing allocations or add new ones
+    for (const alloc of allocations) {
+      const existing = currentAssignments.find((c) => c.auditorId === alloc.auditorId);
+
+      if (existing) {
+        // Verify that products already observed are NOT removed from the range
+        const observedProductIds = new Set(
+          existing.audits.flatMap((a) => a.observations.map((o) => o.productId))
+        );
+        const newProductIdsSet = new Set(alloc.productIds);
+
+        for (const obsProdId of observedProductIds) {
+          if (!newProductIdsSet.has(obsProdId)) {
+            throw new ApiError(
+              409,
+              `Cannot remove item from [${existing.auditor.name}] because field observations have already been recorded for that product.`
+            );
+          }
+        }
+
+        // Update items
+        await tx.assignmentItem.deleteMany({ where: { assignmentId: existing.id } });
+        await tx.assignmentItem.createMany({
+          data: alloc.productIds.map((pId) => ({
+            assignmentId: existing.id,
+            productId: pId,
+            required: true,
+          })),
+        });
+      } else {
+        // Add new auditor assignment to this store
+        const newAsn = await tx.surveyAssignment.create({
+          data: {
+            auditorId: alloc.auditorId,
+            storeId,
+            surveyPeriodId,
+            status: "NOT_STARTED",
+          },
+        });
+
+        await tx.assignmentItem.createMany({
+          data: alloc.productIds.map((pId) => ({
+            assignmentId: newAsn.id,
+            productId: pId,
+            required: true,
+          })),
+        });
+
+        await tx.audit.create({
+          data: {
+            assignmentId: newAsn.id,
+            auditorId: alloc.auditorId,
+            storeId,
+            surveyPeriodId,
+            status: "NOT_STARTED",
+          },
+        });
+      }
+    }
+
+    return tx.surveyAssignment.findMany({
+      where: { storeId, surveyPeriodId },
+      include: ASSIGNMENT_INCLUDE_RELATIONS,
+    });
+  });
+};
+
+
+export const getStoreProgress = async (storeId, surveyPeriodId) => {
+  const assignments = await prisma.surveyAssignment.findMany({
+    where: { storeId, surveyPeriodId },
+    include: {
+      audits: {
+        include: {
+          observations: {
+            select: { productId: true, price: true, availability: true, capturedAt: true },
+          },
+        },
+      },
+      items: {
+        include: {
+          product: {
+            select: { id: true, name: true, sku: true, category: true, unit: true },
+          },
+        },
+      },
+      auditor: { select: { id: true, name: true, phone: true } },
+    },
+  });
+
+  // Collect all unique products assigned to this store across auditors
+  const allAssignedProductsMap = new Map();
+  const observedProductsMap = new Map();
+
+  for (const asn of assignments) {
+    for (const item of asn.items) {
+      if (!allAssignedProductsMap.has(item.productId)) {
+        allAssignedProductsMap.set(item.productId, {
+          ...item.product,
+          assignedAuditors: [asn.auditor.name],
+        });
+      } else {
+        allAssignedProductsMap.get(item.productId).assignedAuditors.push(asn.auditor.name);
+      }
+    }
+
+    for (const audit of asn.audits) {
+      for (const obs of audit.observations) {
+        observedProductsMap.set(obs.productId, {
+          ...obs,
+          auditorName: asn.auditor.name,
+        });
+      }
+    }
+  }
+
+  const assignedProductsList = Array.from(allAssignedProductsMap.values());
+  const completedCount = observedProductsMap.size;
+  const totalCount = assignedProductsList.length;
+
+  return {
+    storeId,
+    surveyPeriodId,
+    totalProducts: totalCount,
+    completedProducts: completedCount,
+    remainingProducts: Math.max(0, totalCount - completedCount),
+    percentDone: totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0,
+    nextPendingProduct: assignedProductsList.find((p) => !observedProductsMap.has(p.id)) || null,
+  };
 };
 
 /**
@@ -500,4 +826,8 @@ export const assignmentService = {
   create,
   update,
   remove,
+  createBatch,
+  getStoreAllocations,
+  updateStoreAllocations,
+  getStoreProgress,
 };

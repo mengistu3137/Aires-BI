@@ -26,8 +26,9 @@ export const Sidebar = ({ activeTab, onSelectTab, isOpen, onClose }) => {
 				/>
 			)}
 
+			{/* Sticky Fixed Sidebar on Desktop + Hidden Scrollbar */}
 			<aside
-				className={`fixed inset-y-0 left-0 z-40 flex w-68 flex-col border-r border-slate-200 bg-white transition-transform duration-200 lg:static lg:translate-x-0 ${
+				className={`fixed inset-y-0 left-0 z-40 flex w-68 flex-col border-r border-slate-200 bg-white transition-transform duration-200 lg:sticky lg:top-0 lg:h-screen lg:flex-shrink-0 lg:translate-x-0 ${
 					isOpen ? "translate-x-0" : "-translate-x-full"
 				}`}
 			>
@@ -43,11 +44,11 @@ export const Sidebar = ({ activeTab, onSelectTab, isOpen, onClose }) => {
 					</div>
 				</div>
 
-				{/* Navigation */}
-				<nav className="flex-1 space-y-1.5 px-3 py-4 overflow-y-auto">
+				{/* Navigation Area: Vertically scrollable with HIDDEN scrollbar */}
+				<nav className="flex-1 space-y-1.5 px-3 py-4 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
 					{visibleNavigation.map((item) => {
 						const active = activeTab === item.id;
-						const Icon = item.icon; // lucide-react component
+						const Icon = item.icon;
 						return (
 							<button
 								key={item.id}
@@ -93,7 +94,7 @@ export const Sidebar = ({ activeTab, onSelectTab, isOpen, onClose }) => {
 				</div>
 			</aside>
 
-			{/* Period management modal (manager only) */}
+			{/* Period management modal */}
 			{isManager && (
 				<PeriodManagementModal
 					isOpen={isPeriodModalOpen}

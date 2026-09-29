@@ -23,9 +23,6 @@ export const createAssignmentSchema = z.object({
   status: z.enum(ASSIGNMENT_STATUSES).optional().default("NOT_STARTED"),
 });
 
-/**
- * Status-only update — used by FIELD_AUDITOR to advance their own assignment.
- */
 export const updateAssignmentStatusSchema = z.object({
   status: z.enum(ASSIGNMENT_STATUSES, {
     required_error:
@@ -33,11 +30,6 @@ export const updateAssignmentStatusSchema = z.object({
   }),
 });
 
-/**
- * Full update — ADMIN / MANAGER can change auditor, store, period, products.
- * All fields optional; at least one must be present.
- * `status` is still allowed here so the manager can advance from NOT_STARTED.
- */
 export const updateAssignmentSchema = z
   .object({
     auditorId: z.string().min(1, "Auditor ID cannot be empty").optional(),
@@ -70,3 +62,37 @@ export const assignmentQuerySchema = z
     status: z.enum(ASSIGNMENT_STATUSES).optional(),
   })
   .optional();
+
+// ============================================================
+// BATCH MULTI-AUDITOR ASSIGNMENT SCHEMAS
+// ============================================================
+
+export const createBatchAssignmentSchema = z.object({
+  storeId: z.string({ required_error: "Store ID is required" }).min(1),
+  surveyPeriodId: z.string({ required_error: "Survey Period ID is required" }).min(1),
+  allocations: z
+    .array(
+      z.object({
+        auditorId: z.string({ required_error: "Auditor ID is required" }).min(1),
+        productIds: z
+          .array(z.string())
+          .min(1, "Each auditor must be allocated at least one product"),
+      })
+    )
+    .min(1, "At least one auditor must be assigned"),
+});
+
+export const updateStoreAllocationsSchema = z.object({
+  storeId: z.string().min(1),
+  surveyPeriodId: z.string().min(1),
+  allocations: z
+    .array(
+      z.object({
+        auditorId: z.string().min(1),
+        productIds: z
+          .array(z.string())
+          .min(1, "Each auditor must be allocated at least one product"),
+      })
+    )
+    .min(1, "At least one auditor must remain assigned"),
+});
