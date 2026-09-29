@@ -1,5 +1,38 @@
 import React, { useState, useMemo } from "react";
 
+// Ultra-subtle status accent with soft glow
+const getStatusAccent = (row) => {
+	const rawStatus = (
+		row?.status ||
+		row?.state ||
+		row?.overallStatus ||
+		""
+	).toUpperCase();
+
+	switch (rawStatus) {
+		case "COMPLETED":
+		case "ACTIVE":
+		case "RESOLVED":
+		case "OPEN":
+			return "bg-[#017C4D] shadow-[0_1px_3px_rgba(1,124,77,0.25)]";
+		case "IN_PROGRESS":
+		case "PENDING":
+		case "WARNING":
+		case "UNDER_REVIEW":
+			return "bg-[#FE7914] shadow-[0_1px_3px_rgba(254,121,20,0.25)]";
+		case "CANCELLED":
+		case "INACTIVE":
+		case "CLOSED":
+		case "REJECTED":
+			return "bg-slate-300";
+		case "NOT_STARTED":
+			return "bg-slate-200";
+		default:
+			// Refined brand primary red hairline (monochromatic)
+			return "bg-gradient-to-r from-[#A41821] to-[#CC242F] shadow-[0_1px_3px_rgba(164,24,33,0.2)]";
+	}
+};
+
 export const DataTable = ({
 	columns = [],
 	data = [],
@@ -118,23 +151,34 @@ export const DataTable = ({
 							<div
 								key={row.id || rIdx}
 								onClick={() => onRowClick?.(row)}
-								className={`rounded-2xl border border-slate-200 bg-white p-4 shadow-xs space-y-2.5 transition ${
+								className={`group relative flex flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-xs transition-all duration-200 hover:border-[#A41821]/25 hover:shadow-md hover:shadow-[#A41821]/5 ${
 									onRowClick ? "cursor-pointer active:scale-[0.99]" : ""
 								}`}
 							>
-								{columns.map((col, cIdx) => (
-									<div
-										key={col.key || cIdx}
-										className="flex items-start justify-between gap-3 text-xs"
-									>
-										<span className="font-bold uppercase tracking-wider text-slate-400 text-[9px] flex-none">
-											{col.header}
-										</span>
-										<div className="text-right text-slate-800 font-medium">
-											{col.render ? col.render(row) : row[col.key]}
+								{/* Ultra-thin 1.5px glowing hairline */}
+								<div className={`h-[1.5px] w-full ${getStatusAccent(row)}`} />
+
+								<div className="flex flex-1 flex-col p-4 space-y-2.5">
+									{columns.map((col, cIdx) => (
+										<div
+											key={col.key || cIdx}
+											className="flex items-start justify-between gap-3 text-xs border-b border-slate-100/80 pb-2 last:border-b-0 last:pb-0"
+										>
+											<span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex-none pt-0.5">
+												{col.header}
+											</span>
+											<div className="text-right text-xs font-semibold text-slate-800">
+												{col.render ? col.render(row) : (row[col.key] ?? "—")}
+											</div>
 										</div>
-									</div>
-								))}
+									))}
+
+									{onRowClick && (
+										<div className="pt-1 flex items-center justify-end text-[11px] font-bold text-[#A41821] group-hover:text-[#7F1219] transition">
+											<span>View details →</span>
+										</div>
+									)}
+								</div>
 							</div>
 						))}
 					</div>
