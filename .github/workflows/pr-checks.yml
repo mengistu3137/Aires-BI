@@ -1,0 +1,144 @@
+name: PR Checks (Aires-BI)
+
+on:
+  pull_request:
+    branches:
+      - main
+
+# Cancel outdated runs when new commits are pushed to the same PR
+concurrency:
+  group: pr-checks-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  changes:
+    name: 🔍 Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      frontend: ${{ steps.filter.outputs.frontend }}
+      backend: ${{ steps.filter.outputs.backend }}
+      prisma: ${{ steps.filter.outputs.prisma }}
+      workflows: ${{ steps.filter.outputs.workflows }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            frontend:
+              - 'frontend/**'
+            backend:
+              - 'Backend/**'
+            prisma:
+              - 'Backend/prisma/**'
+            workflows:
+              - '.github/workflows/**'
+
+  frontend:
+    name: 🏗️ Frontend Build & Lint
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: 'frontend/package-lock.json'
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline
+
+      - name: Lint
+        run: npm run lint --if-present
+
+      - name: Run tests
+        run: npm test --if-present
+
+      - name: Build (must succeed before merge)
+        run: npm run build
+
+  backend:
+    name: ⚙️ Backend Checks
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: Backend
+    env:
+      # Dummy PostgreSQL URL: allows Prisma to validate the schema without connecting to a live DB
+      DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/airesbi_ci?schema=public"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: 'Backend/package-lock.json'
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline
+
+      - name: Syntax check all JS files
+        run: |
+          find . -name "*.js" -not -path "./node_modules/*" -not -path "./uploads/*" -print0 \
+            | xargs -0 -n1 node --check
+
+      - name: Validate Prisma schema
+        if: needs.changes.outputs.prisma == 'true' || needs.changes.outputs.backend == 'true'
+        run: |
+          npx prisma validate
+          npx prisma generate
+
+      - name: Lint
+        run: npm run lint --if-present
+
+      - name: Run tests
+        run: npm test --if-present
+
+  workflows:
+    name: 🧪 Lint GitHub Workflows
+    needs: changes
+    if: needs.changes.outputs.workflows == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run actionlint
+        uses: raven-actions/actionlint@v2
+
+  # Single required status check for branch protection.
+  # Skipped jobs count as OK; failed or cancelled jobs block merge.
+  ci-passed:
+    name: ✅ CI Passed
+    if: always()
+    needs: [changes, frontend, backend, workflows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Evaluate results
+        run: |
+          echo "changes:   ${{ needs.changes.result }}"
+          echo "frontend:  ${{ needs.frontend.result }}"
+          echo "backend:   ${{ needs.backend.result }}"
+          echo "workflows: ${{ needs.workflows.result }}"
+
+          if [ "${{ contains(needs.*.result, 'failure') }}" = "true" ] || [ "${{ contains(needs.*.result, 'cancelled') }}" = "true" ]; then
+            echo "❌ One or more checks failed."
+            exit 1
+          fi
+          echo "✅ All checks passed."
