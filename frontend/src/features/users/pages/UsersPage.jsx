@@ -45,9 +45,10 @@ const LocationPermissionBadge = ({ role, permission }) => {
 	);
 };
 
+// 1. Update DEFAULT_CREATE_FORM:
 const DEFAULT_CREATE_FORM = {
 	name: "",
-	phone: "+251",
+	phone: "", // Start blank so phone is truly optional when email is provided
 	email: "",
 	password: "",
 	role: "FIELD_AUDITOR",
@@ -119,64 +120,79 @@ export const UsersPage = () => {
 		}
 	};
 
-	const handleCreateSubmit = async (e) => {
-		e.preventDefault();
+	// 2. Update handleCreateSubmit:
+const handleCreateSubmit = async (e) => {
+	e.preventDefault();
 
-		if (createFormData.phone.length !== 13) {
-			toast.error(
-				"Please enter a valid 9-digit Ethiopian mobile number (+2519... or +2517...)",
-			);
-			return;
+	const phone = createFormData.phone.trim();
+	const email = createFormData.email.trim();
+
+	if (!phone && !email) {
+		toast.error("Please provide either a phone number or an email address");
+		return;
+	}
+
+	// Validate phone format only if phone was entered
+	if (phone && phone.length !== 13) {
+		toast.error(
+			"Please enter a valid 9-digit Ethiopian mobile number (+2519... or 09...)",
+		);
+		return;
+	}
+
+	try {
+		await createUser({
+			...createFormData,
+			phone: phone || undefined,
+			email: email || undefined,
+		});
+		setIsCreateModalOpen(false);
+		setShowCreatePassword(false);
+		setCreateFormData(DEFAULT_CREATE_FORM);
+	} catch {
+		// Error handled by mutation hook toast
+	}
+};
+// 3. Update handleEditSubmit:
+const handleEditSubmit = async (e) => {
+	e.preventDefault();
+	if (!editingUser) return;
+
+	const phone = editFormData.phone.trim();
+	const email = editFormData.email.trim();
+
+	if (!phone && !email) {
+		toast.error("Please provide either a phone number or an email address");
+		return;
+	}
+
+	if (phone && phone.length !== 13) {
+		toast.error(
+			"Please enter a valid 9-digit Ethiopian mobile number (+2519... or 09...)",
+		);
+		return;
+	}
+
+	try {
+		const updates = {
+			name: editFormData.name.trim(),
+			phone: phone || null,
+			email: email || null,
+			role: editFormData.role,
+			active: editFormData.active,
+		};
+
+		if (editFormData.password.trim()) {
+			updates.password = editFormData.password.trim();
 		}
 
-		try {
-			await createUser({
-				...createFormData,
-				email: createFormData.email?.trim() || undefined,
-			});
-			setIsCreateModalOpen(false);
-			setShowCreatePassword(false);
-			setCreateFormData(DEFAULT_CREATE_FORM);
-		} catch {
-			// Error handled in hook
-		}
-	};
-
-	const handleEditSubmit = async (e) => {
-		e.preventDefault();
-		if (!editingUser) return;
-
-		if (editFormData.phone.length !== 13) {
-			toast.error(
-				"Please enter a valid 9-digit Ethiopian mobile number (+2519... or +2517...)",
-			);
-			return;
-		}
-
-		try {
-			const updates = {
-				name: editFormData.name.trim(),
-				phone: editFormData.phone,
-				email: editFormData.email?.trim() || "",
-				role: editFormData.role,
-				active: editFormData.active,
-			};
-
-			if (editFormData.password.trim()) {
-				updates.password = editFormData.password.trim();
-			}
-
-			await updateUser({
-				id: editingUser.id,
-				updates,
-			});
-
-			setEditingUser(null);
-			setShowEditPassword(false);
-		} catch {
-			// Error handled in hook
-		}
-	};
+		await updateUser({ id: editingUser.id, updates });
+		setEditingUser(null);
+		setShowEditPassword(false);
+	} catch {
+		// Error handled by mutation hook toast
+	}
+};
 
 	if (isLoading) {
 		return (
