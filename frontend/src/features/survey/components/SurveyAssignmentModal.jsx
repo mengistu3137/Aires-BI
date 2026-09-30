@@ -166,6 +166,9 @@ export const SurveyAssignmentModal = ({
 					setAllocations(mapped);
 				} else {
 					setIsEditMode(false);
+					if (products.length > 0) {
+						setSelectedProductIds(products.map((p) => p.id));
+					}
 					const defaultCount = Math.min(3, auditors.length);
 					const initialAuditorIds = auditors
 						.slice(0, defaultCount)
@@ -448,8 +451,8 @@ export const SurveyAssignmentModal = ({
 							<select
 								value={surveyPeriodId}
 								onChange={(e) => setSurveyPeriodId(e.target.value)}
-								disabled={isEditMode}
-								className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 font-mono text-xs font-bold text-slate-800 outline-hidden focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] disabled:bg-slate-100"
+								disabled={Boolean(initialStoreId)}
+								className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 font-mono text-xs font-bold text-slate-800 outline-hidden focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] disabled:bg-slate-100 disabled:cursor-not-allowed"
 							>
 								{openPeriods.map((p) => (
 									<option key={p.id} value={p.id}>
@@ -466,8 +469,8 @@ export const SurveyAssignmentModal = ({
 							<select
 								value={storeId}
 								onChange={(e) => setStoreId(e.target.value)}
-								disabled={isEditMode || storesLoading}
-								className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800 outline-hidden focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] disabled:bg-slate-100"
+								disabled={Boolean(initialStoreId) || storesLoading}
+								className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800 outline-hidden focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] disabled:bg-slate-100 disabled:cursor-not-allowed"
 							>
 								{stores.map((s) => (
 									<option key={s.id} value={s.id}>
@@ -477,7 +480,6 @@ export const SurveyAssignmentModal = ({
 							</select>
 						</div>
 					</div>
-
 					{selectedStore && (
 						<p className="font-mono text-[11px] text-slate-400">
 							GPS Anchor: Lat {Number(selectedStore.latitude).toFixed(5)}, Lon{" "}

@@ -57,6 +57,17 @@ export const PRICE_ANALYSIS_CONFIG = {
  * @param {Array<Prisma.Decimal|string|number>} prices
  * @returns {{ minimumCompetitorPrice: Prisma.Decimal|null, competitorAveragePrice: Prisma.Decimal|null, count: number }}
  */
+
+export const calculateRecommendedPrice = (competitorAveragePrice, targetIndex) => {
+  if (!competitorAveragePrice || !targetIndex) return null;
+  const avg = new Decimal(competitorAveragePrice);
+  const target = new Decimal(targetIndex);
+
+  // avg * (target / 100)
+  return avg
+    .times(target.dividedBy(new Decimal(100)))
+    .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+};
 export const calculateCompetitorAggregates = (prices) => {
   if (!prices || prices.length === 0) {
     return {
@@ -193,8 +204,13 @@ export const determinePriceAction = ({
  * Formats a PriceAnalysis Prisma model into a clean JSON response DTO.
  * Explicitly formats Decimal objects into standard numbers/strings.
  */
+/**
+ * Formats a PriceAnalysis Prisma model into a clean JSON response DTO.
+ */
 export const formatPriceAnalysisResponse = (pa) => {
   if (!pa) return null;
+
+  const rec = calculateRecommendedPrice(pa.competitorAveragePrice, pa.targetIndex);
 
   return {
     id: pa.id,
@@ -214,24 +230,25 @@ export const formatPriceAnalysisResponse = (pa) => {
     action: pa.action,
     notes: pa.notes,
     calculatedAt: pa.calculatedAt,
+    recommendedPrice: rec !== null ? Number(rec) : null,
     product: pa.product
       ? {
-          id: pa.product.id,
-          name: pa.product.name,
-          sku: pa.product.sku,
-          barcode: pa.product.barcode,
-          category: pa.product.category,
-          unit: pa.product.unit,
-        }
+        id: pa.product.id,
+        name: pa.product.name,
+        sku: pa.product.sku,
+        barcode: pa.product.barcode,
+        category: pa.product.category,
+        unit: pa.product.unit,
+      }
       : undefined,
     surveyPeriod: pa.surveyPeriod
       ? {
-          id: pa.surveyPeriod.id,
-          name: pa.surveyPeriod.name,
-          startDate: pa.surveyPeriod.startDate,
-          endDate: pa.surveyPeriod.endDate,
-          status: pa.surveyPeriod.status,
-        }
+        id: pa.surveyPeriod.id,
+        name: pa.surveyPeriod.name,
+        startDate: pa.surveyPeriod.startDate,
+        endDate: pa.surveyPeriod.endDate,
+        status: pa.surveyPeriod.status,
+      }
       : undefined,
     createdAt: pa.createdAt,
     updatedAt: pa.updatedAt,

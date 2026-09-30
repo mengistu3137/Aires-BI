@@ -21,6 +21,10 @@ export const createOrUpdateAnalysisSchema = z.object({
     .string({ required_error: "surveyPeriodId is required" })
     .trim()
     .min(1, "surveyPeriodId cannot be empty"),
+  asOfDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "asOfDate must be in YYYY-MM-DD format")
+    .optional(),
   notes: z.string().trim().max(1000).optional(),
 });
 
@@ -29,6 +33,11 @@ export const recalculateSurveyPeriodSchema = z.object({
     .string({ required_error: "surveyPeriodId is required" })
     .trim()
     .min(1, "surveyPeriodId cannot be empty"),
+  categoryStream: z.enum(["ALL", "FRESH", "FMCG"]).default("ALL").optional(),
+  asOfDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "asOfDate must be in YYYY-MM-DD format")
+    .optional(),
 });
 
 export const listPriceAnalysesQuerySchema = z.object({
@@ -38,6 +47,7 @@ export const listPriceAnalysesQuerySchema = z.object({
   productId: z.string().trim().optional(),
   action: z.enum(["PRICE_DOWN", "PRICE_UP", "KEEP", "REVIEW"]).optional(),
   category: z.string().trim().optional(),
+  asOfDate: z.string().optional(),
   from: z.string().optional(),
   to: z.string().optional(),
 });

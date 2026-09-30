@@ -7,7 +7,9 @@ import {
   determinePriceAction,
   formatPriceAnalysisResponse,
   PRICE_ANALYSIS_CONFIG,
+  calculateRecommendedPrice,
 } from "./price-analysis.helper.js";
+import { queensPriceService } from "../queens-prices/queens-price.service.js";
 import { alertService } from "../alerts/alert.service.js";
 import ExcelJS from "exceljs";
 
@@ -173,12 +175,169 @@ export const resolveBenchmarkForSurveyPeriod = async (
 };
 
 /**
- * Creates or updates a PriceAnalysis record for a specific Product and SurveyPeriod.
+ * Retrieves calculation readiness metrics for a survey period:
+ * Counts assigned products, approved observations, and items pending review.
+ *
+ * A product is considered "ready" for calculation when it has at least one
+ * APPROVED observation. It is "pending review" when it has pending
+ * observations but no approved ones. Everything else is "unobserved".
+ *
+ * Returns aggregate counts plus a per-stream (Fresh / FMCG) breakdown.
+ */
+export const getSurveyPeriodReadiness = async (surveyPeriodId) => {
+  const surveyPeriod = await prisma.surveyPeriod.findUnique({
+    where: { id: surveyPeriodId },
+    include: {
+      assignments: {
+        include: {
+          items: {
+            include: {
+              product: {
+                select: { id: true, name: true, category: true },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (!surveyPeriod) {
+    throw new ApiError(404, `SurveyPeriod [${surveyPeriodId}] not found`);
+  }
+
+  // 1. Collect all distinct assigned products
+  const assignedProductsMap = new Map();
+  for (const asn of surveyPeriod.assignments) {
+    for (const it of asn.items) {
+      if (!assignedProductsMap.has(it.productId)) {
+        assignedProductsMap.set(it.productId, it.product);
+      }
+    }
+  }
+
+  const assignedProductIds = Array.from(assignedProductsMap.keys());
+  const totalAssigned = assignedProductIds.length;
+
+  if (totalAssigned === 0) {
+    return {
+      surveyPeriodId,
+      totalAssigned: 0,
+      approvedProductsCount: 0,
+      pendingReviewProductsCount: 0,
+      unobservedProductsCount: 0,
+      readinessPercent: 0,
+      freshStream: { total: 0, approved: 0, pending: 0, percent: 0 },
+      fmcgStream: { total: 0, approved: 0, pending: 0, percent: 0 },
+    };
+  }
+
+  // 2. Query observations for these products in this period
+  const observations = await prisma.priceObservation.findMany({
+    where: {
+      productId: { in: assignedProductIds },
+      audit: { surveyPeriodId },
+      availability: "AVAILABLE",
+      price: { not: null, gt: 0 },
+    },
+    select: {
+      productId: true,
+      reviewStatus: true,
+    },
+  });
+
+  const approvedProductIds = new Set();
+  const pendingProductIds = new Set();
+
+  for (const obs of observations) {
+    if (obs.reviewStatus === "APPROVED") {
+      approvedProductIds.add(obs.productId);
+    } else if (obs.reviewStatus === "PENDING") {
+      pendingProductIds.add(obs.productId);
+    }
+  }
+
+  // If a product has at least 1 approved observation, it is ready for calculation
+  const readyProductIds = approvedProductIds;
+  // A product is pending review if it has pending observations and NO approved ones yet
+  const pendingOnlyProductIds = new Set(
+    [...pendingProductIds].filter((id) => !readyProductIds.has(id)),
+  );
+
+  const freshCategories = PRICE_ANALYSIS_CONFIG.FRESH_CATEGORIES;
+
+  let freshTotal = 0;
+  let freshApproved = 0;
+  let freshPending = 0;
+
+  let fmcgTotal = 0;
+  let fmcgApproved = 0;
+  let fmcgPending = 0;
+
+  for (const [prodId, prod] of assignedProductsMap) {
+    const isFresh = freshCategories.includes(
+      (prod.category || "").toLowerCase(),
+    );
+    const isApproved = readyProductIds.has(prodId);
+    const isPending = pendingOnlyProductIds.has(prodId);
+
+    if (isFresh) {
+      freshTotal++;
+      if (isApproved) freshApproved++;
+      if (isPending) freshPending++;
+    } else {
+      fmcgTotal++;
+      if (isApproved) fmcgApproved++;
+      if (isPending) fmcgPending++;
+    }
+  }
+
+  const unobserved = Math.max(
+    0,
+    totalAssigned - readyProductIds.size - pendingOnlyProductIds.size,
+  );
+  const readinessPercent =
+    totalAssigned > 0
+      ? Math.round((readyProductIds.size / totalAssigned) * 100)
+      : 0;
+
+  return {
+    surveyPeriodId,
+    totalAssigned,
+    approvedProductsCount: readyProductIds.size,
+    pendingReviewProductsCount: pendingOnlyProductIds.size,
+    unobservedProductsCount: unobserved,
+    readinessPercent,
+    freshStream: {
+      total: freshTotal,
+      approved: freshApproved,
+      pending: freshPending,
+      percent:
+        freshTotal > 0 ? Math.round((freshApproved / freshTotal) * 100) : 0,
+    },
+    fmcgStream: {
+      total: fmcgTotal,
+      approved: fmcgApproved,
+      pending: fmcgPending,
+      percent: fmcgTotal > 0 ? Math.round((fmcgApproved / fmcgTotal) * 100) : 0,
+    },
+  };
+};
+
+/**
+ * Calculates price analysis for a product with support for historical asOfDate.
+ *
+ * - When `asOfDate` is provided, the benchmark and the observation window are
+ *   both pinned to that date, enabling point-in-time / historical recalculation.
+ * - When `asOfDate` is omitted, the current benchmark and all approved
+ *   observations for the survey period are used.
+ *
  * Idempotent via @@unique([productId, surveyPeriodId]).
  */
 export const calculateProductAnalysis = async ({
   productId,
   surveyPeriodId,
+  asOfDate = null,
   notes = null,
 }) => {
   // 1. Verify Product exists
@@ -199,29 +358,51 @@ export const calculateProductAnalysis = async ({
     throw new ApiError(404, `SurveyPeriod [${surveyPeriodId}] not found`);
   }
 
-  // 3. Resolve historical Queens benchmark price
-  const benchmark = await resolveBenchmarkForSurveyPeriod(
-    productId,
-    surveyPeriod,
-  );
+  // 3. Resolve target date — asOfDate pins the calculation to end-of-day UTC
+  const targetDate = asOfDate
+    ? new Date(`${asOfDate}T23:59:59.999Z`)
+    : new Date();
+
+  // 4. Resolve benchmark
+  //    - When asOfDate is given, ask the Queens price service for the price
+  //      active at that exact date (true historical lookup).
+  //    - Otherwise fall back to the survey-period resolver.
+  let benchmark = asOfDate
+    ? await queensPriceService.getQueensPriceAtDate(productId, targetDate)
+    : null;
+
+  if (!benchmark) {
+    benchmark = await resolveBenchmarkForSurveyPeriod(productId, surveyPeriod);
+  }
+
   if (!benchmark) {
     throw new ApiError(
       422,
-      `No Queens benchmark price found for product "${product.name}" (${productId}) covering survey period "${surveyPeriod.name}" (${surveyPeriod.startDate.toISOString()} → ${surveyPeriod.endDate.toISOString()}). Create a Queens price effective before ${surveyPeriod.startDate.toISOString().slice(0, 10)}.`,
+      `No Queens benchmark price found for product "${product.name}" (${productId}) on ${targetDate
+        .toISOString()
+        .slice(0, 10)}.`,
     );
   }
 
-  // 4. Retrieve valid, approved competitor observations belonging to this survey period
+  // 5. Filter observations by date window if asOfDate is specified
+  const dateFilter = asOfDate
+    ? {
+      capturedAt: {
+        gte: new Date(`${asOfDate}T00:00:00.000Z`),
+        lte: new Date(`${asOfDate}T23:59:59.999Z`),
+      },
+    }
+    : {};
+
   const observations = await prisma.priceObservation.findMany({
     where: {
       productId,
-      audit: {
-        surveyPeriodId,
-      },
+      audit: { surveyPeriodId },
       availability: "AVAILABLE",
       price: { not: null, gt: 0 },
       // Analytical data integrity: only APPROVED observations are included in pricing calculations
       reviewStatus: "APPROVED",
+      ...dateFilter,
     },
     select: {
       price: true,
@@ -230,19 +411,19 @@ export const calculateProductAnalysis = async ({
 
   const observedPrices = observations.map((o) => o.price);
 
-  // 5. Aggregate competitor prices
+  // 6. Aggregate competitor prices
   const { minimumCompetitorPrice, competitorAveragePrice, count } =
     calculateCompetitorAggregates(observedPrices);
 
-  // 6. Compute Price Index
+  // 7. Compute Price Index
   const priceIndex = competitorAveragePrice
     ? calculatePriceIndex(benchmark.price, competitorAveragePrice)
     : null;
 
-  // 7. Resolve Target Index
+  // 8. Resolve Target Index
   const targetIndex = getTargetIndex(product);
 
-  // 8. Determine Action
+  // 9. Determine Action
   const action = determinePriceAction({
     priceIndex,
     targetIndex,
@@ -255,7 +436,7 @@ export const calculateProductAnalysis = async ({
       ? "No approved competitor observations found for this survey period."
       : null;
 
-  // 9. Atomic Upsert via unique composite key
+  // 10. Atomic Upsert via unique composite key
   const analysis = await prisma.priceAnalysis.upsert({
     where: {
       productId_surveyPeriodId: {
@@ -272,7 +453,7 @@ export const calculateProductAnalysis = async ({
       priceIndex,
       targetIndex,
       action,
-      calculatedAt: new Date(),
+      calculatedAt: targetDate,
       notes: analysisNotes,
     },
     update: {
@@ -282,7 +463,7 @@ export const calculateProductAnalysis = async ({
       priceIndex,
       targetIndex,
       action,
-      calculatedAt: new Date(),
+      calculatedAt: targetDate,
       notes: analysisNotes,
     },
     include: ANALYSIS_INCLUDE_RELATIONS,
@@ -302,16 +483,27 @@ export const calculateProductAnalysis = async ({
 };
 
 /**
- * Batch generates or recalculates analysis for all assigned products within a survey period.
+ * Recalculates analysis with stream filtering ('ALL' | 'FRESH' | 'FMCG') and asOfDate.
+ *
+ * Accepts either a bare surveyPeriodId string (legacy) or a full options object.
  */
-export const recalculateSurveyPeriodAnalysis = async (surveyPeriodId) => {
+export const recalculateSurveyPeriodAnalysis = async (input) => {
+  const payload = typeof input === "string" ? { surveyPeriodId: input } : input;
+  const {
+    surveyPeriodId,
+    categoryStream = "ALL",
+    asOfDate = null,
+  } = payload;
+
   const surveyPeriod = await prisma.surveyPeriod.findUnique({
     where: { id: surveyPeriodId },
     include: {
       assignments: {
         include: {
           items: {
-            select: { productId: true },
+            include: {
+              product: { select: { id: true, category: true } },
+            },
           },
         },
       },
@@ -322,18 +514,31 @@ export const recalculateSurveyPeriodAnalysis = async (surveyPeriodId) => {
     throw new ApiError(404, `SurveyPeriod [${surveyPeriodId}] not found`);
   }
 
-  // Extract distinct product IDs assigned in this survey period
+  const freshCategories = PRICE_ANALYSIS_CONFIG.FRESH_CATEGORIES;
   const productIds = new Set();
+
   for (const assignment of surveyPeriod.assignments) {
     for (const item of assignment.items) {
-      productIds.add(item.productId);
+      const category = (item.product?.category || "").trim().toLowerCase();
+      const isFresh = freshCategories.includes(category);
+
+      if (categoryStream === "ALL") {
+        productIds.add(item.productId);
+      } else if (categoryStream === "FRESH" && isFresh) {
+        productIds.add(item.productId);
+      } else if (categoryStream === "FMCG" && !isFresh) {
+        productIds.add(item.productId);
+      }
     }
   }
 
   if (productIds.size === 0) {
     return {
       surveyPeriodId,
+      categoryStream,
+      totalAssignedProducts: 0,
       processedCount: 0,
+      failedCount: 0,
       analyses: [],
       errors: [],
     };
@@ -347,6 +552,7 @@ export const recalculateSurveyPeriodAnalysis = async (surveyPeriodId) => {
       const res = await calculateProductAnalysis({
         productId,
         surveyPeriodId,
+        asOfDate,
       });
       results.push(res);
     } catch (err) {
@@ -359,11 +565,64 @@ export const recalculateSurveyPeriodAnalysis = async (surveyPeriodId) => {
 
   return {
     surveyPeriodId,
+    categoryStream,
     totalAssignedProducts: productIds.size,
     processedCount: results.length,
     failedCount: errors.length,
     analyses: results,
     errors,
+  };
+};
+
+/**
+ * 1-Click apply recommended price to Queens benchmark.
+ * Closes previous open-ended price and creates new QueensPrice effective immediately.
+ */
+export const applyRecommendedPrice = async (analysisId, currentUser) => {
+  const analysis = await prisma.priceAnalysis.findUnique({
+    where: { id: analysisId },
+    include: { product: true },
+  });
+
+  if (!analysis) throw new ApiError(404, "Price analysis record not found");
+  if (!analysis.competitorAveragePrice) {
+    throw new ApiError(
+      400,
+      "Cannot calculate recommended price without competitor observations.",
+    );
+  }
+
+  const newPriceDecimal = calculateRecommendedPrice(
+    analysis.competitorAveragePrice,
+    analysis.targetIndex,
+  );
+  if (!newPriceDecimal) {
+    throw new ApiError(400, "Unable to compute recommended price.");
+  }
+
+  const newPrice = newPriceDecimal.toNumber();
+  const now = new Date();
+
+  // Create new benchmark price (auto-closes prior open-ended record)
+  const benchmark = await queensPriceService.createQueensPrice({
+    productId: analysis.productId,
+    price: newPrice,
+    effectiveFrom: now,
+    source: `Price Analysis Automation (${currentUser?.name || "Manager"})`,
+    notes: `1-Click adjustment to match target index ${analysis.targetIndex}% from competitor avg ${analysis.competitorAveragePrice} ETB`,
+  });
+
+  // Recalculate analysis immediately
+  const updatedAnalysis = await calculateProductAnalysis({
+    productId: analysis.productId,
+    surveyPeriodId: analysis.surveyPeriodId,
+  });
+
+  return {
+    success: true,
+    newPrice,
+    benchmark,
+    analysis: updatedAnalysis,
   };
 };
 
@@ -420,6 +679,7 @@ export const listPriceAnalyses = async (query = {}) => {
     productId,
     action,
     category,
+    asOfDate,
     from,
     to,
   } = query;
@@ -437,7 +697,14 @@ export const listPriceAnalyses = async (query = {}) => {
     where.product = { ...(where.product || {}), category };
   }
 
-  if (from || to) {
+  // Date filtering: asOfDate takes precedence (single-day pin), otherwise
+  // fall back to the from/to range.
+  if (asOfDate) {
+    where.calculatedAt = {
+      gte: new Date(`${asOfDate}T00:00:00.000Z`),
+      lte: new Date(`${asOfDate}T23:59:59.999Z`),
+    };
+  } else if (from || to) {
     where.calculatedAt = {};
     if (from) where.calculatedAt.gte = new Date(from);
     if (to) {
@@ -482,6 +749,8 @@ export const listPriceAnalyses = async (query = {}) => {
  *   - A "Report Info" sheet with metadata
  *   - A "Price Analysis" sheet with one row per product and
  *     one column per store, plus Min / Avg / Index / Target / Action.
+ *   - A "Legend" block to the right of the table explaining the
+ *     Action pills and Index color scale.
  *
  * Only APPROVED competitor observations are included — matching the
  * same filter that feeds the analysis calculation.
@@ -490,15 +759,15 @@ export const generatePriceAnalysisExcel = async ({ surveyPeriodId } = {}) => {
   // 1. Load the survey period (for metadata + filename)
   const surveyPeriod = surveyPeriodId
     ? await prisma.surveyPeriod.findUnique({
-        where: { id: surveyPeriodId },
-        select: {
-          id: true,
-          name: true,
-          startDate: true,
-          endDate: true,
-          status: true,
-        },
-      })
+      where: { id: surveyPeriodId },
+      select: {
+        id: true,
+        name: true,
+        startDate: true,
+        endDate: true,
+        status: true,
+      },
+    })
     : null;
 
   // 2. Load all analyses for the period (or all periods if none specified)
@@ -927,9 +1196,11 @@ export const generatePriceAnalysisExcel = async ({ surveyPeriodId } = {}) => {
 export const priceAnalysisService = {
   calculateProductAnalysis,
   recalculateSurveyPeriodAnalysis,
+  applyRecommendedPrice,
   getPriceAnalysisById,
   getProductSurveyPeriodAnalysis,
   listPriceAnalyses,
   resolveBenchmarkForSurveyPeriod,
   generatePriceAnalysisExcel,
+  getSurveyPeriodReadiness,
 };
