@@ -1,5 +1,6 @@
 // Backend/src/middlewares/error.middleware.js
 import ApiError from "../utils/api-error.js";
+import { ZodError } from "zod";
 
 const isOperationalPrismaError = (error) => {
   return ["P2002", "P2003", "P2025"].includes(error?.code);
@@ -24,8 +25,35 @@ const mapPrismaError = (error) => {
   return new ApiError(500, "Database operation failed");
 };
 
+/**
+ * Normalizes a ZodError into a response payload of
+ *   { field: "body.email", message: "Invalid email" }
+ *
+ * Zod v3 exposes `error.errors`; Zod v4 exposes `error.issues`.
+ * We accept both so the handler works across versions.
+ */
+const formatZodIssues = (zodError) => {
+  const issuesList = zodError?.errors || zodError?.issues || [];
+  if (!Array.isArray(issuesList)) return [];
+  return issuesList.map((issue) => ({
+    field: Array.isArray(issue.path) ? issue.path.join(".") : String(issue.path ?? ""),
+    message: issue.message,
+  }));
+};
+
 export default function globalErrorHandler(err, req, res, next) {
   let error = err;
+
+  // 0. Handle Zod Validation Errors (accepts .errors or .issues)
+  //    Respond directly — do NOT call next() from inside an error handler.
+  if (err instanceof ZodError) {
+    return res.status(400).json({
+      status: "fail",
+      message: "Validation failed",
+      code: "VALIDATION_ERROR",
+      errors: formatZodIssues(err),
+    });
+  }
 
   // 1. Handle Known Prisma Code-Based Errors (P2002, P2003, P2025)
   if (isOperationalPrismaError(err)) {
