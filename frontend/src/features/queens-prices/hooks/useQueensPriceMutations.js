@@ -6,9 +6,6 @@ import {
   deleteQueensPriceRequest,
 } from "@/services/api/queens-prices.api.js";
 
-/**
- * Invalidate all Queens price related queries for a product
- */
 const invalidateQueensPriceQueries = (queryClient, { id, productId } = {}) => {
   queryClient.invalidateQueries({ queryKey: ["queens-prices", "list"] });
   if (id) {
@@ -26,16 +23,19 @@ const invalidateQueensPriceQueries = (queryClient, { id, productId } = {}) => {
   }
 };
 
-/**
- * Create a new Queens price
- */
 export const useCreateQueensPrice = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: createQueensPriceRequest,
-    onSuccess: (data) => {
-      toast.success("Queens price created");
+    onSuccess: (data, variables) => {
+      // Suppress generic toast if caller requested custom toast
+      if (!variables?.skipToast) {
+        toast.success("Queens price created", {
+          id: "queens-price-toast",
+          duration: 1500,
+        });
+      }
       invalidateQueensPriceQueries(queryClient, {
         id: data?.data?.id,
         productId: data?.data?.productId,
@@ -44,17 +44,16 @@ export const useCreateQueensPrice = () => {
     meta: { skipGlobalToast: true },
   });
 };
-
-/**
- * Update an existing Queens price
- */
 export const useUpdateQueensPrice = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: updateQueensPriceRequest,
     onSuccess: (data) => {
-      toast.success("Queens price updated");
+      toast.success("Queens price updated", {
+        id: "queens-price-toast",
+        duration: 1500,
+      });
       invalidateQueensPriceQueries(queryClient, {
         id: data?.data?.id,
         productId: data?.data?.productId,
@@ -64,9 +63,6 @@ export const useUpdateQueensPrice = () => {
   });
 };
 
-/**
- * Delete a Queens price (scheduled only, ADMIN)
- */
 export const useDeleteQueensPrice = () => {
   const queryClient = useQueryClient();
 

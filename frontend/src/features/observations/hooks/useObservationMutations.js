@@ -8,9 +8,6 @@ import {
   requestObservationReviewRequest,
 } from "@/services/api/observations.api.js";
 
-/**
- * Invalidate observation-related queries
- */
 const invalidateObservationQueries = (queryClient, auditId, observationId) => {
   if (auditId) {
     queryClient.invalidateQueries({
@@ -28,78 +25,78 @@ const invalidateObservationQueries = (queryClient, auditId, observationId) => {
   }
 };
 
-/**
- * Create a new observation
- */
 export const useCreateObservation = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: createObservationRequest,
     onSuccess: (data, variables) => {
-      toast.success("Observation saved");
+      toast.success("Observation saved", {
+        id: "observation-action-toast",
+        duration: 1200,
+      });
       invalidateObservationQueries(queryClient, variables?.auditId, data?.data?.id);
     },
     meta: { skipGlobalToast: true },
   });
 };
 
-/**
- * Update an existing observation
- */
 export const useUpdateObservation = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: updateObservationRequest,
     onSuccess: (data) => {
-      toast.success("Observation updated");
+      toast.success("Observation updated", {
+        id: "observation-action-toast",
+        duration: 1200,
+      });
       invalidateObservationQueries(queryClient, data?.data?.auditId, data?.data?.id);
     },
     meta: { skipGlobalToast: true },
   });
 };
 
-/**
- * Approve observation (ADMIN/MANAGER)
- */
 export const useApproveObservation = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: approveObservationRequest,
     onSuccess: (data) => {
-      toast.success("Observation approved");
+      toast.success("Observation approved ✓", {
+        id: "observation-review-toast",
+        duration: 1200,
+      });
       invalidateObservationQueries(queryClient, data?.data?.auditId, data?.data?.id);
     },
   });
 };
 
-/**
- * Reject observation with note (ADMIN/MANAGER)
- */
 export const useRejectObservation = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: rejectObservationRequest,
     onSuccess: (data) => {
-      toast.success("Observation rejected");
+      toast.success("Observation rejected ✕", {
+        id: "observation-review-toast",
+        duration: 1200,
+      });
       invalidateObservationQueries(queryClient, data?.data?.auditId, data?.data?.id);
     },
   });
 };
 
-/**
- * Request review on observation (ADMIN/MANAGER)
- */
 export const useRequestObservationReview = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: requestObservationReviewRequest,
     onSuccess: (data) => {
-      toast.success("Observation flagged for review");
+      toast.success("Observation flagged for review", {
+        id: "observation-review-toast",
+        duration: 1200,
+      });
       invalidateObservationQueries(queryClient, data?.data?.auditId, data?.data?.id);
     },
   });
