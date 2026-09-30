@@ -33,7 +33,22 @@ export const recalculateSurveyPeriodAnalysis = async (req, res, next) => {
     next(error);
   }
 };
+export const applyRecommendedPrice = async (req, res, next) => {
+  try {
+    const result = await priceAnalysisService.applyRecommendedPrice(
+      req.params.id,
+      req.user,
+    );
 
+    res.status(200).json({
+      status: "success",
+      message: `Queens benchmark price successfully updated to ${result.newPrice} ETB`,
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
 export const getPriceAnalysisById = async (req, res, next) => {
   try {
     const analysis = await priceAnalysisService.getPriceAnalysisById(
@@ -97,11 +112,24 @@ export const exportPriceAnalysisExcel = async (req, res, next) => {
   }
 };
 
+export const getSurveyPeriodReadiness = async (req, res, next) => {
+  try {
+    const data = await priceAnalysisService.getSurveyPeriodReadiness(
+      req.params.surveyPeriodId,
+    );
+    res.status(200).json({ status: "success", data });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const priceAnalysisController = {
   calculateProductAnalysis,
   recalculateSurveyPeriodAnalysis,
+  applyRecommendedPrice,
   getPriceAnalysisById,
   getProductSurveyPeriodAnalysis,
   listPriceAnalyses,
   exportPriceAnalysisExcel,
+  getSurveyPeriodReadiness
 };
