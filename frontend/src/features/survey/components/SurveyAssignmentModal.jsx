@@ -669,18 +669,33 @@ export const SurveyAssignmentModal = ({
 
 					{/* 3. AUDITOR ALLOCATIONS SECTION */}
 					<div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/70 p-3">
-						<div className="flex items-center justify-between">
+						<div className="flex items-center justify-between gap-2">
 							<span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
 								Auditors on Duty ({allocations.length} Selected)
 							</span>
+
+							{/* Enhanced Brand Micro-Action Button */}
 							{allocations.length > 1 && (
 								<button
 									type="button"
 									onClick={handleRebalanceEqually}
-									className="cursor-pointer text-[10px] font-bold text-[#017C4D] hover:underline"
+									className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-emerald-200/90 bg-emerald-50/80 px-2 py-0.5 text-[10px] font-bold text-[#017C4D] shadow-2xs transition-all duration-150 hover:border-[#017C4D] hover:bg-[#017C4D] hover:text-white active:scale-95"
+									title={`Distribute ${selectedProductIds.length} items equally across ${allocations.length} auditors`}
 								>
-									⚡ Re-balance Across {selectedProductIds.length} Selected
-									Items
+									<svg
+										className="h-3 w-3 shrink-0"
+										fill="none"
+										viewBox="0 0 24 24"
+										stroke="currentColor"
+										strokeWidth={2.5}
+									>
+										<path
+											strokeLinecap="round"
+											strokeLinejoin="round"
+											d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"
+										/>
+									</svg>
+									<span>Re-balance ({selectedProductIds.length} Items)</span>
 								</button>
 							)}
 						</div>
@@ -767,7 +782,7 @@ export const SurveyAssignmentModal = ({
 												<button
 													type="button"
 													onClick={() => handleToggleAuditor(alloc.auditorId)}
-													className="text-slate-400 hover:text-[#A41821] p-1 text-xs"
+													className="text-slate-400 hover:text-[#A41821] p-1 text-xs cursor-pointer"
 													title="Remove auditor"
 												>
 													✕

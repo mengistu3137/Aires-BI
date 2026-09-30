@@ -102,17 +102,35 @@ export const createQueensPrice = async ({
     throw new ApiError(400, "effectiveTo must be strictly after effectiveFrom");
   }
 
-  // Find any previous open-ended record starting BEFORE the new price
+  // Find any previous open-ended record starting on or before the candidate date
   const priorOpenEnded = await prisma.queensPrice.findFirst({
     where: {
       productId,
       effectiveTo: null,
-      effectiveFrom: { lt: fromDate },
+      effectiveFrom: { lte: fromDate },
     },
     orderBy: { effectiveFrom: "desc" },
   });
 
-  // Check for any actual conflicting overlap (ignoring the prior record we will close)
+  // Case A: Existing open-ended record starts at the EXACT same timestamp/date
+  // Update in-place so today's price adjustment doesn't create conflicting duplicate records
+  if (
+    priorOpenEnded &&
+    new Date(priorOpenEnded.effectiveFrom).getTime() === fromDate.getTime()
+  ) {
+    const updated = await prisma.queensPrice.update({
+      where: { id: priorOpenEnded.id },
+      data: {
+        price,
+        source: source?.trim() || priorOpenEnded.source,
+        notes: notes?.trim() || priorOpenEnded.notes,
+      },
+      include: QUEENS_PRICE_INCLUDE_RELATIONS,
+    });
+    return formatQueensPriceResponse(updated);
+  }
+
+  // Case B: Existing open-ended record started earlier -> check conflict and auto-close
   const conflict = await checkOverlap(
     productId,
     fromDate,
@@ -400,15 +418,16 @@ export const updateQueensPrice = async (id, updates) => {
   const isChangingPrice =
     updates.price !== undefined &&
     Number(updates.price) !== Number(existing.price);
+
   const isChangingDates =
     (updates.effectiveFrom &&
       new Date(updates.effectiveFrom).getTime() !==
-        new Date(existing.effectiveFrom).getTime()) ||
+      new Date(existing.effectiveFrom).getTime()) ||
     (updates.effectiveTo !== undefined &&
       (updates.effectiveTo === null
         ? existing.effectiveTo !== null
         : new Date(updates.effectiveTo).getTime() !==
-          new Date(existing.effectiveTo).getTime()));
+        new Date(existing.effectiveTo).getTime()));
 
   // Historical Immutability check
   if (isExpired && (isChangingPrice || isChangingDates)) {
@@ -434,6 +453,30 @@ export const updateQueensPrice = async (id, updates) => {
 
   // If changing dates, verify no overlaps with other periods
   if (isChangingDates) {
+    // Find any prior record whose effectiveTo was on the same boundary
+    const priorRecord = await prisma.queensPrice.findFirst({
+      where: {
+        productId: existing.productId,
+        id: { not: id },
+        effectiveFrom: { lt: effectiveFrom },
+      },
+      orderBy: { effectiveFrom: "desc" },
+    });
+
+    // If the prior record's effectiveTo slightly overlaps due to sub-day hours, auto-align boundary
+    if (
+      priorRecord &&
+      priorRecord.effectiveTo &&
+      new Date(priorRecord.effectiveTo) > effectiveFrom &&
+      new Date(priorRecord.effectiveTo).toISOString().slice(0, 10) ===
+      effectiveFrom.toISOString().slice(0, 10)
+    ) {
+      await prisma.queensPrice.update({
+        where: { id: priorRecord.id },
+        data: { effectiveTo: effectiveFrom },
+      });
+    }
+
     const conflict = await checkOverlap(
       existing.productId,
       effectiveFrom,
