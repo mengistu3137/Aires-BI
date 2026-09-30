@@ -206,10 +206,13 @@ export const getObservationById = async ({ observationId, user }) => {
 /**
  * List observations for a specific Audit with pagination, filters, and completeness counts.
  */
+/**
+ * List observations for a specific Audit with pagination, filters, and completeness counts.
+ */
 export const listAuditObservations = async ({ auditId, user, query = {} }) => {
   const {
     page: rawPage = 1,
-    limit: rawLimit = 20,
+    limit: rawLimit = 200, // ← Default raised to 200 so full checklists are returned
     productId,
     availability,
     reviewStatus,
@@ -220,7 +223,7 @@ export const listAuditObservations = async ({ auditId, user, query = {} }) => {
 
   // Sanitize and explicitly parse integer pagination to protect Prisma
   const page = Math.max(1, parseInt(rawPage, 10) || 1);
-  const limit = Math.min(100, Math.max(1, parseInt(rawLimit, 10) || 20));
+  const limit = Math.min(500, Math.max(1, parseInt(rawLimit, 10) || 200));
 
   // 1. Verify Audit exists and belongs to auditor if FIELD_AUDITOR
   const audit = await prisma.audit.findUnique({
@@ -280,7 +283,7 @@ export const listAuditObservations = async ({ auditId, user, query = {} }) => {
       prisma.priceObservation.findMany({
         where,
         skip,
-        take: limit, // Explicit Int
+        take: limit, // Explicit Int up to 200
         orderBy: { capturedAt: "desc" },
         include: OBSERVATION_INCLUDE_RELATIONS,
       }),
@@ -291,7 +294,6 @@ export const listAuditObservations = async ({ auditId, user, query = {} }) => {
     ],
   );
 
-  // 4. Calculate actual assignment completeness metadata
   const expectedItems = audit.assignment?.items || [];
   const expectedProductIds = expectedItems.map((i) => i.productId);
   const observedProductIds = new Set(
@@ -324,7 +326,6 @@ export const listAuditObservations = async ({ auditId, user, query = {} }) => {
     },
   };
 };
-
 /**
  * Global observations list (Admin/Manager or self-scoped Field Auditor)
  */
