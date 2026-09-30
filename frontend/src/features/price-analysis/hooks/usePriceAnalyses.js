@@ -1,6 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
-import { listPriceAnalysesRequest } from "@/services/api/price-analysis.api.js";
+import { getPriceAnalysisReadinessRequest, listPriceAnalysesRequest } from "@/services/api/price-analysis.api.js";
 
+export const usePriceAnalysisReadiness = (surveyPeriodId) => {
+  return useQuery({
+    queryKey: ["price-analysis", "readiness", surveyPeriodId],
+    queryFn: () => getPriceAnalysisReadinessRequest(surveyPeriodId),
+    enabled: Boolean(surveyPeriodId),
+    staleTime: 30 * 1000,
+    select: (res) => res?.data || null,
+  });
+};
 /**
  * Hook for listing price analyses with filters and pagination
  */

@@ -1,7 +1,10 @@
 import React, { useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
-import { usePriceAnalyses } from "../hooks/usePriceAnalyses.js";
+import {
+	usePriceAnalyses,
+	usePriceAnalysisReadiness, // ← added
+} from "../hooks/usePriceAnalyses.js";
 import { useRecalculateSurveyPeriod } from "../hooks/usePriceAnalysisMutations.js";
 import { useAuth } from "@/hooks/useAuth.js";
 import { SurveyPeriodSelector } from "@/features/survey/components/SurveyPeriodSelector.jsx";
@@ -54,6 +57,12 @@ export const PriceAnalysisPage = () => {
 
 	const { data, isLoading, isError, error, refetch } =
 		usePriceAnalyses(filters);
+
+	// ── Readiness metrics ─────────────────────────────────────────
+	// Tells the manager exactly what will be computed BEFORE they click
+	// "Recalculate". Enabled only when a survey period is selected.
+	const { data: readiness, isLoading: isReadinessLoading } =
+		usePriceAnalysisReadiness(surveyPeriodId);
 
 	const analyses = data?.analyses || [];
 	const meta = data?.meta || { page: 1, totalPages: 1, total: 0 };
@@ -253,6 +262,105 @@ export const PriceAnalysisPage = () => {
 					</div>
 				</div>
 			</div>
+
+			{/* ──────────────────────────────────────────────────────────── */}
+			{/* Readiness Banner — tells the manager what will be computed    */}
+			{/* BEFORE they click "Recalculate". Prevents blind recalcs.      */}
+			{/* ──────────────────────────────────────────────────────────── */}
+			{surveyPeriodId && isReadinessLoading && (
+				<div className="h-28 animate-pulse rounded-2xl border border-slate-200 bg-slate-50" />
+			)}
+
+			{surveyPeriodId && readiness && (
+				<div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
+					<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+						<div className="flex items-center gap-3">
+							{/* Readiness circular percentage badge */}
+							<div
+								className={`flex h-12 w-12 flex-none items-center justify-center rounded-xl font-mono text-sm font-black ${
+									readiness.readinessPercent >= 90
+										? "bg-emerald-50 text-[#017C4D] border border-emerald-200"
+										: readiness.readinessPercent >= 50
+											? "bg-amber-50 text-[#FE7914] border border-amber-200"
+											: "bg-red-50 text-[#A41821] border border-red-200"
+								}`}
+							>
+								{readiness.readinessPercent}%
+							</div>
+
+							<div>
+								<h2 className="text-xs font-bold text-slate-800">
+									Calculation Readiness
+								</h2>
+								<p className="text-[11px] text-slate-500 font-medium mt-0.5">
+									<span className="font-bold text-slate-900">
+										{readiness.approvedProductsCount}
+									</span>{" "}
+									of{" "}
+									<span className="font-bold text-slate-900">
+										{readiness.totalAssigned}
+									</span>{" "}
+									products have approved competitor prices
+								</p>
+							</div>
+						</div>
+
+						{/* Breakdown chips */}
+						<div className="flex flex-wrap items-center gap-2">
+							<span className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50/70 px-2.5 py-1 text-[11px] font-bold text-[#017C4D]">
+								<span className="h-1.5 w-1.5 rounded-full bg-[#017C4D]" />
+								{readiness.approvedProductsCount} Approved
+							</span>
+
+							{readiness.pendingReviewProductsCount > 0 ? (
+								<button
+									type="button"
+									onClick={() =>
+										navigate(
+											`/observations?reviewStatus=PENDING&queue=pending&surveyPeriodId=${surveyPeriodId}`,
+										)
+									}
+									className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-[11px] font-bold text-[#FE7914] hover:bg-amber-100 transition shadow-2xs"
+									title="Click to review and approve pending observations"
+								>
+									<span className="h-1.5 w-1.5 rounded-full bg-[#FE7914] animate-pulse" />
+									{readiness.pendingReviewProductsCount} Pending Review →
+								</button>
+							) : (
+								<span className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-400">
+									0 Pending
+								</span>
+							)}
+
+							<span className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-400">
+								{readiness.unobservedProductsCount} Unobserved
+							</span>
+						</div>
+					</div>
+
+					{/* Stream mini-progress bars */}
+					<div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 pt-3 border-t border-slate-100">
+						<div className="flex items-center justify-between text-[11px]">
+							<span className="font-bold text-slate-600">
+							Daily Fresh (92% Target):
+							</span>
+							<span className="font-mono font-bold text-slate-800">
+								{readiness.freshStream.approved} / {readiness.freshStream.total}{" "}
+								({readiness.freshStream.percent}%)
+							</span>
+						</div>
+						<div className="flex items-center justify-between text-[11px]">
+							<span className="font-bold text-slate-600">
+								🛒 FMCG Core (95% Target):
+							</span>
+							<span className="font-mono font-bold text-slate-800">
+								{readiness.fmcgStream.approved} / {readiness.fmcgStream.total} (
+								{readiness.fmcgStream.percent}%)
+							</span>
+						</div>
+					</div>
+				</div>
+			)}
 
 			{/* Recalc Summary Banner */}
 			{recalcSummary && (

@@ -59,3 +59,8 @@ export const exportPriceAnalysisExcelRequest = async ({ surveyPeriodId } = {}) =
 
   return { blob: response.data, filename };
 };
+export const getPriceAnalysisReadinessRequest = async (surveyPeriodId) => {
+  if (!surveyPeriodId) return null;
+  const response = await apiClient.get(`/price-analysis/readiness/${surveyPeriodId}`);
+  return response.data;
+};

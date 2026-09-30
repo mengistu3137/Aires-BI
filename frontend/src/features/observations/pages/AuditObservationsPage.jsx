@@ -40,7 +40,9 @@ export const AuditObservationsPage = () => {
 	const { user, isManager, isAdmin } = useAuth();
 
 	const { data: audit, isLoading: auditLoading } = useAudit(auditId);
-	const { data, isLoading, isError, error } = useAuditObservations(auditId);
+	const { data, isLoading, isError, error } = useAuditObservations(auditId, {
+		limit: 200,
+	});
 
 	const observations = data?.observations || [];
 	const store = audit?.store;
@@ -666,7 +668,7 @@ const CollectionView = ({ audit, observations, auditId }) => {
 	const { localObservations } = useLocalQueue(auditId);
 
 	const queryKey = useMemo(
-		() => ["observations", "audit", auditId, {}],
+		() => ["observations", "audit", auditId, { limit: 200 }],
 		[auditId],
 	);
 

@@ -3,17 +3,15 @@ import { listAuditObservationsRequest } from "@/services/api/observations.api.js
 
 /**
  * Hook for listing observations for an audit.
- *
- * networkMode: "offlineFirst" — see useObservations.js for why. Note this
- * only affects the *server* half of the picture; the auditor's own
- * collection view merges this with the local offline queue (useLocalQueue)
- * regardless of network mode, so newly-captured offline rows still show up
- * immediately either way.
+ * Enforces a minimum limit of 200 so assigned product checklists up to 120 items
+ * are never truncated across pagination boundaries during field collection.
  */
 export const useAuditObservations = (auditId, filters = {}) => {
+  const queryParams = { limit: 200, ...filters };
+
   return useQuery({
-    queryKey: ["observations", "audit", auditId, filters],
-    queryFn: () => listAuditObservationsRequest({ auditId, params: filters }),
+    queryKey: ["observations", "audit", auditId, queryParams],
+    queryFn: () => listAuditObservationsRequest({ auditId, params: queryParams }),
     enabled: Boolean(auditId),
     staleTime: 30 * 1000,
     networkMode: "offlineFirst",
@@ -21,7 +19,7 @@ export const useAuditObservations = (auditId, filters = {}) => {
       observations: data.data || [],
       meta: data.meta || {
         page: 1,
-        limit: 20,
+        limit: 200,
         total: 0,
         totalPages: 1,
         completeness: {
