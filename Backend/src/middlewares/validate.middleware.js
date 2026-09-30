@@ -22,13 +22,23 @@ export const validate = (schema, source = "body") => {
 
       next();
     } catch (error) {
-      if (error instanceof ZodError) {
-        const formattedErrors = error.errors.map((err) => ({
-          field: err.path.join("."),
+      if (error instanceof ZodError || error?.name === "ZodError") {
+        const issues = Array.isArray(error.issues)
+          ? error.issues
+          : Array.isArray(error.errors)
+            ? error.errors
+            : [];
+
+        const formattedErrors = issues.map((err) => ({
+          field: Array.isArray(err.path)
+            ? err.path.join(".")
+            : String(err.path || "unknown"),
           message: err.message,
         }));
+
         return next(new ApiError(400, "Validation failed", formattedErrors));
       }
+
       next(error);
     }
   };
