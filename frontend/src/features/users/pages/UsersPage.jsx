@@ -158,15 +158,15 @@ const handleEditSubmit = async (e) => {
 	e.preventDefault();
 	if (!editingUser) return;
 
-	const phone = editFormData.phone.trim();
-	const email = editFormData.email.trim();
+	const phone = editFormData.phone?.trim() || "";
+	const email = editFormData.email?.trim() || "";
 
 	if (!phone && !email) {
 		toast.error("Please provide either a phone number or an email address");
 		return;
 	}
 
-	if (phone && phone.length !== 13) {
+	if (phone && phone !== "+251" && phone.length !== 13) {
 		toast.error(
 			"Please enter a valid 9-digit Ethiopian mobile number (+2519... or 09...)",
 		);
@@ -176,13 +176,13 @@ const handleEditSubmit = async (e) => {
 	try {
 		const updates = {
 			name: editFormData.name.trim(),
-			phone: phone || null,
+			phone: phone && phone !== "+251" ? phone : null,
 			email: email || null,
 			role: editFormData.role,
 			active: editFormData.active,
 		};
 
-		if (editFormData.password.trim()) {
+		if (editFormData.password && editFormData.password.trim().length > 0) {
 			updates.password = editFormData.password.trim();
 		}
 
@@ -190,7 +190,7 @@ const handleEditSubmit = async (e) => {
 		setEditingUser(null);
 		setShowEditPassword(false);
 	} catch {
-		// Error handled by mutation hook toast
+		// Handled by mutation toast
 	}
 };
 

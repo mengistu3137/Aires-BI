@@ -19,7 +19,7 @@ export const useUsers = () => {
         queryKey: ["users"],
         queryFn: async () => {
             const response = await getUsersRequest();
-            return response?.data?.users || [];
+            return response?.data?.users || response?.data || [];
         },
         staleTime: 60 * 1000,
     });
@@ -28,14 +28,12 @@ export const useUsers = () => {
     useEffect(() => {
         if (!isAdmin && !isManager) return;
 
-        // Listen for live auditor GPS permission changes
         const unsubscribeGps = subscribeToRealtimeEvent("user:gps-permission-updated", (payload) => {
-            console.log("⚡ [Realtime Event] user:gps-permission-updated:", payload);
-
             queryClient.setQueryData(["users"], (oldUsers) => {
-                if (!Array.isArray(oldUsers)) return oldUsers;
+                const list = Array.isArray(oldUsers) ? oldUsers : oldUsers?.users;
+                if (!Array.isArray(list)) return oldUsers;
 
-                return oldUsers.map((u) => {
+                const updated = list.map((u) => {
                     if (u.id === payload.userId) {
                         return {
                             ...u,
@@ -46,13 +44,13 @@ export const useUsers = () => {
                     }
                     return u;
                 });
+
+                return Array.isArray(oldUsers) ? updated : { ...oldUsers, users: updated };
             });
         });
 
-        // On socket reconnect, resynchronize with fresh DB state
         const socket = getSocket();
         const handleReconnect = () => {
-            console.log("🔄 [Realtime] Socket reconnected, resynchronizing users...");
             queryClient.invalidateQueries({ queryKey: ["users"] });
         };
 
@@ -76,7 +74,7 @@ export const useUsers = () => {
             queryClient.invalidateQueries({ queryKey: ["users"] });
         },
         onError: (err) => {
-            toast.error(err.message || "Failed to create user");
+            toast.error(err?.response?.data?.message || err.message || "Failed to create user");
         },
     });
 
@@ -87,7 +85,7 @@ export const useUsers = () => {
             queryClient.invalidateQueries({ queryKey: ["users"] });
         },
         onError: (err) => {
-            toast.error(err.message || "Failed to update user");
+            toast.error(err?.response?.data?.message || err.message || "Failed to update user");
         },
     });
 
@@ -97,12 +95,20 @@ export const useUsers = () => {
             queryClient.invalidateQueries({ queryKey: ["users"] });
         },
         onError: (err) => {
-            toast.error(err.message || "Failed to delete user");
+            toast.error(err?.response?.data?.message || err.message || "Failed to delete user");
         },
     });
 
+    // Guaranteed array extraction regardless of envelope format
+    const rawData = usersQuery.data;
+    const usersList = Array.isArray(rawData)
+        ? rawData
+        : Array.isArray(rawData?.users)
+            ? rawData.users
+            : [];
+
     return {
-        users: usersQuery.data || [],
+        users: usersList,
         isLoading: usersQuery.isLoading,
         createUser: createUserMutation.mutateAsync,
         updateUser: updateUserMutation.mutateAsync,
