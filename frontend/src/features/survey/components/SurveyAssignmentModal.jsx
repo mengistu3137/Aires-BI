@@ -161,7 +161,7 @@ export const SurveyAssignmentModal = ({
 							observedCount: asn.observedCount,
 							canModify: asn.canModify,
 							assignmentId: asn.assignmentId,
-							status: asn.status, // ✅ Added status mapping
+							status: asn.status,
 						};
 					});
 					setAllocations(mapped);
@@ -488,13 +488,20 @@ export const SurveyAssignmentModal = ({
 					{/* 1. Cycle & Store Selection */}
 					<div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
 						<div>
-							<label className="mb-1 block font-bold text-slate-700">
-								Survey Cycle
-							</label>
+							<div className="flex items-center justify-between mb-1">
+								<label className="block font-bold text-slate-700">
+									Survey Cycle
+								</label>
+								{isLocked && (
+									<span className="text-[10px] font-bold text-amber-700 uppercase tracking-wider">
+										Locked
+									</span>
+								)}
+							</div>
 							<select
 								value={surveyPeriodId}
 								onChange={(e) => setSurveyPeriodId(e.target.value)}
-								disabled={Boolean(isLocked)}
+								disabled={isLocked}
 								className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 font-mono text-xs font-bold text-slate-800 outline-hidden focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] disabled:bg-slate-100 disabled:cursor-not-allowed"
 							>
 								{openPeriods.map((p) => (
@@ -506,15 +513,20 @@ export const SurveyAssignmentModal = ({
 						</div>
 
 						<div>
-							<label className="mb-1 block font-bold text-slate-700">
-								Target Store
-							</label>
+							<div className="flex items-center justify-between mb-1">
+								<label className="block font-bold text-slate-700">
+									Target Store
+								</label>
+								{isLocked && (
+									<span className="text-[10px] font-bold text-amber-700 uppercase tracking-wider">
+										Locked (In Progress)
+									</span>
+								)}
+							</div>
 							<select
 								value={storeId}
 								onChange={(e) => setStoreId(e.target.value)}
-								disabled={
-									Boolean(initialStoreId) || storesLoading || Boolean(isLocked)
-								}
+								disabled={isLocked || storesLoading || isLoadingExisting}
 								className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800 outline-hidden focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] disabled:bg-slate-100 disabled:cursor-not-allowed"
 							>
 								{stores.map((s) => (
@@ -867,7 +879,7 @@ export const SurveyAssignmentModal = ({
 								allocations.length === 0 ||
 								selectedProductIds.length === 0 ||
 								!openPeriods.length ||
-								isLocked
+								(isEditMode && isLocked)
 							}
 							className="cursor-pointer rounded-xl bg-[#A41821] px-5 py-2 font-bold text-white shadow-xs transition hover:bg-[#7F1219] active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
 						>
