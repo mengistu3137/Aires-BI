@@ -85,6 +85,7 @@ export const createBatchAssignmentSchema = z.object({
 export const updateStoreAllocationsSchema = z.object({
   storeId: z.string().min(1),
   surveyPeriodId: z.string().min(1),
+  previousStoreId: z.string().min(1).optional(),
   allocations: z
     .array(
       z.object({
