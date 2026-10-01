@@ -184,60 +184,100 @@ export const getStoreAllocations = async (storeId, surveyPeriodId) => {
   });
 };
 
-/**
- * Updates or rebalances store allocations.
- * Protects already started audits and observed items.
- */
+
 export const updateStoreAllocations = async (payload) => {
-  const { storeId, surveyPeriodId, allocations } = payload;
-
-  const currentAssignments = await prisma.surveyAssignment.findMany({
-    where: { storeId, surveyPeriodId },
-    include: {
-      auditor: { select: { id: true, name: true } },
-      audits: {
-        include: {
-          observations: { select: { productId: true } },
-          _count: { select: { observations: true } },
-        },
-      },
-      items: true,
-    },
-  });
-
-  const newAllocationsMap = new Map(allocations.map((a) => [a.auditorId, a]));
+  const { storeId, surveyPeriodId, allocations, previousStoreId } = payload;
 
   return prisma.$transaction(async (tx) => {
-    // 1. Check for removed auditors
+    // 0. If target store was changed for an unstarted dispatch, clean up previous store records
+    if (previousStoreId && previousStoreId !== storeId) {
+      const prevAssignments = await tx.surveyAssignment.findMany({
+        where: { storeId: previousStoreId, surveyPeriodId },
+        include: {
+          audits: {
+            include: { _count: { select: { observations: true } } },
+          },
+        },
+      });
+
+      const anyStarted = prevAssignments.some(
+        (a) =>
+          a.status !== "NOT_STARTED" ||
+          a.audits.some(
+            (aud) =>
+              aud.status !== "NOT_STARTED" || (aud._count?.observations || 0) > 0,
+          ),
+      );
+
+      if (anyStarted) {
+        throw new ApiError(
+          409,
+          "Cannot change target store: visits or observations have already started for the previous store.",
+        );
+      }
+
+      for (const prev of prevAssignments) {
+        await tx.audit.deleteMany({
+          where: { assignmentId: prev.id, status: "NOT_STARTED" },
+        });
+        await tx.assignmentItem.deleteMany({
+          where: { assignmentId: prev.id },
+        });
+        await tx.surveyAssignment.delete({ where: { id: prev.id } });
+      }
+    }
+
+    // 1. Fetch current assignments for the target store
+    const currentAssignments = await tx.surveyAssignment.findMany({
+      where: { storeId, surveyPeriodId },
+      include: {
+        auditor: { select: { id: true, name: true } },
+        audits: {
+          include: {
+            observations: { select: { productId: true } },
+            _count: { select: { observations: true } },
+          },
+        },
+        items: true,
+      },
+    });
+
+    const newAllocationsMap = new Map(allocations.map((a) => [a.auditorId, a]));
+
+    // 2. Check for removed auditors
     for (const current of currentAssignments) {
       if (!newAllocationsMap.has(current.auditorId)) {
         const observationsCount = current.audits.reduce(
           (sum, a) => sum + (a._count?.observations || 0),
-          0
+          0,
         );
 
         if (observationsCount > 0 || current.status !== "NOT_STARTED") {
           throw new ApiError(
             409,
-            `Cannot remove auditor [${current.auditor.name}]: observations have already been recorded.`
+            `Cannot remove auditor [${current.auditor.name}]: observations have already been recorded.`,
           );
         }
 
-        // Safe delete unstarted assignment
-        await tx.audit.deleteMany({ where: { assignmentId: current.id, status: "NOT_STARTED" } });
-        await tx.assignmentItem.deleteMany({ where: { assignmentId: current.id } });
+        await tx.audit.deleteMany({
+          where: { assignmentId: current.id, status: "NOT_STARTED" },
+        });
+        await tx.assignmentItem.deleteMany({
+          where: { assignmentId: current.id },
+        });
         await tx.surveyAssignment.delete({ where: { id: current.id } });
       }
     }
 
-    // 2. Update existing allocations or add new ones
+    // 3. Update existing allocations or add new ones
     for (const alloc of allocations) {
-      const existing = currentAssignments.find((c) => c.auditorId === alloc.auditorId);
+      const existing = currentAssignments.find(
+        (c) => c.auditorId === alloc.auditorId,
+      );
 
       if (existing) {
-        // Verify that products already observed are NOT removed from the range
         const observedProductIds = new Set(
-          existing.audits.flatMap((a) => a.observations.map((o) => o.productId))
+          existing.audits.flatMap((a) => a.observations.map((o) => o.productId)),
         );
         const newProductIdsSet = new Set(alloc.productIds);
 
@@ -245,13 +285,14 @@ export const updateStoreAllocations = async (payload) => {
           if (!newProductIdsSet.has(obsProdId)) {
             throw new ApiError(
               409,
-              `Cannot remove item from [${existing.auditor.name}] because field observations have already been recorded for that product.`
+              `Cannot remove item from [${existing.auditor.name}] because field observations have already been recorded for that product.`,
             );
           }
         }
 
-        // Update items
-        await tx.assignmentItem.deleteMany({ where: { assignmentId: existing.id } });
+        await tx.assignmentItem.deleteMany({
+          where: { assignmentId: existing.id },
+        });
         await tx.assignmentItem.createMany({
           data: alloc.productIds.map((pId) => ({
             assignmentId: existing.id,
@@ -260,7 +301,6 @@ export const updateStoreAllocations = async (payload) => {
           })),
         });
       } else {
-        // Add new auditor assignment to this store
         const newAsn = await tx.surveyAssignment.create({
           data: {
             auditorId: alloc.auditorId,
