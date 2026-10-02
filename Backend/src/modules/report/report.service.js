@@ -233,7 +233,9 @@ const buildSection = (
 
   const productsMap = new Map();
   const pairs = new Map(); // `${columnKey}|${productId}` -> { columnKey, productId, observations[] }
-  const columnStores = new Map(competitorColumns.map((c) => [c.key, new Set()]));
+  const columnStores = new Map(
+    competitorColumns.map((c) => [c.key, new Set()]),
+  );
 
   const registerProduct = (p) => {
     if (!p || productsMap.has(p.id)) return;
@@ -470,7 +472,9 @@ export const buildReportModel = ({
 
   if (sections.length === 0) {
     const label =
-      reportTypes.length === 1 ? ` (${REPORT_TYPES[reportTypes[0]].label})` : "";
+      reportTypes.length === 1
+        ? ` (${REPORT_TYPES[reportTypes[0]].label})`
+        : "";
     throw new ApiError(
       404,
       store
@@ -567,6 +571,7 @@ export const getObservationReportSummary = async (params) => {
 };
 
 export const generateObservationReportPdf = async (params) => {
+  console.log("Generating PDF report for", params);
   const model = await loadReportModel(params);
   const buffer = await buildObservationReportPdf(model);
   return {

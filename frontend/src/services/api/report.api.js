@@ -29,10 +29,14 @@ const parseFilename = (contentDisposition) => {
 /**
  * Downloads a report file as a Blob.
  * @param {"pdf"|"excel"} format
- * @param {{ surveyPeriodId: string, storeId?: string }} params
+ * @param {{
+ *   surveyPeriodId: string,
+ *   storeId?: string,
+ *   reportType?: "FRESH_CORNER"|"ULTRA_SENSITIVE"
+ * }} params  reportType omitted = both reports in one file
  * @returns {Promise<{ blob: Blob, filename: string|null }>}
  */
-export const downloadReportRequest = async (format, { surveyPeriodId, storeId }) => {
+export const downloadReportRequest = async (format, { surveyPeriodId, storeId, reportType }) => {
   const endpoint = FILE_ENDPOINTS[format];
   if (!endpoint) throw new Error(`Unsupported report format: ${format}`);
 
@@ -40,6 +44,7 @@ export const downloadReportRequest = async (format, { surveyPeriodId, storeId })
     params: {
       surveyPeriodId,
       ...(storeId ? { storeId } : {}),
+      ...(reportType ? { reportType } : {}),
     },
     responseType: "blob",
   });
