@@ -23,6 +23,7 @@ import storeRoutes from "./modules/stores/stores.routes.js";
 import periodRoutes from "./modules/period/period.routes.js";
 import assignmentRoutes from "./modules/assignment/assignment.routes.js";
 import dashboardRoutes from "./modules/dashboard/dashboard.routes.js";
+import reportRoutes from "./modules/report/report.routes.js";
 
 const app = express();
 
@@ -65,6 +66,8 @@ app.get("/health", (req, res) => {
 // ==========================================
 // REGISTER SYSTEM ROUTES
 // ==========================================
+app.use("/api/v1/reports", reportRoutes);
+
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/users", userRoutes);
 app.use("/api/v1/products", productRoutes);
@@ -80,7 +83,7 @@ app.use("/api/v1/stores", storeRoutes);
 app.use("/api/v1/survey-periods", periodRoutes);
 app.use("/api/v1/assignments", assignmentRoutes);
 app.use("/api/v1/dashboard", dashboardRoutes);
-
+// app.use("/api/v1/reports", reportRoutes);
 // ==========================================
 // 404 CATCH-ALL (Express 4 & 5 Compatible)
 // ==========================================

@@ -10,10 +10,14 @@ import { ObservationsSummaryBar } from "../components/ObservationsSummaryBar.jsx
 import { ObservationEmptyState } from "../components/ObservationEmptyState.jsx";
 import { SurveyPeriodSelector } from "@/features/survey/components/SurveyPeriodSelector.jsx";
 import { useStores } from "@/features/survey/hooks/useStores.js";
+import { useSurveyPeriods } from "@/features/survey/hooks/useSurveyPeriods.js";
+import { useReportDownload } from "../hooks/useReportDownload.js";
+import { ReportExportMenu } from "../components/ReportExportMenu.jsx";
 
 export const ObservationsPage = () => {
   const navigate = useNavigate();
-  const { isManager } = useAuth();
+  const { isManager, isAdmin } = useAuth();
+  console.log("isManager", isManager, "isAdmin", isAdmin);
   const isOnline = useOnlineStatus();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -55,6 +59,19 @@ export const ObservationsPage = () => {
   // We use the shared stores hook (same cache key as elsewhere in the app).
   const { stores = [], isLoading: storesLoading } = useStores();
 
+  // Survey periods (same cache as SurveyPeriodSelector) — used for readable labels
+  const { data: periods = [] } = useSurveyPeriods();
+  const selectedPeriod = periods.find((p) => p.id === surveyPeriodId);
+  const selectedStore = stores.find((s) => s.id === storeId);
+
+  // Report export (PDF / Excel) — uses the selected period + store filters
+  const { download, downloading } = useReportDownload();
+  const handleExport = (format) =>
+    download(format, {
+      surveyPeriodId,
+      storeId: storeId || undefined,
+    });
+
   // Client-side search across the loaded page
   const visibleObservations = useMemo(() => {
     if (!search.trim()) return observations;
@@ -86,11 +103,23 @@ export const ObservationsPage = () => {
         <div>
           <h1 className="text-lg font-black text-slate-800">Observations</h1>
           <p className="mt-0.5 text-xs text-slate-500">
-            {isManager
+            {isManager || isAdmin
               ? "All competitor price observations collected across field audits."
               : "Your price observations collected during field audits."}
           </p>
         </div>
+
+        {/* Export (managers/admins only — matches backend restrictTo) */}
+        {(isManager || isAdmin) && (
+          <ReportExportMenu
+            surveyPeriodId={surveyPeriodId}
+            periodLabel={selectedPeriod?.name || "Selected survey period"}
+            scopeLabel={selectedStore ? selectedStore.name : "All stores"}
+            onDownload={handleExport}
+            downloading={downloading}
+            disabled={!isOnline}
+          />
+        )}
       </div>
 
       {/* Offline banner */}
@@ -160,6 +189,15 @@ export const ObservationsPage = () => {
         onReviewStatusChange={(v) => setFilter("reviewStatus", v)}
       />
 
+      {/* Export hint: a survey period is required for reports */}
+      {isManager && !surveyPeriodId && (
+        <p className="-mt-1 text-[11px] text-slate-500">
+          Select a <span className="font-bold">survey period</span> to export a PDF or Excel report.
+          Choose a store to export just that store, or leave it on “All stores” for the full
+          comparison.
+        </p>
+      )}
+
       {/* Active filter chips */}
       {hasActiveFilters && (
         <div className="flex flex-wrap items-center gap-1.5">
@@ -168,13 +206,13 @@ export const ObservationsPage = () => {
           </span>
           {storeId && (
             <FilterChip
-              label={`Store: ${stores.find((s) => s.id === storeId)?.name || storeId}`}
+              label={`Store: ${selectedStore?.name || storeId}`}
               onRemove={() => setFilter("storeId", "")}
             />
           )}
           {surveyPeriodId && (
             <FilterChip
-              label={`Period: ${surveyPeriodId}`}
+              label={`Period: ${selectedPeriod?.name || surveyPeriodId}`}
               onRemove={() => setFilter("surveyPeriodId", "")}
             />
           )}
