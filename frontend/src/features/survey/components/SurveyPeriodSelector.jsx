@@ -10,7 +10,7 @@ export const SurveyPeriodSelector = ({
   className = "",
 }) => {
   const { data: periods = [], isLoading, isError } = useSurveyPeriods();
-
+  console.log("periods", periods);
   const openPeriod = periods.find((p) => p.status === "OPEN");
   const otherPeriods = periods.filter((p) => p.status !== "OPEN");
 
