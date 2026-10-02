@@ -6,7 +6,7 @@ import {
   formatDate,
   formatDateTime,
   formatPrice,
-  storeHeaderLabel,
+  columnHeaderLabel,
 } from "./report.utils.js";
 
 // ------------------------------------------------------------------
@@ -26,6 +26,8 @@ const C = {
   red: "FFB42318",
   amber: "FFB54708",
   subtitle: "FFD6E2F0",
+  queens: "FFE8F0FA",
+  lowest: "FFE8F5E9",
 };
 
 const FONT = "Calibri";
@@ -119,33 +121,26 @@ const addTitleBar = (sheet, rowNumber, colCount, title, subtitle, tag) => {
     }
   }
 
-  if (tag) {
-    // Tag text is shown in the last cell of the title row, right-aligned.
-    // (Title cell is merged, so we un-merge the last column visually by
-    //  placing the tag in the subtitle row instead.)
-    const tagRow = sheet.getRow(rowNumber + 1);
-    // Re-merge subtitle to leave the last 2 columns for the tag when possible
-    if (colCount >= 4) {
-      sheet.unMergeCells(`A${rowNumber + 1}:${lastCol}${rowNumber + 1}`);
-      sheet.mergeCells(
-        `A${rowNumber + 1}:${colLetter(colCount - 2)}${rowNumber + 1}`,
-      );
-      sheet.mergeCells(
-        `${colLetter(colCount - 1)}${rowNumber + 1}:${lastCol}${rowNumber + 1}`,
-      );
-      const left = sheet.getCell(`A${rowNumber + 1}`);
-      left.value = subtitle;
-      left.font = font({ size: 10, color: { argb: C.subtitle } });
-      left.alignment = { vertical: "middle", horizontal: "left", indent: 1 };
-      left.fill = fill(C.primary);
+  if (tag && colCount >= 4) {
+    // Subtitle keeps the left part of the row, the tag goes in the last two columns
+    sheet.unMergeCells(`A${rowNumber + 1}:${lastCol}${rowNumber + 1}`);
+    sheet.mergeCells(
+      `A${rowNumber + 1}:${colLetter(colCount - 2)}${rowNumber + 1}`,
+    );
+    sheet.mergeCells(
+      `${colLetter(colCount - 1)}${rowNumber + 1}:${lastCol}${rowNumber + 1}`,
+    );
+    const left = sheet.getCell(`A${rowNumber + 1}`);
+    left.value = subtitle;
+    left.font = font({ size: 10, color: { argb: C.subtitle } });
+    left.alignment = { vertical: "middle", horizontal: "left", indent: 1 };
+    left.fill = fill(C.primary);
 
-      const right = sheet.getCell(`${colLetter(colCount - 1)}${rowNumber + 1}`);
-      right.value = tag;
-      right.font = font({ size: 9, bold: true, color: { argb: C.white } });
-      right.alignment = { vertical: "middle", horizontal: "right", indent: 1 };
-      right.fill = fill(C.primary);
-      tagRow.height = 20;
-    }
+    const right = sheet.getCell(`${colLetter(colCount - 1)}${rowNumber + 1}`);
+    right.value = tag;
+    right.font = font({ size: 9, bold: true, color: { argb: C.white } });
+    right.alignment = { vertical: "middle", horizontal: "right", indent: 1 };
+    right.fill = fill(C.primary);
   }
 };
 
@@ -211,19 +206,108 @@ const availabilityColor = (availability) => {
   return C.amber;
 };
 
-const packLabel = (record, product) =>
-  [record.packageSize, record.observedUnit || product.unit]
-    .filter(Boolean)
-    .join(" / ") || product.unit;
+// ------------------------------------------------------------------
+// Sheet 1: Summary (info + one block per report type)
+// ------------------------------------------------------------------
 
-// ------------------------------------------------------------------
-// Sheet 1: Summary
-// ------------------------------------------------------------------
+const SUMMARY_COLS = 9;
+const NUMERIC_ALIGNS = [
+  "left",
+  "right",
+  "right",
+  "right",
+  "right",
+  "right",
+  "right",
+  "right",
+  "right",
+];
+
+const writeKpis = (sheet, r, t) => {
+  const kpis = [
+    { label: "Items to price", value: t.items },
+    { label: "Recorded", value: t.recorded },
+    { label: "Available", value: t.available, color: C.green },
+    { label: "Out of stock", value: t.outOfStock, color: C.red },
+    { label: "Not found", value: t.notFound, color: C.amber },
+    { label: "Missing", value: t.missing, color: C.muted },
+    { label: "Coverage", value: t.coveragePct / 100, pct: true },
+  ];
+
+  // KPI cards occupy columns B..H; column A holds a row caption
+  const caption = sheet.getCell(`A${r}`);
+  caption.value = "KEY FIGURES";
+  caption.font = font({ size: 8, bold: true, color: { argb: C.muted } });
+  caption.alignment = { vertical: "middle" };
+
+  kpis.forEach((kpi, i) => {
+    const col = i + 2;
+    const valueCell = sheet.getRow(r).getCell(col);
+    valueCell.value = kpi.value;
+    if (kpi.pct) valueCell.numFmt = PCT_FORMAT;
+    valueCell.font = font({
+      size: 16,
+      bold: true,
+      color: { argb: kpi.color || C.primary },
+    });
+    valueCell.alignment = { vertical: "middle", horizontal: "center" };
+    valueCell.fill = fill(C.card);
+
+    const labelCell = sheet.getRow(r + 1).getCell(col);
+    labelCell.value = kpi.label;
+    labelCell.font = font({ size: 8, color: { argb: C.muted } });
+    labelCell.alignment = { vertical: "middle", horizontal: "center" };
+    labelCell.fill = fill(C.card);
+  });
+  sheet.getRow(r).height = 28;
+  sheet.getRow(r + 1).height = 16;
+  return r + 3;
+};
+
+const writeMergedText = (sheet, r, text, height) => {
+  sheet.mergeCells(`A${r}:I${r}`);
+  const cell = sheet.getCell(`A${r}`);
+  cell.value = text;
+  cell.font = font({ size: 9, color: { argb: C.muted } });
+  cell.alignment = { wrapText: true, vertical: "top" };
+  sheet.getRow(r).height = height;
+  return r + 1;
+};
+
+const writeSummaryTable = (sheet, r, { headers, rows, totalRow }) => {
+  styleHeaderRow(sheet.getRow(r), headers.length, NUMERIC_ALIGNS);
+  headers.forEach((h, i) => {
+    sheet.getRow(r).getCell(i + 1).value = h;
+  });
+  r += 1;
+
+  const writeRow = (values, { bold = false, zebra = false, band = false }) => {
+    const row = sheet.getRow(r);
+    values.forEach((value, i) => {
+      const cell = row.getCell(i + 1);
+      cell.value = value;
+      styleDataCell(cell, {
+        align: NUMERIC_ALIGNS[i] || "right",
+        zebra,
+        wrap: false,
+      });
+      if (bold) cell.font = font({ bold: true });
+      if (band) cell.fill = fill(C.band);
+      if (i === values.length - 1 && typeof value === "number") {
+        cell.numFmt = PCT_FORMAT;
+      }
+    });
+    row.height = 18;
+    r += 1;
+  };
+
+  rows.forEach((values, i) => writeRow(values, { zebra: i % 2 === 1 }));
+  if (totalRow) writeRow(totalRow, { bold: true, band: true });
+  return r;
+};
 
 const buildSummarySheet = (workbook, model) => {
-  const { period, store, summary, scope } = model;
-  const t = summary.totals;
-  const COLS = 9;
+  const { period, store, scope, sections } = model;
 
   const sheet = workbook.addWorksheet("Summary", {
     views: [{ showGridLines: false }],
@@ -246,10 +330,10 @@ const buildSummarySheet = (workbook, model) => {
   addTitleBar(
     sheet,
     r,
-    COLS,
+    SUMMARY_COLS,
     "Competitor Price Audit Report",
     `${period.name}  |  ${formatDate(period.startDate)} - ${formatDate(period.endDate)}`,
-    scope === "STORE" ? "STORE REPORT" : "ALL STORES - BY CATEGORY",
+    scope === "STORE" ? "STORE REPORT" : "BY COMPETITOR",
   );
   r += 3;
 
@@ -260,8 +344,9 @@ const buildSummarySheet = (workbook, model) => {
       "Scope",
       scope === "STORE"
         ? `${store.name}${store.competitorName ? ` - ${store.competitorName}` : ""}`
-        : `All stores (${t.stores})`,
+        : "All competitors",
     ],
+    ["Report", sections.map((s) => s.label).join(" + ")],
     ["Generated", formatDateTime(model.generatedAt)],
     ["Generated by", model.generatedBy || "System"],
   ];
@@ -281,135 +366,69 @@ const buildSummarySheet = (workbook, model) => {
   }
   r += 1;
 
-  // KPI strip
-  const kpis = [
-    { label: "Items to price", value: t.items },
-    { label: "Recorded", value: t.recorded },
-    { label: "Available", value: t.available, color: C.green },
-    { label: "Out of stock", value: t.outOfStock, color: C.red },
-    { label: "Not found", value: t.notFound, color: C.amber },
-    { label: "Missing", value: t.missing, color: C.muted },
-    { label: "Coverage", value: t.coveragePct / 100, pct: true },
-  ];
-  // KPI cards occupy columns B..H; column A holds a row caption
-  sheet.getCell(`A${r}`).value = "KEY FIGURES";
-  sheet.getCell(`A${r}`).font = font({
-    size: 8,
-    bold: true,
-    color: { argb: C.muted },
-  });
-  sheet.getCell(`A${r}`).alignment = { vertical: "middle" };
-  kpis.forEach((kpi, i) => {
-    const col = i + 2;
-    const valueCell = sheet.getRow(r).getCell(col);
-    valueCell.value = kpi.value;
-    if (kpi.pct) valueCell.numFmt = PCT_FORMAT;
-    valueCell.font = font({
-      size: 16,
-      bold: true,
-      color: { argb: kpi.color || C.primary },
-    });
-    valueCell.alignment = { vertical: "middle", horizontal: "center" };
-    valueCell.fill = fill(C.card);
-
-    const labelCell = sheet.getRow(r + 1).getCell(col);
-    labelCell.value = kpi.label;
-    labelCell.font = font({ size: 8, color: { argb: C.muted } });
-    labelCell.alignment = { vertical: "middle", horizontal: "center" };
-    labelCell.fill = fill(C.card);
-  });
-  sheet.getRow(r).height = 28;
-  sheet.getRow(r + 1).height = 16;
-  r += 3;
-
-  // Secondary facts
-  const rev = summary.review;
-  sheet.mergeCells(`A${r}:I${r}`);
-  sheet.getCell(`A${r}`).value =
-    `Stores covered: ${t.stores}   |   Products: ${t.products}   |   ` +
-    `Duplicate observations resolved: ${t.duplicatesResolved}   |   ` +
-    `Review status - Approved: ${rev.APPROVED}, Pending: ${rev.PENDING}, Needs review: ${rev.NEEDS_REVIEW}`;
-  sheet.getCell(`A${r}`).font = font({ size: 9, color: { argb: C.muted } });
-  sheet.getCell(`A${r}`).alignment = { wrapText: true, vertical: "top" };
-  sheet.getRow(r).height = 28;
-  r += 1;
-
-  if (scope === "STORE" && summary.priceRange) {
-    const { lowest, highest } = summary.priceRange;
-    sheet.mergeCells(`A${r}:I${r}`);
-    sheet.getCell(`A${r}`).value =
-      `Lowest price: ${lowest.product} - ${formatPrice(lowest.price)} ${CURRENCY}   |   ` +
-      `Highest price: ${highest.product} - ${formatPrice(highest.price)} ${CURRENCY}`;
-    sheet.getCell(`A${r}`).font = font({ size: 9, color: { argb: C.muted } });
-    sheet.getCell(`A${r}`).alignment = { wrapText: true, vertical: "top" };
-    sheet.getRow(r).height = 18;
-    r += 1;
-  }
-
   addNote(
     sheet,
     r,
-    COLS,
-    "Rejected observations and cancelled audits are excluded. When a product has several observations " +
-      "for the same store in this survey period, the AVAILABLE one is reported (then approved, then most recent).",
+    SUMMARY_COLS,
+    "Rejected observations and cancelled audits are excluded. Each competitor column combines all of its stores: " +
+      "when a product has several observations, the AVAILABLE one is reported (then approved, then most recent). " +
+      "Queens Price is the current price from the Queens price list.",
     30,
   );
   r += 2;
 
-  // ---- Summary by category ----
-  addSectionHeading(sheet, r, "Summary by Category");
-  r += 1;
+  for (const section of sections) {
+    const { summary } = section;
+    const t = summary.totals;
 
-  const catHeaders = [
-    "Category",
-    "Products",
-    "Items",
-    "Recorded",
-    "Available",
-    "Out of stock",
-    "Not found",
-    "Missing",
-    "Coverage",
-  ];
-  const numericAligns = [
-    "left",
-    "right",
-    "right",
-    "right",
-    "right",
-    "right",
-    "right",
-    "right",
-    "right",
-  ];
-  styleHeaderRow(sheet.getRow(r), catHeaders.length, numericAligns);
-  catHeaders.forEach((h, i) => {
-    sheet.getRow(r).getCell(i + 1).value = h;
-  });
-  r += 1;
+    styleBandRow(
+      sheet,
+      r,
+      SUMMARY_COLS,
+      `${section.label} - ${section.description}`,
+    );
+    r += 2;
 
-  const writeSummaryRow = (values, { bold = false, zebra = false } = {}) => {
-    const row = sheet.getRow(r);
-    values.forEach((value, i) => {
-      const cell = row.getCell(i + 1);
-      cell.value = value;
-      styleDataCell(cell, {
-        align: numericAligns[i] || "right",
-        zebra,
-        wrap: false,
-      });
-      if (bold) cell.font = font({ bold: true });
-      if (i === values.length - 1 && typeof value === "number") {
-        cell.numFmt = PCT_FORMAT;
-      }
-    });
-    row.height = 18;
+    r = writeKpis(sheet, r, t);
+
+    const rev = summary.review;
+    let facts =
+      `Competitors: ${t.competitors}   |   Stores covered: ${t.stores}   |   Products: ${t.products}   |   ` +
+      `Duplicate observations resolved: ${t.duplicatesResolved}   |   ` +
+      `Review status - Approved: ${rev.APPROVED}, Pending: ${rev.PENDING}, Needs review: ${rev.NEEDS_REVIEW}`;
+    if (summary.queens) {
+      facts += `   |   Queens Price found for ${summary.queens.priced} of ${summary.queens.products} products`;
+    }
+    r = writeMergedText(sheet, r, facts, 28);
+
+    if (summary.priceRange) {
+      const { lowest, highest } = summary.priceRange;
+      r = writeMergedText(
+        sheet,
+        r,
+        `Lowest competitor price: ${lowest.product} (${lowest.competitor}) - ${formatPrice(lowest.price)} ${CURRENCY}   |   ` +
+          `Highest competitor price: ${highest.product} (${highest.competitor}) - ${formatPrice(highest.price)} ${CURRENCY}`,
+        18,
+      );
+    }
     r += 1;
-  };
 
-  summary.byCategory.forEach((c, i) => {
-    writeSummaryRow(
-      [
+    // ---- Summary by category ----
+    addSectionHeading(sheet, r, "Summary by Category");
+    r += 1;
+    r = writeSummaryTable(sheet, r, {
+      headers: [
+        "Category",
+        "Products",
+        "Items",
+        "Recorded",
+        "Available",
+        "Out of stock",
+        "Not found",
+        "Missing",
+        "Coverage",
+      ],
+      rows: summary.byCategory.map((c) => [
         c.category,
         c.products,
         c.items,
@@ -419,89 +438,54 @@ const buildSummarySheet = (workbook, model) => {
         c.notFound,
         c.missing,
         c.coveragePct / 100,
+      ]),
+      totalRow: [
+        "Total",
+        t.products,
+        t.items,
+        t.recorded,
+        t.available,
+        t.outOfStock,
+        t.notFound,
+        t.missing,
+        t.coveragePct / 100,
       ],
-      { zebra: i % 2 === 1 },
-    );
-  });
-  writeSummaryRow(
-    [
-      "Total",
-      t.products,
-      t.items,
-      t.recorded,
-      t.available,
-      t.outOfStock,
-      t.notFound,
-      t.missing,
-      t.coveragePct / 100,
-    ],
-    { bold: true },
-  );
-  // Total row highlight
-  for (let c = 1; c <= catHeaders.length; c += 1) {
-    sheet.getRow(r - 1).getCell(c).fill = fill(C.band);
-  }
+    });
 
-  // ---- Summary by store (all-stores report only) ----
-  if (scope === "ALL_STORES") {
+    // ---- Summary by competitor (no data -> blank) ----
     r += 2;
-    addSectionHeading(sheet, r, "Summary by Store");
+    addSectionHeading(sheet, r, "Summary by Competitor");
     r += 1;
-
-    const storeHeaders = [
-      "Store",
-      "Competitor",
-      "Items",
-      "Recorded",
-      "Available",
-      "Out of stock",
-      "Not found",
-      "Missing",
-      "Coverage",
-    ];
-    const storeAligns = [
-      "left",
-      "left",
-      "right",
-      "right",
-      "right",
-      "right",
-      "right",
-      "right",
-      "right",
-    ];
-    styleHeaderRow(sheet.getRow(r), storeHeaders.length, storeAligns);
-    storeHeaders.forEach((h, i) => {
-      sheet.getRow(r).getCell(i + 1).value = h;
+    r = writeSummaryTable(sheet, r, {
+      headers: [
+        "Competitor",
+        "Stores",
+        "Items",
+        "Recorded",
+        "Available",
+        "Out of stock",
+        "Not found",
+        "Missing",
+        "Coverage",
+      ],
+      rows: summary.byCompetitor.map((c) =>
+        c.items === 0
+          ? [c.competitor, "", "", "", "", "", "", "", ""]
+          : [
+              c.competitor,
+              c.stores,
+              c.items,
+              c.recorded,
+              c.available,
+              c.outOfStock,
+              c.notFound,
+              c.missing,
+              c.coveragePct / 100,
+            ],
+      ),
     });
-    r += 1;
 
-    summary.byStore.forEach((s, i) => {
-      const row = sheet.getRow(r);
-      const values = [
-        s.store,
-        s.competitor,
-        s.items,
-        s.recorded,
-        s.available,
-        s.outOfStock,
-        s.notFound,
-        s.missing,
-        s.coveragePct / 100,
-      ];
-      values.forEach((value, idx) => {
-        const cell = row.getCell(idx + 1);
-        cell.value = value;
-        styleDataCell(cell, {
-          align: storeAligns[idx],
-          zebra: i % 2 === 1,
-          wrap: false,
-        });
-        if (idx === values.length - 1) cell.numFmt = PCT_FORMAT;
-      });
-      row.height = 18;
-      r += 1;
-    });
+    r += 3;
   }
 
   setPageSetup(sheet, { landscape: true });
@@ -509,79 +493,100 @@ const buildSummarySheet = (workbook, model) => {
 };
 
 // ------------------------------------------------------------------
-// Sheet 2a: Price comparison matrix (all-stores report)
+// Sheet per report type: price comparison matrix (products x competitors)
 // ------------------------------------------------------------------
 
-const writeMatrixCell = (cell, record, isLowest) => {
+/** Writes one matrix cell. Returns true when the cell got its own fill. */
+const writeMatrixCell = (cell, record, column, isLowest) => {
   cell.border = thinBorder;
   cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+  cell.font = font();
 
   if (record === undefined) {
-    cell.value = "-";
-    cell.font = font({ color: { argb: C.muted } });
-    return;
+    cell.value = null; // no data -> blank
+    return false;
   }
   if (record === null) {
     cell.value = "Missing";
     cell.font = font({ italic: true, color: { argb: C.muted } });
-    return;
+    return false;
   }
+
+  if (column.kind === "QUEENS") {
+    cell.value = record.price;
+    cell.numFmt = PRICE_FORMAT;
+    cell.alignment = { vertical: "middle", horizontal: "right" };
+    cell.font = font({ bold: true, color: { argb: C.primary } });
+    cell.fill = fill(C.queens);
+    return true;
+  }
+
   if (record.availability === "AVAILABLE") {
     if (record.price === null) {
       cell.value = AVAILABILITY_LABELS.AVAILABLE;
       cell.font = font({ color: { argb: C.green } });
-      return;
+      return false;
     }
     cell.value = record.price;
     cell.numFmt = PRICE_FORMAT;
     cell.alignment = { vertical: "middle", horizontal: "right" };
-    cell.font = isLowest
-      ? font({ bold: true, color: { argb: C.green } })
-      : font();
-    if (isLowest) cell.fill = fill("FFE8F5E9");
-    return;
+    if (isLowest) {
+      cell.font = font({ bold: true, color: { argb: C.green } });
+      cell.fill = fill(C.lowest);
+      return true;
+    }
+    return false;
   }
   if (record.availability === "OUT_OF_STOCK") {
     cell.value = AVAILABILITY_LABELS.OUT_OF_STOCK;
     cell.font = font({ color: { argb: C.red } });
-    return;
+    return false;
   }
   cell.value = AVAILABILITY_LABELS.NOT_FOUND;
   cell.font = font({ color: { argb: C.amber } });
+  return false;
 };
 
-const buildMatrixSheet = (workbook, model) => {
-  const { stores, categories, period } = model;
+const buildMatrixSheet = (workbook, model, section) => {
+  const { columns, categories } = section;
+  const { period } = model;
   const FIXED = 4; // No., Item Code, Article Name, Unit
-  const colCount = FIXED + stores.length;
+  const colCount = FIXED + columns.length;
+  const barCols = Math.max(colCount, 5);
 
-  const sheet = workbook.addWorksheet("Price Comparison", {
-    views: [{ showGridLines: false }],
-    properties: { tabColor: { argb: C.green } },
-  });
+  const sheet = workbook.addWorksheet(
+    safeSheetName(`${section.label} Prices`),
+    {
+      views: [{ showGridLines: false }],
+      properties: { tabColor: { argb: C.green } },
+    },
+  );
 
   sheet.columns = [
     { width: 6 },
     { width: 18 },
     { width: 42 },
     { width: 10 },
-    ...stores.map(() => ({ width: 18 })),
+    ...columns.map(() => ({ width: 20 })),
   ];
 
   addTitleBar(
     sheet,
     1,
-    Math.max(colCount, 5),
-    "Price Comparison by Category",
+    barCols,
+    `${section.label} - Price Comparison by Category`,
     `${period.name}  |  Prices in ${CURRENCY}`,
     null,
   );
 
+  const hasQueens = columns.some((c) => c.kind === "QUEENS");
   addNote(
     sheet,
     3,
-    Math.max(colCount, 5),
-    `Prices in ${CURRENCY}. Green = lowest price in the row. "Missing" = assigned but not recorded. "-" = not on that store's checklist.`,
+    barCols,
+    `Prices in ${CURRENCY}. Green = lowest competitor price in the row. ` +
+      (hasQueens ? "Queens Price = current price from the price list. " : "") +
+      `"Missing" = assigned but not recorded. Blank = no data.`,
     18,
   );
 
@@ -592,7 +597,7 @@ const buildMatrixSheet = (workbook, model) => {
     "Item Code",
     "Article Name",
     "Unit",
-    ...stores.map((s) => storeHeaderLabel(s)),
+    ...columns.map((c) => columnHeaderLabel(c)),
   ];
   headers.forEach((h, i) => {
     headerRow.getCell(i + 1).value = h;
@@ -615,8 +620,9 @@ const buildMatrixSheet = (workbook, model) => {
     for (const product of category.products) {
       counter += 1;
 
-      const prices = stores
-        .map((s) => product.cells[s.id])
+      const prices = columns
+        .filter((c) => c.kind === "COMPETITOR")
+        .map((c) => product.cells[c.key])
         .filter(
           (rec) =>
             rec && rec.availability === "AVAILABLE" && rec.price !== null,
@@ -643,169 +649,18 @@ const buildMatrixSheet = (workbook, model) => {
       unitCell.value = product.unit;
       styleDataCell(unitCell, { align: "center", zebra });
 
-      stores.forEach((s, i) => {
+      columns.forEach((column, i) => {
         const cell = row.getCell(FIXED + i + 1);
-        const record = product.cells[s.id];
+        const record = product.cells[column.key];
         const isLowest =
+          column.kind === "COMPETITOR" &&
           lowest !== null &&
           record &&
           record.availability === "AVAILABLE" &&
           record.price === lowest;
-        writeMatrixCell(cell, record, isLowest);
-        if (zebra && !isLowest) cell.fill = fill(C.zebra);
+        const filled = writeMatrixCell(cell, record, column, isLowest);
+        if (zebra && !filled) cell.fill = fill(C.zebra);
       });
-
-      row.height = 18;
-      zebra = !zebra;
-      r += 1;
-    }
-  }
-
-  sheet.views = [
-    {
-      showGridLines: false,
-      state: "frozen",
-      xSplit: 3,
-      ySplit: HEADER_ROW,
-    },
-  ];
-  sheet.pageSetup.printTitlesRow = `${HEADER_ROW}:${HEADER_ROW}`;
-  setPageSetup(sheet, { landscape: true });
-  sheet.pageSetup.printTitlesRow = `${HEADER_ROW}:${HEADER_ROW}`;
-  return sheet;
-};
-
-// ------------------------------------------------------------------
-// Sheet 2b: Single-store observations
-// ------------------------------------------------------------------
-
-const buildStoreSheet = (workbook, model) => {
-  const storeId = model.store.id;
-  const colCount = 9;
-
-  const sheet = workbook.addWorksheet("Store Observations", {
-    views: [{ showGridLines: false }],
-    properties: { tabColor: { argb: C.green } },
-  });
-
-  sheet.columns = [
-    { width: 6 }, // No.
-    { width: 18 }, // Item Code
-    { width: 42 }, // Article
-    { width: 18 }, // Unit / Pack
-    { width: 15 }, // Availability
-    { width: 14 }, // Price
-    { width: 14 }, // Review
-    { width: 20 }, // Captured
-    { width: 28 }, // Notes
-  ];
-
-  addTitleBar(
-    sheet,
-    1,
-    colCount,
-    `Price Observations - ${model.store.name}`,
-    `${model.period.name}  |  Prices in ${CURRENCY}`,
-    null,
-  );
-
-  addNote(
-    sheet,
-    3,
-    colCount,
-    `Prices in ${CURRENCY}. "Not recorded" = assigned to this store but no observation was captured.`,
-    18,
-  );
-
-  const HEADER_ROW = 5;
-  const headers = [
-    "No.",
-    "Item Code",
-    "Article Name",
-    "Unit / Pack",
-    "Availability",
-    `Price (${CURRENCY})`,
-    "Review",
-    "Captured",
-    "Notes",
-  ];
-  const aligns = [
-    "center",
-    "left",
-    "left",
-    "left",
-    "left",
-    "right",
-    "left",
-    "left",
-    "left",
-  ];
-  const headerRow = sheet.getRow(HEADER_ROW);
-  headers.forEach((h, i) => {
-    headerRow.getCell(i + 1).value = h;
-  });
-  styleHeaderRow(headerRow, colCount, aligns);
-
-  let r = HEADER_ROW + 1;
-  let counter = 0;
-
-  for (const category of model.categories) {
-    const entries = category.products.filter(
-      (p) => p.cells[storeId] !== undefined,
-    );
-    if (entries.length === 0) continue;
-
-    styleBandRow(sheet, r, colCount, category.name);
-    r += 1;
-
-    let zebra = false;
-    for (const product of entries) {
-      const record = product.cells[storeId];
-      counter += 1;
-      const row = sheet.getRow(r);
-
-      const values =
-        record === null
-          ? [
-              counter,
-              product.code,
-              product.name,
-              product.unit,
-              "Not recorded",
-              null,
-              "",
-              "",
-              "",
-            ]
-          : [
-              counter,
-              product.code,
-              product.name,
-              packLabel(record, product),
-              AVAILABILITY_LABELS[record.availability] || record.availability,
-              record.availability === "AVAILABLE" ? record.price : null,
-              REVIEW_LABELS[record.reviewStatus] || record.reviewStatus,
-              formatDateTime(record.capturedAt),
-              record.notes || "",
-            ];
-
-      values.forEach((value, i) => {
-        const cell = row.getCell(i + 1);
-        cell.value = value;
-        styleDataCell(cell, { align: aligns[i], zebra });
-      });
-
-      row.getCell(1).font = font({ color: { argb: C.muted } });
-      row.getCell(6).numFmt = PRICE_FORMAT;
-
-      if (record === null) {
-        row.getCell(5).font = font({ italic: true, color: { argb: C.muted } });
-      } else {
-        row.getCell(5).font = font({
-          bold: true,
-          color: { argb: availabilityColor(record.availability) },
-        });
-      }
 
       row.height = 18;
       zebra = !zebra;
@@ -827,7 +682,7 @@ const buildStoreSheet = (workbook, model) => {
 };
 
 // ------------------------------------------------------------------
-// Sheet 3: Flat observation details (filterable)
+// Last sheet: flat observation details (filterable)
 // ------------------------------------------------------------------
 
 const buildDetailsSheet = (workbook, model) => {
@@ -837,8 +692,9 @@ const buildDetailsSheet = (workbook, model) => {
   });
 
   const columns = [
+    { header: "Report", key: "report", width: 16, align: "left" },
+    { header: "Competitor", key: "competitor", width: 20, align: "left" },
     { header: "Store", key: "store", width: 28, align: "left" },
-    { header: "Competitor", key: "competitor", width: 22, align: "left" },
     { header: "City", key: "city", width: 16, align: "left" },
     { header: "Area", key: "area", width: 16, align: "left" },
     { header: "Category", key: "category", width: 22, align: "left" },
@@ -859,6 +715,8 @@ const buildDetailsSheet = (workbook, model) => {
     },
     { header: "Notes", key: "notes", width: 36, align: "left" },
   ];
+  const priceCol = columns.findIndex((c) => c.key === "price") + 1;
+  const availCol = columns.findIndex((c) => c.key === "availability") + 1;
 
   sheet.columns = columns.map((c) => ({ key: c.key, width: c.width }));
 
@@ -872,86 +730,99 @@ const buildDetailsSheet = (workbook, model) => {
     columns.map((c) => c.align),
   );
 
-  // Stores for lookup
-  const storeById = new Map(model.stores.map((s) => [s.id, s]));
+  const emptyData = (section, column, product, category) => ({
+    report: section.label,
+    competitor: column.label,
+    store: "",
+    city: "",
+    area: "",
+    category: category.name,
+    code: product.code,
+    name: product.name,
+    availability: "",
+    price: null,
+    packageSize: "",
+    unit: product.unit,
+    review: "",
+    capturedAt: "",
+    auditor: "",
+    alternatives: null,
+    notes: "",
+  });
 
   let rowIndex = 2;
-  for (const category of model.categories) {
-    for (const product of category.products) {
-      for (const s of model.stores) {
-        const record = product.cells[s.id];
-        if (record === undefined) continue;
+  for (const section of model.sections) {
+    for (const category of section.categories) {
+      for (const product of category.products) {
+        for (const column of section.columns) {
+          const record = product.cells[column.key];
+          if (record === undefined) continue;
 
-        const storeInfo = storeById.get(s.id);
-        const row = sheet.getRow(rowIndex);
-        const zebra = rowIndex % 2 === 1;
+          const base = emptyData(section, column, product, category);
+          let data;
+          let availabilityKey = null;
 
-        const data =
-          record === null
-            ? {
-                store: storeInfo.name,
-                competitor: storeInfo.competitorName,
-                city: storeInfo.city ?? "",
-                area: storeInfo.area ?? "",
-                category: category.name,
-                code: product.code,
-                name: product.name,
-                availability: "Not recorded",
-                price: null,
-                packageSize: "",
-                unit: product.unit,
-                review: "",
-                capturedAt: "",
-                auditor: "",
-                alternatives: null,
-                notes: "",
-              }
-            : {
-                store: storeInfo.name,
-                competitor: storeInfo.competitorName,
-                city: storeInfo.city ?? "",
-                area: storeInfo.area ?? "",
-                category: category.name,
-                code: product.code,
-                name: product.name,
-                availability:
-                  AVAILABILITY_LABELS[record.availability] ||
-                  record.availability,
-                price:
-                  record.availability === "AVAILABLE" ? record.price : null,
-                packageSize: record.packageSize ?? "",
-                unit: record.observedUnit || product.unit,
-                review:
-                  REVIEW_LABELS[record.reviewStatus] || record.reviewStatus,
-                capturedAt: formatDateTime(record.capturedAt),
-                auditor: record.auditorName,
-                alternatives: record.alternativesCount,
-                notes: record.notes || "",
-              };
+          if (record === null) {
+            data = { ...base, availability: "Not recorded" };
+          } else if (column.kind === "QUEENS") {
+            data = {
+              ...base,
+              store: "Queens price list",
+              availability: AVAILABILITY_LABELS.AVAILABLE,
+              price: record.price,
+              capturedAt: formatDateTime(record.effectiveFrom),
+              notes:
+                `Current price, effective from ${formatDate(record.effectiveFrom)}` +
+                (record.source ? ` (${record.source})` : ""),
+            };
+            availabilityKey = "AVAILABLE";
+          } else {
+            data = {
+              ...base,
+              store: record.storeName,
+              city: record.city ?? "",
+              area: record.area ?? "",
+              availability:
+                AVAILABILITY_LABELS[record.availability] || record.availability,
+              price: record.availability === "AVAILABLE" ? record.price : null,
+              packageSize: record.packageSize ?? "",
+              unit: record.observedUnit || product.unit,
+              review: REVIEW_LABELS[record.reviewStatus] || record.reviewStatus,
+              capturedAt: formatDateTime(record.capturedAt),
+              auditor: record.auditorName,
+              alternatives: record.alternativesCount,
+              notes: record.notes || "",
+            };
+            availabilityKey = record.availability;
+          }
 
-        columns.forEach((c, i) => {
-          const cell = row.getCell(i + 1);
-          cell.value = data[c.key];
-          styleDataCell(cell, {
-            align: c.align,
-            zebra,
-            wrap: c.key === "notes",
+          const row = sheet.getRow(rowIndex);
+          const zebra = rowIndex % 2 === 1;
+
+          columns.forEach((c, i) => {
+            const cell = row.getCell(i + 1);
+            cell.value = data[c.key];
+            styleDataCell(cell, {
+              align: c.align,
+              zebra,
+              wrap: c.key === "notes",
+            });
           });
-        });
 
-        row.getCell(9).numFmt = PRICE_FORMAT;
+          row.getCell(priceCol).numFmt = PRICE_FORMAT;
 
-        const availCell = row.getCell(8);
-        if (record === null) {
-          availCell.font = font({ italic: true, color: { argb: C.muted } });
-        } else {
-          availCell.font = font({
-            bold: true,
-            color: { argb: availabilityColor(record.availability) },
-          });
+          const availCell = row.getCell(availCol);
+          if (availabilityKey === null) {
+            availCell.font = font({ italic: true, color: { argb: C.muted } });
+          } else {
+            availCell.font = font({
+              bold: true,
+              color: { argb: availabilityColor(availabilityKey) },
+            });
+          }
+
+          rowIndex += 1;
         }
-
-        rowIndex += 1;
       }
     }
   }
@@ -974,6 +845,7 @@ const buildDetailsSheet = (workbook, model) => {
 
 /**
  * Builds the Excel report from the shared report model.
+ * Sheets: Summary, one price-comparison sheet per report type, Observation Details.
  * Returns a Node Buffer containing the .xlsx file.
  */
 export const buildObservationReportExcel = async (model) => {
@@ -987,10 +859,8 @@ export const buildObservationReportExcel = async (model) => {
 
   buildSummarySheet(workbook, model);
 
-  if (model.scope === "STORE") {
-    buildStoreSheet(workbook, model);
-  } else {
-    buildMatrixSheet(workbook, model);
+  for (const section of model.sections) {
+    buildMatrixSheet(workbook, model, section);
   }
 
   buildDetailsSheet(workbook, model);
