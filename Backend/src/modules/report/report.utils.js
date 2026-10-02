@@ -64,14 +64,15 @@ export const slugify = (value) =>
     .replace(/-+/g, "-")
     .toLowerCase() || "report";
 
-/** "Competitor" sub-label for a store column header, avoiding duplicates. */
-export const storeHeaderLabel = (store) => {
-  const competitor = store.competitorName || "";
-  if (
-    competitor &&
-    !store.name.toLowerCase().includes(competitor.toLowerCase())
-  ) {
-    return `${store.name}\n${competitor}`;
-  }
-  return store.name;
-};
+/**
+ * Lower-cases and strips everything except letters/digits so that
+ * "Ultra-Sensitive", "ultra sensitive" and "ULTRA_SENSITIVE" compare equal.
+ */
+export const normalizeKey = (value) =>
+  String(value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+
+/** Column header text for a report column (competitor or Queens Price). */
+export const columnHeaderLabel = (column) =>
+  column.kind === "QUEENS" ? `${column.label}\n(current)` : column.label;

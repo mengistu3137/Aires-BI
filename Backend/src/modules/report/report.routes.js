@@ -10,7 +10,9 @@ router.use(authenticate);
 
 // ========================================================
 // REPORTS: /api/v1/reports/...
-// Query: surveyPeriodId (required), storeId (optional)
+// Query: surveyPeriodId (required)
+//        reportType (optional): FRESH_CORNER | ULTRA_SENSITIVE (omit = both)
+//        storeId (optional)
 // ========================================================
 router.get(
   "/summary",

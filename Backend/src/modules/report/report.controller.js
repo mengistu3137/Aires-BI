@@ -13,13 +13,18 @@ const sendFile = (res, { buffer, filename, contentType }) => {
   res.status(200).end(buffer);
 };
 
+const paramsFrom = (req) => ({
+  surveyPeriodId: req.query.surveyPeriodId,
+  storeId: req.query.storeId,
+  reportType: req.query.reportType,
+  user: req.user,
+});
+
 export const getReportSummary = async (req, res, next) => {
   try {
-    const result = await observationReportService.getObservationReportSummary({
-      surveyPeriodId: req.query.surveyPeriodId,
-      storeId: req.query.storeId,
-      user: req.user,
-    });
+    const result = await observationReportService.getObservationReportSummary(
+      paramsFrom(req),
+    );
 
     res.status(200).json({
       status: "success",
@@ -32,11 +37,9 @@ export const getReportSummary = async (req, res, next) => {
 
 export const downloadPdfReport = async (req, res, next) => {
   try {
-    const file = await observationReportService.generateObservationReportPdf({
-      surveyPeriodId: req.query.surveyPeriodId,
-      storeId: req.query.storeId,
-      user: req.user,
-    });
+    const file = await observationReportService.generateObservationReportPdf(
+      paramsFrom(req),
+    );
 
     sendFile(res, file);
   } catch (error) {
@@ -46,11 +49,9 @@ export const downloadPdfReport = async (req, res, next) => {
 
 export const downloadExcelReport = async (req, res, next) => {
   try {
-    const file = await observationReportService.generateObservationReportExcel({
-      surveyPeriodId: req.query.surveyPeriodId,
-      storeId: req.query.storeId,
-      user: req.user,
-    });
+    const file = await observationReportService.generateObservationReportExcel(
+      paramsFrom(req),
+    );
 
     sendFile(res, file);
   } catch (error) {

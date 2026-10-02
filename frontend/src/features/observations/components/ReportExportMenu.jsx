@@ -22,13 +22,33 @@ const FileIcon = ({ className = "" }) => (
   </svg>
 );
 
+// value "" = both reports in one file (the backend default)
+const REPORT_TYPES = [
+  {
+    value: "FRESH_CORNER",
+    label: "Fresh Corner",
+    hint: "Fresh Corner, Garment Market, Straight Market, Queens Price",
+  },
+  {
+    value: "ULTRA_SENSITIVE",
+    label: "Ultra-Sensitive",
+    hint: "Shoa, Abadir, Allmart, Bambis",
+  },
+  {
+    value: "",
+    label: "Both",
+    hint: "Fresh Corner and Ultra-Sensitive in one file",
+  },
+];
+
 /**
- * Export dropdown (PDF / Excel).
+ * Export dropdown (report type + PDF / Excel).
  * Props:
  *  - surveyPeriodId: required to enable the menu
- *  - scopeLabel: e.g. "All stores" or the selected store's name
+ *  - scopeLabel: e.g. "All competitors" or the selected store's name
  *  - periodLabel: human-readable period name
- *  - onDownload(format): "pdf" | "excel"
+ *  - onDownload(format, reportType): format "pdf" | "excel";
+ *      reportType "FRESH_CORNER" | "ULTRA_SENSITIVE" | "" (both)
  *  - downloading: null | "pdf" | "excel"
  *  - disabled: extra disable flag (e.g. offline)
  */
@@ -41,6 +61,7 @@ export const ReportExportMenu = ({
   disabled = false,
 }) => {
   const [open, setOpen] = useState(false);
+  const [reportType, setReportType] = useState("FRESH_CORNER");
   const ref = useRef(null);
 
   const needsPeriod = !surveyPeriodId;
@@ -63,7 +84,7 @@ export const ReportExportMenu = ({
 
   const handle = (format) => {
     setOpen(false);
-    onDownload(format);
+    onDownload(format, reportType || undefined);
   };
 
   const options = [
@@ -80,6 +101,8 @@ export const ReportExportMenu = ({
       color: "text-emerald-700",
     },
   ];
+
+  const selectedType = REPORT_TYPES.find((t) => t.value === reportType);
 
   return (
     <div className="relative" ref={ref}>
@@ -110,7 +133,7 @@ export const ReportExportMenu = ({
       {open && (
         <div
           role="menu"
-          className="absolute right-0 z-20 mt-2 w-64 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg"
+          className="absolute right-0 z-20 mt-2 w-72 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg"
         >
           <div className="border-b border-slate-100 bg-slate-50/70 px-3.5 py-2.5">
             <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
@@ -118,6 +141,39 @@ export const ReportExportMenu = ({
             </p>
             <p className="mt-0.5 truncate text-xs font-semibold text-slate-800">{periodLabel}</p>
             <p className="truncate text-[11px] text-slate-500">{scopeLabel}</p>
+          </div>
+
+          {/* Report type */}
+          <div className="border-b border-slate-100 px-3.5 py-2.5">
+            <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              Report
+            </p>
+            <div
+              role="radiogroup"
+              aria-label="Report type"
+              className="grid grid-cols-3 gap-1 rounded-xl bg-slate-100 p-1"
+            >
+              {REPORT_TYPES.map((t) => {
+                const active = t.value === reportType;
+                return (
+                  <button
+                    key={t.value || "both"}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    onClick={() => setReportType(t.value)}
+                    className={`rounded-lg px-1.5 py-1.5 text-[11px] font-bold transition ${
+                      active
+                        ? "bg-white text-[#A41821] shadow-xs"
+                        : "text-slate-500 hover:text-slate-800"
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="mt-1.5 text-[11px] leading-snug text-slate-500">{selectedType?.hint}</p>
           </div>
 
           {options.map((opt) => (

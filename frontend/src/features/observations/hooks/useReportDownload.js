@@ -19,14 +19,15 @@ const saveBlob = (blob, filename) => {
 };
 
 /**
- * Handles PDF / Excel report downloads for a survey period (+ optional store).
+ * Handles PDF / Excel report downloads for a survey period (+ optional store
+ * and optional reportType: "FRESH_CORNER" | "ULTRA_SENSITIVE", omit for both).
  * `downloading` is null | "pdf" | "excel" so the UI can show per-format spinners.
  */
 export const useReportDownload = () => {
   const [downloading, setDownloading] = useState(null);
 
   const download = useCallback(
-    async (format, { surveyPeriodId, storeId }) => {
+    async (format, { surveyPeriodId, storeId, reportType }) => {
       if (!surveyPeriodId) {
         toast.error("Select a survey period first");
         return;
@@ -40,8 +41,10 @@ export const useReportDownload = () => {
         const { blob, filename } = await downloadReportRequest(format, {
           surveyPeriodId,
           storeId,
+          reportType,
         });
-        const fallback = `price-report_${new Date().toISOString().slice(0, 10)}.${EXTENSIONS[format]}`;
+        const typeSlug = reportType ? `_${reportType.toLowerCase().replace(/_/g, "-")}` : "";
+        const fallback = `price-report${typeSlug}_${new Date().toISOString().slice(0, 10)}.${EXTENSIONS[format]}`;
         saveBlob(blob, filename || fallback);
         toast.success(`${LABELS[format]} report downloaded`, { id: toastId });
       } catch (err) {
