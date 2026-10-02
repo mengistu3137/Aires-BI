@@ -1,4 +1,4 @@
-name: Deploy YemiFlow to cPanel
+name: Deploy Aires-BI to cPanel
 
 on:
   push:
@@ -15,278 +15,123 @@ on:
         type: boolean
         default: false
 
-concurrency:
-  group: production-deploy
-  cancel-in-progress: false
-
-permissions:
-  contents: write
-
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
 
     steps:
       - name: ⬇️ Checkout Repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      # 1. Automated SemVer via Conventional Commits
-      - name: 🏷️ Calculate Next Semantic Version
-        id: semver
-        uses: mathieudutour/github-tag-action@v6.2
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          default_bump: false
-          release_branches: main
-
-      # 2. Update package.json & create GitHub Release if a new version was determined
-      - name: 📝 Bump package.json & Publish Release
-        if: steps.semver.outputs.new_version != ''
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NEW_VER: ${{ steps.semver.outputs.new_version }}
-          NEW_TAG: ${{ steps.semver.outputs.new_tag }}
-          CHANGELOG: ${{ steps.semver.outputs.changelog }}
-        run: |
-          echo "🚀 New version determined: $NEW_VER ($NEW_TAG)"
-
-          npm --prefix milki-backend version "$NEW_VER" --no-git-tag-version --allow-same-version
-          npm --prefix milki-frontend version "$NEW_VER" --no-git-tag-version --allow-same-version
-
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add milki-backend/package.json milki-backend/package-lock.json milki-frontend/package.json milki-frontend/package-lock.json
-          git commit -m "chore(release): bump version to $NEW_VER [skip ci]" || true
-          git pull origin main --rebase || true
-          git push origin main || true
-
-          gh release create "$NEW_TAG" \
-            --title "Release $NEW_TAG" \
-            --notes "$CHANGELOG"
-
-      # 3. Path-based change detection
+      # 1. ⚡ Detect exactly which files changed in this push
       - name: 🔍 Check for Modified Paths
         uses: dorny/paths-filter@v3
         id: filter
         with:
           filters: |
             frontend:
-              - 'milki-frontend/**'
+              - 'frontend/**'
             backend:
-              - 'milki-backend/**'
+              - 'Backend/**'
             backend_deps:
-              - 'milki-backend/package.json'
-              - 'milki-backend/package-lock.json'
+              - 'Backend/package.json'
+              - 'Backend/package-lock.json'
             prisma:
-              - 'milki-backend/prisma/**'
+              - 'Backend/prisma/**'
 
-      # 4. Decide what to deploy
-      - name: 🧭 Determine Deployment Plan
-        id: plan
-        env:
-          INPUT_FORCE_ALL: ${{ inputs.force_all }}
-          INPUT_RUN_SEED: ${{ inputs.run_seed }}
-          FRONTEND_CHANGED: ${{ steps.filter.outputs.frontend }}
-          BACKEND_CHANGED: ${{ steps.filter.outputs.backend }}
-          NEW_VER: ${{ steps.semver.outputs.new_version }}
-        run: |
-          deploy_frontend=false
-          deploy_backend=false
-          run_remote=false
-          should_seed=false
-
-          if [ "$INPUT_FORCE_ALL" = "true" ] || [ "$FRONTEND_CHANGED" = "true" ] || [ -n "$NEW_VER" ]; then
-            deploy_frontend=true
-          fi
-
-          if [ "$INPUT_FORCE_ALL" = "true" ] || [ "$BACKEND_CHANGED" = "true" ] || [ -n "$NEW_VER" ]; then
-            deploy_backend=true
-          fi
-
-          if [ "$INPUT_RUN_SEED" = "true" ]; then
-            should_seed=true
-          fi
-
-          if [ "$deploy_backend" = "true" ] || [ "$should_seed" = "true" ]; then
-            run_remote=true
-          fi
-
-          {
-            echo "deploy_frontend=$deploy_frontend"
-            echo "deploy_backend=$deploy_backend"
-            echo "run_remote=$run_remote"
-            echo "should_seed=$should_seed"
-          } >> "$GITHUB_OUTPUT"
-
-          echo "Frontend: $deploy_frontend | Backend: $deploy_backend | Remote: $run_remote | Seed: $should_seed"
-
-      # 5. Build frontend only when needed
+      # 2. ⚡ Setup Node with caching enabled for frontend (cuts npm ci from 40s to 5s)
       - name: ⚙️ Setup Node.js 22 with Cache
-        if: steps.plan.outputs.deploy_frontend == 'true'
+        if: steps.filter.outputs.frontend == 'true' || github.event.inputs.force_all == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: "npm"
-          cache-dependency-path: "milki-frontend/package-lock.json"
+          cache: 'npm'
+          cache-dependency-path: 'frontend/package-lock.json'
 
+      # 3. ⚡ Only build frontend if frontend files changed
       - name: 🏗️ Build Frontend (React)
-        if: steps.plan.outputs.deploy_frontend == 'true'
-        working-directory: milki-frontend
+        if: steps.filter.outputs.frontend == 'true' || github.event.inputs.force_all == 'true'
         run: |
-          npm install
+          cd frontend
+          npm ci --prefer-offline
           npm run build
 
-      # 6. SSH setup with Connection Multiplexing
-      - name: 🔐 Setup SSH & Multiplexing
-        if: steps.plan.outputs.deploy_frontend == 'true' || steps.plan.outputs.deploy_backend == 'true' || steps.plan.outputs.run_remote == 'true'
-        env:
-          SSH_KEY: ${{ secrets.SSH_KEY }}
-          SSH_PSW: ${{ secrets.SSH_PSW }}
-          SSH_HOST: ${{ secrets.SSH_HOST }}
-          SSH_PORT: ${{ secrets.SSH_PORT }}
+      # Setup SSH key (only if deploying frontend or backend)
+      - name: 🔐 Setup & Unlock SSH Key
+        if: steps.filter.outputs.frontend == 'true' || steps.filter.outputs.backend == 'true' || github.event.inputs.force_all == 'true'
         run: |
-          SSH_HOST_CLEAN=$(echo "$SSH_HOST" | tr -d '[:space:]')
-          SSH_PORT_CLEAN=$(echo "$SSH_PORT" | tr -d '[:space:]')
-
-          mkdir -p ~/.ssh/sockets
-          chmod 700 ~/.ssh ~/.ssh/sockets
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_rsa
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keygen -p -P "$SSH_PSW" -N "" -f ~/.ssh/id_rsa
+          ssh-keygen -p -P "${{ secrets.SSH_PASSPHRASE }}" -N "" -f ~/.ssh/id_rsa
 
-          cat << 'EOF' > ~/.ssh/config
-          Host *
-            ServerAliveInterval 15
-            ServerAliveCountMax 4
-            StrictHostKeyChecking no
-            UserKnownHostsFile /dev/null
-            ControlMaster auto
-            ControlPath ~/.ssh/sockets/%r@%h:%p
-            ControlPersist 10m
-            ConnectTimeout 30
-            ConnectionAttempts 5
-          EOF
-
-      # 7. Deploy frontend
+      # 4. ⚡ Only upload frontend if dist was rebuilt
       - name: 🚀 Deploy Frontend to cPanel
-        if: steps.plan.outputs.deploy_frontend == 'true'
-        env:
-          SSH_USER: ${{ secrets.SSH_USER }}
-          SSH_HOST: ${{ secrets.SSH_HOST }}
-          SSH_PORT: ${{ secrets.SSH_PORT }}
+        if: steps.filter.outputs.frontend == 'true' || github.event.inputs.force_all == 'true'
         run: |
-          SSH_USER_CLEAN=$(echo "$SSH_USER" | tr -d '[:space:]')
-          SSH_HOST_CLEAN=$(echo "$SSH_HOST" | tr -d '[:space:]')
-          SSH_PORT_CLEAN=$(echo "$SSH_PORT" | tr -d '[:space:]')
+          rsync -avz --delete -e "ssh -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=no -o ConnectTimeout=30" frontend/dist/ ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/home/airescad/airesbi/
 
-          rsync -avz --delete \
-            --filter='P .htaccess' \
-            --filter='P .well-known/' \
-            --filter='P cgi-bin/' \
-            --filter='P .user.ini' \
-            --filter='P error_log' \
-            -e "ssh -i ~/.ssh/id_rsa -p ${SSH_PORT_CLEAN}" \
-            milki-frontend/dist/ \
-            "${SSH_USER_CLEAN}@${SSH_HOST_CLEAN}:/home/${SSH_USER_CLEAN}/public_html/"
-
-      # 8. Deploy backend
+      # 5. ⚡ Only upload backend if backend files changed
       - name: 🚀 Deploy Backend to cPanel
-        if: steps.plan.outputs.deploy_backend == 'true'
-        env:
-          SSH_USER: ${{ secrets.SSH_USER }}
-          SSH_HOST: ${{ secrets.SSH_HOST }}
-          SSH_PORT: ${{ secrets.SSH_PORT }}
+        if: steps.filter.outputs.backend == 'true' || github.event.inputs.force_all == 'true'
         run: |
-          SSH_USER_CLEAN=$(echo "$SSH_USER" | tr -d '[:space:]')
-          SSH_HOST_CLEAN=$(echo "$SSH_HOST" | tr -d '[:space:]')
-          SSH_PORT_CLEAN=$(echo "$SSH_PORT" | tr -d '[:space:]')
+          rsync -avz --delete --exclude 'node_modules' --exclude '.env' --exclude '.htaccess' --exclude 'uploads' -e "ssh -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=no -o ConnectTimeout=30" Backend/ ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/home/airescad/biapi/
 
-          sleep 2
+      - name: 🧭 Determine Seed Execution
+        id: seed_check
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.run_seed }}" = "true" ]; then
+            echo "should_seed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_seed=false" >> "$GITHUB_OUTPUT"
+          fi
 
-          rsync -avz --delete \
-            --exclude 'node_modules' \
-            --exclude '.env' \
-            --exclude '.htaccess' \
-            --exclude 'uploads' \
-            --exclude 'data' \
-            --exclude 'tmp' \
-            --exclude 'logs' \
-            --exclude '.git' \
-            -e "ssh -i ~/.ssh/id_rsa -p ${SSH_PORT_CLEAN}" \
-            milki-backend/ \
-            "${SSH_USER_CLEAN}@${SSH_HOST_CLEAN}:/home/${SSH_USER_CLEAN}/yemiflow/"
-
-      # 9. Remote execution via native OpenSSH (Fixed for CloudLinux Node Selector)
+      # 6. ⚡ Smart Remote Execution on cPanel:
+      # - Only runs npm install if Backend/package.json changed
+      # - Only runs prisma migrations if Backend/prisma/ changed
+      # - Only restarts server if backend changed
       - name: 🔄 Smart Server Execution & Node Restart
-        if: steps.plan.outputs.run_remote == 'true'
-        env:
-          SSH_USER: ${{ secrets.SSH_USER }}
-          SSH_HOST: ${{ secrets.SSH_HOST }}
-          SSH_PORT: ${{ secrets.SSH_PORT }}
-          DEPS_CHANGED: ${{ steps.filter.outputs.backend_deps }}
-          PRISMA_CHANGED: ${{ steps.filter.outputs.prisma }}
-          SHOULD_SEED: ${{ steps.plan.outputs.should_seed }}
-          FORCE_ALL: ${{ inputs.force_all }}
-        run: |
-          SSH_USER_CLEAN=$(echo "$SSH_USER" | tr -d '[:space:]')
-          SSH_HOST_CLEAN=$(echo "$SSH_HOST" | tr -d '[:space:]')
-          SSH_PORT_CLEAN=$(echo "$SSH_PORT" | tr -d '[:space:]')
+        if: steps.filter.outputs.backend == 'true' || steps.seed_check.outputs.should_seed == 'true' || github.event.inputs.force_all == 'true'
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          passphrase: ${{ secrets.SSH_PASSPHRASE }}
+          port: ${{ secrets.SSH_PORT }}
+          envs: DEPS_CHANGED,PRISMA_CHANGED,SHOULD_SEED,FORCE_ALL
+          script: |
+            source /home/airescad/nodevenv/biapi/22/bin/activate && cd /home/airescad/biapi
 
-          sleep 2
-
-          ssh -i ~/.ssh/id_rsa -p "${SSH_PORT_CLEAN}" "${SSH_USER_CLEAN}@${SSH_HOST_CLEAN}" \
-            "DEPS_CHANGED='${DEPS_CHANGED}' PRISMA_CHANGED='${PRISMA_CHANGED}' SHOULD_SEED='${SHOULD_SEED}' FORCE_ALL='${FORCE_ALL}' bash -s" << 'EOF'
-            set -e
-            CURRENT_USER=$(whoami)
-            VENV_PATH="/home/${CURRENT_USER}/nodevenv/yemiflow/22"
-            APP_PATH="/home/${CURRENT_USER}/yemiflow"
-
-            source "${VENV_PATH}/bin/activate"
-            cd "${APP_PATH}"
-
-            # Ensure CloudLinux node_modules symlink is intact and not a real folder
-            if [ -d node_modules ] && [ ! -L node_modules ]; then
-              echo "🔧 Converting corrupted node_modules directory back to CloudLinux symlink..."
-              rm -rf node_modules
-              ln -s "${VENV_PATH}/lib/node_modules" node_modules
-            elif [ ! -e node_modules ]; then
-              ln -s "${VENV_PATH}/lib/node_modules" node_modules
-            fi
-
-            # Install dependencies without 'npm ci' (uses CloudLinux-compatible npm install)
+            # 1. Skip slow npm install unless dependencies actually changed
             if [ "$DEPS_CHANGED" = "true" ] || [ "$FORCE_ALL" = "true" ]; then
-              echo "📦 Installing production dependencies..."
-              npm install --omit=dev --no-package-lock
+              echo "📦 package.json changed. Running npm install on server..."
+              npm install --omit=dev
             else
-              echo "⚡ Dependencies unchanged. Skipping npm install."
+              echo "⚡ Dependencies unchanged. Skipping server npm install."
             fi
 
-            # Prisma schema sync and client generation
-            echo "🗄️ Generating Prisma Client..."
-            npx prisma generate
+            # 2. Skip Prisma generate/migrate unless schema changed
+            if [ "$PRISMA_CHANGED" = "true" ] || [ "$DEPS_CHANGED" = "true" ] || [ "$FORCE_ALL" = "true" ]; then
+              echo "🗄️ Schema changed. Running Prisma generate and migrate..."
+              npx prisma generate
+              npx prisma migrate deploy
+            else
+              echo "⚡ Prisma schema unchanged. Skipping migrations."
+            fi
 
-            echo "🗄️ Syncing database schema..."
-            npx prisma db push --accept-data-loss
-
-            # Seed only when explicitly requested
+            # 3. Seed only when explicitly requested
             if [ "$SHOULD_SEED" = "true" ]; then
               echo "🌱 Running database seed..."
               node prisma/seed.js
             fi
 
-            # Restart cPanel Node.js (Passenger) application
-            echo "🔄 Restarting application..."
-            mkdir -p tmp
-            touch tmp/restart.txt
-
-            # Register Telegram webhook if script exists
-            if [ -f scripts/set-webhook.js ]; then
-              echo "🤖 Registering Telegram webhook..."
-              node scripts/set-webhook.js || true
-            fi
-
-            echo "✅ Deployment complete."
-          EOF
+            # 4. Restart cPanel Phusion Passenger / Node.js
+            echo "🔄 Refreshing application..."
+            mkdir -p /home/airescad/biapi/tmp
+            touch /home/airescad/biapi/tmp/restart.txt
+        env:
+          DEPS_CHANGED: ${{ steps.filter.outputs.backend_deps }}
+          PRISMA_CHANGED: ${{ steps.filter.outputs.prisma }}
+          SHOULD_SEED: ${{ steps.seed_check.outputs.should_seed }}
+          FORCE_ALL: ${{ github.event.inputs.force_all }}
