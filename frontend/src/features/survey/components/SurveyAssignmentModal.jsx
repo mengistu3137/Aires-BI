@@ -82,9 +82,14 @@ export const SurveyAssignmentModal = ({
 	const [isEditMode, setIsEditMode] = useState(false);
 	const [isLoadingExisting, setIsLoadingExisting] = useState(false);
 
-	// Tracks whether the manager has manually configured auditors/products.
-	// Used to PRESERVE that configuration when switching to a fresh/unassigned store.
+	// Tracks whether the manager has manually configured auditors/products
+	// on the CURRENT store. Used to PRESERVE that config when re-checking
+	// the SAME store, but reset it when switching to a DIFFERENT store.
 	const hasManualConfigRef = useRef(false);
+
+	// Tracks the last storeId the loader ran for so we can detect genuine
+	// store SWITCHES vs initial mount / same-store re-checks.
+	const previousStoreIdRef = useRef(null);
 
 	// Split Category Pools
 	const ultraSensitiveProducts = useMemo(
@@ -127,30 +132,25 @@ export const SurveyAssignmentModal = ({
 		}
 	}, [isOpen, products, isEditMode, selectedProductIds.length]);
 
-	// Mark manual config once the manager has meaningful state (products loaded + selections)
-	useEffect(() => {
-		if (!isOpen) return;
-		if (
-			products.length > 0 &&
-			(allocations.length > 0 || selectedProductIds.length > 0)
-		) {
-			hasManualConfigRef.current = true;
-		}
-	}, [isOpen, allocations, selectedProductIds, products.length]);
-
-	// Reset manual-config flag when modal closes so a fresh open starts clean
+	// Reset refs when modal closes so a fresh open starts clean
 	useEffect(() => {
 		if (!isOpen) {
 			hasManualConfigRef.current = false;
+			previousStoreIdRef.current = null;
 		}
 	}, [isOpen]);
 
-	// Check for existing active store allocations when store or period changes
+	// Allocation loader — runs whenever store or period changes
 	useEffect(() => {
 		if (!isOpen || !storeId || !surveyPeriodId) return;
 
 		let isMounted = true;
 		setIsLoadingExisting(true);
+
+		// Detect a genuine store SWITCH (not the initial mount)
+		const isStoreSwitch =
+			previousStoreIdRef.current !== null &&
+			previousStoreIdRef.current !== storeId;
 
 		getStoreAllocationsRequest({ storeId, surveyPeriodId })
 			.then((res) => {
@@ -187,13 +187,22 @@ export const SurveyAssignmentModal = ({
 						};
 					});
 					setAllocations(mapped);
+
+					// Since we just loaded a real dispatch, mark it as "not manual"
+					// so a subsequent switch resets cleanly.
+					hasManualConfigRef.current = false;
 				} else {
-					// Store is available: DO NOT wipe out the manager's configured auditors
+					// New store has no active dispatch
 					setIsEditMode(false);
 
 					setAllocations((prevAllocations) => {
-						// If manager already configured auditors (e.g. Mirhan only), preserve them!
-						if (prevAllocations.length > 0 && hasManualConfigRef.current) {
+						// KEY: on a store SWITCH, always reset to fresh default.
+						// Only preserve manual config when we're on the SAME store
+						// (e.g. the user re-opened it or the period re-loaded).
+						const shouldReset = isStoreSwitch || prevAllocations.length === 0;
+
+						if (!shouldReset && hasManualConfigRef.current) {
+							// Preserve the user's manual config on this same store
 							return prevAllocations.map((a) => ({
 								...a,
 								observedCount: 0,
@@ -202,8 +211,8 @@ export const SurveyAssignmentModal = ({
 							}));
 						}
 
-						// Only auto-split if opening from scratch with no prior selection
-						const defaultCount = Math.min(1, auditors.length); // Default to 1 auditor initially
+						// Fresh default: exactly ONE auditor (the first in the list)
+						const defaultCount = Math.min(1, auditors.length);
 						const initialAuditorIds = auditors
 							.slice(0, defaultCount)
 							.map((a) => a.id);
@@ -219,10 +228,25 @@ export const SurveyAssignmentModal = ({
 							status: "NOT_STARTED",
 						}));
 					});
+
+					// Reset products to ALL on a genuine switch to avoid carrying
+					// over a previous store's selection.
+					if (isStoreSwitch && products.length > 0) {
+						setSelectedProductIds(products.map((p) => p.id));
+					}
+
+					// A fresh store starts with no manual config
+					hasManualConfigRef.current = false;
 				}
+
+				// Remember this storeId for the next run
+				previousStoreIdRef.current = storeId;
 			})
 			.catch(() => {
-				if (isMounted) setIsEditMode(false);
+				if (isMounted) {
+					setIsEditMode(false);
+					previousStoreIdRef.current = storeId;
+				}
 			})
 			.finally(() => {
 				if (isMounted) setIsLoadingExisting(false);
@@ -233,8 +257,10 @@ export const SurveyAssignmentModal = ({
 		};
 	}, [isOpen, storeId, surveyPeriodId, products, auditors]);
 
-	// Check whether any audit or observation has actually started for this store
+	// Lock state — must be FALSE while we're loading a fresh store so the
+	// old store's locked state doesn't leak into the UI.
 	const isLocked = useMemo(() => {
+		if (isLoadingExisting) return false;
 		if (allocations.length === 0) return false;
 		return allocations.some(
 			(a) =>
@@ -242,7 +268,7 @@ export const SurveyAssignmentModal = ({
 				(a.observedCount || 0) > 0 ||
 				(a.status && a.status !== "NOT_STARTED"),
 		);
-	}, [allocations]);
+	}, [allocations, isLoadingExisting]);
 
 	// Product Selection Handlers
 	const handleToggleProduct = (productId) => {
@@ -569,8 +595,8 @@ export const SurveyAssignmentModal = ({
 							>
 								{stores.map((s) => {
 									const isCurrentStore = s.id === storeId;
-									// A store is "in progress" if it has allocations in the current period
-									// and it is NOT the store we're currently editing.
+									// A store is "in progress" if it has active allocations in the
+									// current period and is NOT the store we are currently editing.
 									const isInProgress =
 										(s.hasActiveDispatch || s.status === "IN_PROGRESS") &&
 										!isCurrentStore;
