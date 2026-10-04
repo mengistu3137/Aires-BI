@@ -66,10 +66,12 @@ export const ObservationsPage = () => {
 
   // Report export (PDF / Excel) — uses the selected period + store filters
   const { download, downloading } = useReportDownload();
-  const handleExport = (format) =>
+  // reportType: "FRESH_CORNER" | "ULTRA_SENSITIVE" | undefined (= both in one file)
+  const handleExport = (format, reportType) =>
     download(format, {
       surveyPeriodId,
       storeId: storeId || undefined,
+      reportType: reportType || undefined,
     });
 
   // Client-side search across the loaded page
@@ -114,7 +116,7 @@ export const ObservationsPage = () => {
           <ReportExportMenu
             surveyPeriodId={surveyPeriodId}
             periodLabel={selectedPeriod?.name || "Selected survey period"}
-            scopeLabel={selectedStore ? selectedStore.name : "All stores"}
+            scopeLabel={selectedStore ? selectedStore.name : "All competitors"}
             onDownload={handleExport}
             downloading={downloading}
             disabled={!isOnline}
@@ -193,8 +195,9 @@ export const ObservationsPage = () => {
       {isManager && !surveyPeriodId && (
         <p className="-mt-1 text-[11px] text-slate-500">
           Select a <span className="font-bold">survey period</span> to export a PDF or Excel report.
-          Choose a store to export just that store, or leave it on “All stores” for the full
-          comparison.
+          Pick the report (Fresh Corner, Ultra-Sensitive or both) in the export menu. Columns are
+          grouped by competitor; choose a store to export just that store’s competitor, or leave it
+          on “All stores” for the full comparison.
         </p>
       )}
 
