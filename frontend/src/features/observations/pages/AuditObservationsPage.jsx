@@ -943,177 +943,130 @@ const CollectionView = ({ audit, observations, auditId }) => {
 		setTimeout(() => searchRef.current?.focusInput(), 60);
 	}, []);
 
-	const performSave = useCallback(
-		async ({ productId, price, availability }) => {
-			const existing = observationsByProductRef.current[productId];
-			const currentAuditStatus = auditStatusRef.current;
-			const currentProducts = productsRef.current;
-			const online = navigator.onLine;
+const performSave = useCallback(
+	async ({ productId, price, availability }) => {
+		const existing = observationsByProductRef.current[productId];
+		const currentProducts = productsRef.current;
+		const online = navigator.onLine;
 
-			const productName = formatProductName(
-				currentProducts.find((p) => p.id === productId)?.name || "Item",
-			);
+		const productName = formatProductName(
+			currentProducts.find((p) => p.id === productId)?.name || "Item",
+		);
 
-			// Update server-side directly only when we're online AND the existing
-			// row is a server row. If we're offline, an edit to an already-synced
-			// row falls through to the offline-queue path below (as an UPDATE)
-			// instead of firing a doomed network mutation that fails and reverts
-			// the row back to its old value.
-			const isServerRow =
-				existing && !existing.__local && existing.review?.status === "PENDING";
-			const isEditableExisting =
-				isServerRow && currentAuditStatus === "IN_PROGRESS";
+		// Existing server row that has not yet been approved by a manager
+		const isExistingServerRow =
+			existing &&
+			existing.id &&
+			!existing.__local &&
+			existing.review?.status === "PENDING";
 
-			if (isEditableExisting && online) {
-				const optimistic = {
-					...existing,
-					availability,
-					price: availability === "AVAILABLE" ? price : null,
-					capturedAt: new Date().toISOString(),
-					sync: { ...(existing.sync || {}), status: "SYNCED" },
-				};
-				upsertObservationInCache(optimistic);
-				try {
-					const response = await updateObservation.mutateAsync({
-						observationId: existing.id,
-						payload: { price, availability },
-					});
-					if (response?.data) {
-						upsertObservationInCache(response.data);
-					}
-					toast.success(
-						availability === "AVAILABLE"
-							? `Updated: ${Number(price).toFixed(2)} ETB`
-							: `Updated: ${availability.replace("_", " ")}`,
-						{ id: "observation-toast", duration: 1200 },
-					);
-					invalidateDependentQueries();
-					return;
-				} catch (err) {
-					upsertObservationInCache(existing);
-					toast.error(
-						err?.response?.data?.message || "Unable to update observation",
-					);
-					return;
-				}
-			}
-
-			const clientObservationId = buildClientObservationId(auditId, productId);
-			// An offline edit to a row that already exists on the server needs to
-			// sync as an UPDATE against that server id, not a new CREATE.
-			const isOfflineEditOfServerRow = isEditableExisting && !online;
-
-			const payload = {
-				clientObservationId,
-				auditId,
-				productId,
+		// Direct online update if row already exists on server
+		if (isExistingServerRow && online) {
+			const optimistic = {
+				...existing,
 				availability,
 				price: availability === "AVAILABLE" ? price : null,
-				observedUnit: existing?.observedUnit || null,
-				packageSize: existing?.packageSize || null,
 				capturedAt: new Date().toISOString(),
-				evidencePhotoUrl: existing?.evidencePhotoUrl || null,
-				notes: existing?.notes || null,
-				operation: isOfflineEditOfServerRow ? "UPDATE" : "CREATE",
-				serverObservationId: isOfflineEditOfServerRow ? existing.id : null,
+				sync: { ...(existing.sync || {}), status: "SYNCED" },
 			};
-
-			const optimisticObservation = {
-				id: isOfflineEditOfServerRow ? existing.id : clientObservationId,
-				clientObservationId,
-				auditId,
-				productId,
-				availability: payload.availability,
-				price: payload.price,
-				capturedAt: payload.capturedAt,
-				sync: { status: "PENDING", attempts: 0 },
-				review: {
-					status: isOfflineEditOfServerRow
-						? existing.review?.status || "PENDING"
-						: "PENDING",
-				},
-				product: currentProducts.find((p) => p.id === productId) || undefined,
-				__local: true,
-			};
-			upsertObservationInCache(optimisticObservation);
+			upsertObservationInCache(optimistic);
 
 			try {
-				const queued = await enqueueObservation(payload);
-
-				// Offline: stop here. Don't attempt the network call at all — that
-				// is exactly what produced the "shows a status, then reverts"
-				// behavior (a doomed request that eventually fails and flips the
-				// row back). The row stays visibly PENDING/offline until
-				// runQueueFlush() pushes it once we're back online.
-				if (!online) {
-					toast.success(
-						`${productName} saved offline — will sync when online`,
-						{
-							id: "observation-toast",
-							duration: 1800,
-						},
-					);
-					return;
-				}
-
-				const result = await syncObservation(queued);
-
-				if (result.success && result.data) {
-					upsertObservationInCache(result.data);
-					invalidateDependentQueries();
-					toast.success(
-						availability === "AVAILABLE"
-							? `${productName}: ${Number(price).toFixed(2)} ETB`
-							: `${productName}: ${availability.replace("_", " ")}`,
-						{ id: "observation-toast", duration: 1200 },
-					);
-				} else if (result.permanent) {
-					toast.error(
-						result.error?.response?.data?.message ||
-							"This observation could not be saved",
-					);
-					queryClient.setQueryData(queryKey, (previous) => {
-						if (!previous) return previous;
-						return {
-							...previous,
-							observations: (previous.observations || []).filter(
-								(o) => o.clientObservationId !== clientObservationId,
-							),
-						};
-					});
-				} else {
-					// Transient failure (connection dropped mid-request, etc). Leave
-					// it queued as PENDING — the next reconnect flush will retry it.
-					toast.success(
-						`${productName} saved offline — will sync when online`,
-						{
-							id: "observation-toast",
-							duration: 1800,
-						},
-					);
-				}
-			} catch (err) {
-				queryClient.setQueryData(queryKey, (previous) => {
-					if (!previous) return previous;
-					return {
-						...previous,
-						observations: (previous.observations || []).filter(
-							(o) => o.clientObservationId !== clientObservationId,
-						),
-					};
+				const response = await updateObservation.mutateAsync({
+					observationId: existing.id,
+					payload: { price, availability },
 				});
-				toast.error(err?.message || "Unable to save observation locally");
+				if (response?.data) {
+					upsertObservationInCache(response.data);
+				}
+				toast.success(
+					availability === "AVAILABLE"
+						? `${productName}: ${Number(price).toFixed(2)} ETB`
+						: `${productName}: ${availability.replace("_", " ")}`,
+					{ id: "observation-toast", duration: 1500 },
+				);
+				invalidateDependentQueries();
+				return;
+			} catch (err) {
+				upsertObservationInCache(existing);
+				toast.error(
+					err?.response?.data?.message || "Unable to update observation",
+				);
+				return;
 			}
-		},
-		[
+		}
+
+		// Offline or brand new observation
+		const clientObservationId = buildClientObservationId(auditId, productId);
+		const isUpdate = Boolean(
+			existing && (existing.id || existing.serverObservationId),
+		);
+
+		const payload = {
+			clientObservationId,
 			auditId,
-			updateObservation,
-			upsertObservationInCache,
-			invalidateDependentQueries,
-			queryClient,
-			queryKey,
-		],
-	);
+			productId,
+			availability,
+			price: availability === "AVAILABLE" ? price : null,
+			observedUnit: existing?.observedUnit || null,
+			packageSize: existing?.packageSize || null,
+			capturedAt: new Date().toISOString(),
+			evidencePhotoUrl: existing?.evidencePhotoUrl || null,
+			notes: existing?.notes || null,
+			operation: isUpdate ? "UPDATE" : "CREATE",
+			serverObservationId: isUpdate
+				? existing.serverObservationId || existing.id
+				: null,
+		};
+
+		const optimisticObservation = {
+			id: payload.serverObservationId || clientObservationId,
+			clientObservationId,
+			auditId,
+			productId,
+			availability: payload.availability,
+			price: payload.price,
+			capturedAt: payload.capturedAt,
+			sync: { status: "PENDING", attempts: 0 },
+			review: { status: existing?.review?.status || "PENDING" },
+			product: currentProducts.find((p) => p.id === productId) || undefined,
+			__local: true,
+		};
+		upsertObservationInCache(optimisticObservation);
+
+		try {
+			const queued = await enqueueObservation(payload);
+
+			if (!online) {
+				toast.success(`${productName} saved offline — will sync when online`, {
+					id: "observation-toast",
+					duration: 1800,
+				});
+				return;
+			}
+
+			const result = await syncObservation(queued);
+			if (result.success && result.data) {
+				upsertObservationInCache(result.data);
+				invalidateDependentQueries();
+				toast.success(
+					availability === "AVAILABLE"
+						? `${productName}: ${Number(price).toFixed(2)} ETB`
+						: `${productName}: ${availability.replace("_", " ")}`,
+					{ id: "observation-toast", duration: 1500 },
+				);
+			}
+		} catch (err) {
+			toast.error("Unable to save observation locally");
+		}
+	},
+	[
+		auditId,
+		updateObservation,
+		upsertObservationInCache,
+		invalidateDependentQueries,
+	],
+);
 
 	const persistObservation = useCallback(
 		({ productId, price, availability }) => {

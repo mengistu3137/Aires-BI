@@ -400,9 +400,6 @@ export const listAllObservations = async ({ user, query = {} }) => {
   };
 };
 
-/**
- * Update an existing observation.
- */
 export const updateObservation = async ({ observationId, user, updates }) => {
   const observation = await prisma.priceObservation.findUnique({
     where: { id: observationId },
@@ -431,14 +428,15 @@ export const updateObservation = async ({ observationId, user, updates }) => {
     );
   }
 
-  // Audit must still be IN_PROGRESS for field auditors to update observations
+  // Allow updates while IN_PROGRESS or COMPLETED as long as reviewStatus is PENDING
+  // Only CANCELLED visits are strictly forbidden
   if (
     user.role === "FIELD_AUDITOR" &&
-    observation.audit.status !== "IN_PROGRESS"
+    observation.audit.status === "CANCELLED"
   ) {
     throw new ApiError(
       409,
-      `Cannot update observation: corresponding audit is [${observation.audit.status}]`,
+      "Cannot update observation: corresponding audit was CANCELLED",
     );
   }
 
@@ -482,7 +480,7 @@ export const updateObservation = async ({ observationId, user, updates }) => {
         updates.notes !== undefined ? updates.notes?.trim() : observation.notes,
       reviewStatus:
         observation.reviewStatus === "REJECTED" ||
-        observation.reviewStatus === "NEEDS_REVIEW"
+          observation.reviewStatus === "NEEDS_REVIEW"
           ? "PENDING"
           : observation.reviewStatus,
     },

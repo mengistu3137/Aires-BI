@@ -281,9 +281,9 @@ export const syncObservation = async (observation) => {
     const response =
       observation.operation === "UPDATE" && observation.serverObservationId
         ? await updateObservationRequest({
-            observationId: observation.serverObservationId,
-            payload: { price: payload.price, availability: payload.availability },
-          })
+          observationId: observation.serverObservationId,
+          payload: { price: payload.price, availability: payload.availability },
+        })
         : await createObservationRequest({ auditId: observation.auditId, payload });
 
     // Remove from IndexedDB FIRST, then notify. This guarantees any
@@ -319,11 +319,8 @@ export const syncObservation = async (observation) => {
 };
 
 /**
- * Push every PENDING queued observation to the server. This is the piece
- * that was missing before: nothing ever called it, so items saved while
- * offline just sat in IndexedDB forever unless the user happened to save
- * a brand-new observation later (which only synced that one item). Call
- * this whenever connectivity returns.
+ * Push every PENDING or FAILED queued observation to the server.
+ * Retries failed items so they do not stay trapped in IndexedDB forever.
  */
 export const flushQueue = async () => {
   if (!isNetworkOnline()) {
@@ -331,14 +328,44 @@ export const flushQueue = async () => {
     return { synced: 0, failed: 0, pending, skipped: true };
   }
 
-  const pending = await getPendingObservations();
+  const db = await openDB();
+  const allQueued = await new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readonly");
+    const store = tx.objectStore(STORE_NAME);
+    const request = store.getAll();
+    request.onsuccess = () => resolve(request.result || []);
+    request.onerror = () => reject(request.error);
+  });
+
+  // Include both PENDING and FAILED items for synchronization
+  const itemsToSync = allQueued.filter(
+    (obs) => obs.syncStatus === "PENDING" || obs.syncStatus === "FAILED"
+  );
+
   let synced = 0;
   let failed = 0;
-  for (const obs of pending) {
+
+  for (const obs of itemsToSync) {
     const result = await syncObservation(obs);
-    if (result.success) synced += 1;
-    else if (result.permanent) failed += 1;
+    if (result.success) {
+      synced += 1;
+    } else if (result.permanent) {
+      failed += 1;
+    }
   }
+
   const remaining = await countPendingObservations();
   return { synced, failed, pending: remaining };
+};
+
+/**
+ * Hard-clears stuck queue items for an audit (Emergency recovery)
+ */
+export const clearQueueForAudit = async (auditId) => {
+  const db = await openDB();
+  const records = await getObservationsForAudit(auditId);
+  for (const r of records) {
+    await removeQueuedObservation(r.id);
+  }
+  notifyQueueChanged(auditId);
 };
