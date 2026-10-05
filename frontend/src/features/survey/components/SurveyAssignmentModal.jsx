@@ -70,14 +70,14 @@ export const SurveyAssignmentModal = ({
 	const [surveyPeriodId, setSurveyPeriodId] = useState("");
 	const [storeId, setStoreId] = useState("");
 
-	// All products pre-selected by default
+	// Product selection pool
 	const [selectedProductIds, setSelectedProductIds] = useState([]);
 
 	// Product Checklist UI State
 	const [activeProductTab, setActiveProductTab] = useState("ALL"); // 'ALL' | 'ULTRA_SENSITIVE' | 'FRESH_CORNER'
 	const [checklistSearch, setChecklistSearch] = useState("");
 
-	// Multi-Auditor Slicing State
+	// Multi-Auditor Allocation State
 	const [allocations, setAllocations] = useState([]);
 	const [isEditMode, setIsEditMode] = useState(false);
 	const [isLoadingExisting, setIsLoadingExisting] = useState(false);
@@ -115,7 +115,7 @@ export const SurveyAssignmentModal = ({
 		setStoreId(initialStoreId || stores[0]?.id || "");
 	}, [isOpen, activePeriod, openPeriods, initialStoreId, stores]);
 
-	// Pre-select products on open if brand new
+	// Pre-select all products by default on brand-new dispatch
 	useEffect(() => {
 		if (!isOpen || isEditMode) return;
 		if (products.length > 0 && selectedProductIds.length === 0) {
@@ -123,7 +123,7 @@ export const SurveyAssignmentModal = ({
 		}
 	}, [isOpen, products, isEditMode, selectedProductIds.length]);
 
-	// Load existing allocations or preserve configured auditor on store switch
+	// Load existing allocations or preserve configured auditor on store change
 	useEffect(() => {
 		if (!isOpen || !storeId || !surveyPeriodId) return;
 
@@ -136,7 +136,6 @@ export const SurveyAssignmentModal = ({
 				const existing = res?.data || [];
 
 				if (existing.length > 0) {
-					// 1. Existing dispatch found for this store in this cycle: load true DB state
 					setIsEditMode(true);
 					const allAssignedIds = Array.from(
 						new Set(existing.flatMap((asn) => asn.productIds || [])),
@@ -158,29 +157,26 @@ export const SurveyAssignmentModal = ({
 							fromNumber: firstIdx !== -1 ? firstIdx + 1 : 1,
 							toNumber: lastIdx !== -1 ? lastIdx + 1 : asn.productIds.length,
 							count: asn.productIds.length,
-							observedCount: asn.observedCount,
-							canModify: asn.canModify,
+							observedCount: asn.observedCount || 0,
 							assignmentId: asn.assignmentId,
-							status: asn.status,
+							status: asn.status || "NOT_STARTED",
 						};
 					});
 					setAllocations(mapped);
 				} else {
-					// 2. Unassigned store: DO NOT wipe out manager's chosen auditor(s)
 					setIsEditMode(false);
 
 					setAllocations((prevAllocations) => {
-						// If manager already selected auditor(s), preserve them cleanly!
+						// Preserve user's configured allocations if already configured
 						if (prevAllocations.length > 0) {
 							return prevAllocations.map((a) => ({
 								...a,
 								observedCount: 0,
-								canModify: true,
 								status: "NOT_STARTED",
 							}));
 						}
 
-						// If opening from scratch, default to 1 auditor initially
+						// Default to first auditor initially
 						const defaultCount = Math.min(1, auditors.length);
 						const initialAuditorIds = auditors
 							.slice(0, defaultCount)
@@ -193,7 +189,6 @@ export const SurveyAssignmentModal = ({
 							toNumber: slices[idx]?.toNumber || products.length,
 							count: slices[idx]?.count || products.length,
 							observedCount: 0,
-							canModify: true,
 							status: "NOT_STARTED",
 						}));
 					});
@@ -211,23 +206,8 @@ export const SurveyAssignmentModal = ({
 		};
 	}, [isOpen, storeId, surveyPeriodId]);
 
-	// Check whether any audit or observation has actually started for this store
-	const isLocked = useMemo(() => {
-		if (allocations.length === 0) return false;
-		return allocations.some(
-			(a) =>
-				!a.canModify ||
-				(a.observedCount || 0) > 0 ||
-				(a.status && a.status !== "NOT_STARTED"),
-		);
-	}, [allocations]);
-
 	// Product Selection Handlers
 	const handleToggleProduct = (productId) => {
-		if (isLocked) {
-			toast.error("Cannot modify products: field observations have started.");
-			return;
-		}
 		setSelectedProductIds((prev) =>
 			prev.includes(productId)
 				? prev.filter((id) => id !== productId)
@@ -236,10 +216,6 @@ export const SurveyAssignmentModal = ({
 	};
 
 	const handleSelectAllGlobal = () => {
-		if (isLocked) {
-			toast.error("Cannot modify products: field observations have started.");
-			return;
-		}
 		if (selectedProductIds.length === products.length) {
 			setSelectedProductIds([]);
 		} else {
@@ -249,10 +225,6 @@ export const SurveyAssignmentModal = ({
 
 	// Bulk Category Toggle
 	const handleToggleCategory = (categoryProducts) => {
-		if (isLocked) {
-			toast.error("Cannot modify products: field observations have started.");
-			return;
-		}
 		const catIds = categoryProducts.map((p) => p.id);
 		const allSelected = catIds.every((id) => selectedProductIds.includes(id));
 
@@ -269,12 +241,8 @@ export const SurveyAssignmentModal = ({
 		}
 	};
 
-	// Rebalance ranges equally across selected auditors using the ACTIVE selected products pool
+	// Rebalance ranges equally across selected auditors using the active selected products pool
 	const handleRebalanceEqually = () => {
-		if (isLocked) {
-			toast.error("Cannot rebalance: field observations have started.");
-			return;
-		}
 		if (allocations.length === 0 || selectedProductIds.length === 0) return;
 		const slices = calculateEqualSlices(
 			selectedProductIds.length,
@@ -282,34 +250,20 @@ export const SurveyAssignmentModal = ({
 		);
 
 		setAllocations((prev) =>
-			prev.map((item, idx) => {
-				if (!item.canModify) return item;
-				return {
-					...item,
-					fromNumber: slices[idx]?.fromNumber || 1,
-					toNumber: slices[idx]?.toNumber || selectedProductIds.length,
-					count: slices[idx]?.count || selectedProductIds.length,
-				};
-			}),
+			prev.map((item, idx) => ({
+				...item,
+				fromNumber: slices[idx]?.fromNumber || 1,
+				toNumber: slices[idx]?.toNumber || selectedProductIds.length,
+				count: slices[idx]?.count || selectedProductIds.length,
+			})),
 		);
 		toast.success("Re-balanced ranges across active selected items");
 	};
 
 	const handleToggleAuditor = (auditorIdToToggle) => {
-		if (isLocked) {
-			toast.error("Cannot modify auditors: field observations have started.");
-			return;
-		}
-
 		const exists = allocations.find((a) => a.auditorId === auditorIdToToggle);
 
 		if (exists) {
-			if (!exists.canModify) {
-				toast.error(
-					"Cannot remove this auditor: field observations have already started.",
-				);
-				return;
-			}
 			const updated = allocations.filter(
 				(a) => a.auditorId !== auditorIdToToggle,
 			);
@@ -335,7 +289,6 @@ export const SurveyAssignmentModal = ({
 					toNumber: selectedProductIds.length,
 					count: selectedProductIds.length,
 					observedCount: 0,
-					canModify: true,
 					status: "NOT_STARTED",
 				},
 			];
@@ -356,7 +309,6 @@ export const SurveyAssignmentModal = ({
 	};
 
 	const handleRangeChange = (auditorIdToEdit, field, val) => {
-		if (isLocked) return;
 		const parsed = parseInt(val, 10);
 		setAllocations((prev) =>
 			prev.map((a) => {
@@ -449,7 +401,7 @@ export const SurveyAssignmentModal = ({
 			}
 			onClose();
 		} catch {
-			// Handled by hook toast
+			// Error handled by mutation hook toast
 		}
 	};
 
@@ -470,15 +422,9 @@ export const SurveyAssignmentModal = ({
 							<span className="rounded-md bg-emerald-50 border border-emerald-200 px-2 py-0.5 font-mono text-[10px] font-bold text-[#017C4D]">
 								{selectedProductIds.length}/{products.length} Products Active
 							</span>
-							{isLocked && (
-								<span className="rounded-md bg-amber-50 border border-amber-200 px-2 py-0.5 font-mono text-[10px] font-bold text-amber-700">
-									🔒 Locked — Observations Started
-								</span>
-							)}
 						</div>
 						<p className="mt-0.5 text-xs text-slate-500">
-							Filter by category tabs to selectively include or bulk-exclude
-							product lines
+							Select products, allocate checklist ranges, and assign field auditors
 						</p>
 					</div>
 					<button
@@ -494,24 +440,16 @@ export const SurveyAssignmentModal = ({
 					onSubmit={handleSubmit}
 					className="flex-1 space-y-4 overflow-y-auto pr-1 text-xs"
 				>
-					{/* 1. Cycle & Store Selection */}
+					{/* 1. Cycle & Store Selection (Fully Editable) */}
 					<div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
 						<div>
-							<div className="flex items-center justify-between mb-1">
-								<label className="block font-bold text-slate-700">
-									Survey Cycle
-								</label>
-								{isLocked && (
-									<span className="text-[10px] font-bold text-amber-700 uppercase tracking-wider">
-										Locked
-									</span>
-								)}
-							</div>
+							<label className="mb-1 block font-bold text-slate-700">
+								Survey Cycle
+							</label>
 							<select
 								value={surveyPeriodId}
 								onChange={(e) => setSurveyPeriodId(e.target.value)}
-								disabled={Boolean(isLocked)}
-								className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 font-mono text-xs font-bold text-slate-800 outline-hidden focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] disabled:bg-slate-100 disabled:cursor-not-allowed"
+								className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 font-mono text-xs font-bold text-slate-800 outline-hidden focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] cursor-pointer"
 							>
 								{openPeriods.map((p) => (
 									<option key={p.id} value={p.id}>
@@ -522,23 +460,14 @@ export const SurveyAssignmentModal = ({
 						</div>
 
 						<div>
-							<div className="flex items-center justify-between mb-1">
-								<label className="block font-bold text-slate-700">
-									Target Store
-								</label>
-								{isLocked && (
-									<span className="text-[10px] font-bold text-amber-700 uppercase tracking-wider">
-										Locked (In Progress)
-									</span>
-								)}
-							</div>
+							<label className="mb-1 block font-bold text-slate-700">
+								Target Store
+							</label>
 							<select
 								value={storeId}
 								onChange={(e) => setStoreId(e.target.value)}
-								disabled={
-									Boolean(isLocked) || storesLoading || isLoadingExisting
-								}
-								className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800 outline-hidden focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] disabled:bg-slate-100 disabled:cursor-not-allowed"
+								disabled={storesLoading || isLoadingExisting}
+								className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-800 outline-hidden focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] cursor-pointer disabled:bg-slate-100 disabled:cursor-not-allowed"
 							>
 								{stores.map((s) => (
 									<option key={s.id} value={s.id}>
@@ -567,12 +496,11 @@ export const SurveyAssignmentModal = ({
 							<button
 								type="button"
 								onClick={handleSelectAllGlobal}
-								disabled={isLocked}
-								className="cursor-pointer text-[11px] font-bold text-[#017C4D] hover:underline self-end sm:self-auto disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:no-underline"
+								className="cursor-pointer text-[11px] font-bold text-[#017C4D] hover:underline self-end sm:self-auto"
 							>
 								{selectedProductIds.length === products.length
-									? "Deselect All (120)"
-									: "Select All 120 Products"}
+									? `Deselect All (${products.length})`
+									: `Select All ${products.length} Products`}
 							</button>
 						</div>
 
@@ -618,20 +546,18 @@ export const SurveyAssignmentModal = ({
 
 						{/* Tab Toolbar: Category Bulk Action & Inline Search */}
 						<div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pt-1">
-							{/* Category-Level Bulk Select/Deselect Button */}
 							{activeProductTab === "ULTRA_SENSITIVE" && (
 								<button
 									type="button"
 									onClick={() => handleToggleCategory(ultraSensitiveProducts)}
-									disabled={isLocked}
-									className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold border transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+									className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold border transition cursor-pointer ${
 										selectedUltraCount === ultraSensitiveProducts.length
 											? "border-red-200 bg-red-50 text-[#A41821] hover:bg-red-100"
 											: "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
 									}`}
 								>
 									{selectedUltraCount === ultraSensitiveProducts.length
-										? "✕ Deselect All Ultra-Sensitive (100)"
+										? `✕ Deselect All Ultra-Sensitive (${ultraSensitiveProducts.length})`
 										: `✓ Select All Ultra-Sensitive (${ultraSensitiveProducts.length})`}
 								</button>
 							)}
@@ -640,15 +566,14 @@ export const SurveyAssignmentModal = ({
 								<button
 									type="button"
 									onClick={() => handleToggleCategory(freshCornerProducts)}
-									disabled={isLocked}
-									className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold border transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+									className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold border transition cursor-pointer ${
 										selectedFreshCount === freshCornerProducts.length
 											? "border-red-200 bg-red-50 text-[#A41821] hover:bg-red-100"
 											: "border-emerald-200 bg-emerald-50 text-[#017C4D] hover:bg-emerald-100"
 									}`}
 								>
 									{selectedFreshCount === freshCornerProducts.length
-										? "✕ Deselect All Fresh Corner (20)"
+										? `✕ Deselect All Fresh Corner (${freshCornerProducts.length})`
 										: `✓ Select All Fresh Corner (${freshCornerProducts.length})`}
 								</button>
 							)}
@@ -698,11 +623,7 @@ export const SurveyAssignmentModal = ({
 									return (
 										<label
 											key={p.id}
-											className={`flex items-center justify-between rounded-lg p-2 text-xs transition border ${
-												isLocked
-													? "cursor-not-allowed opacity-70"
-													: "cursor-pointer"
-											} ${
+											className={`flex cursor-pointer items-center justify-between rounded-lg p-2 text-xs transition border ${
 												isChecked
 													? "bg-white border-slate-200 shadow-2xs font-semibold text-slate-900"
 													: "bg-white/40 border-transparent text-slate-400 hover:bg-white"
@@ -712,9 +633,8 @@ export const SurveyAssignmentModal = ({
 												<input
 													type="checkbox"
 													checked={isChecked}
-													disabled={isLocked}
 													onChange={() => handleToggleProduct(p.id)}
-													className="cursor-pointer rounded border-slate-300 text-[#A41821] focus:ring-[#A41821] disabled:cursor-not-allowed"
+													className="cursor-pointer rounded border-slate-300 text-[#A41821] focus:ring-[#A41821]"
 												/>
 												<span className="font-mono text-[10px] text-slate-400">
 													#{idx + 1}
@@ -744,20 +664,18 @@ export const SurveyAssignmentModal = ({
 						</div>
 					</div>
 
-					{/* 3. AUDITOR ALLOCATIONS SECTION */}
+					{/* 3. AUDITOR ALLOCATIONS SECTION (Fully Editable) */}
 					<div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/70 p-3">
 						<div className="flex items-center justify-between gap-2">
 							<span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
 								Auditors on Duty ({allocations.length} Selected)
 							</span>
 
-							{/* Enhanced Brand Micro-Action Button */}
 							{allocations.length > 1 && (
 								<button
 									type="button"
 									onClick={handleRebalanceEqually}
-									disabled={isLocked}
-									className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-emerald-200/90 bg-emerald-50/80 px-2 py-0.5 text-[10px] font-bold text-[#017C4D] shadow-2xs transition-all duration-150 hover:border-[#017C4D] hover:bg-[#017C4D] hover:text-white active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-emerald-50/80 disabled:hover:text-[#017C4D]"
+									className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-emerald-200/90 bg-emerald-50/80 px-2 py-0.5 text-[10px] font-bold text-[#017C4D] shadow-2xs transition-all duration-150 hover:border-[#017C4D] hover:bg-[#017C4D] hover:text-white active:scale-95"
 									title={`Distribute ${selectedProductIds.length} items equally across ${allocations.length} auditors`}
 								>
 									<svg
@@ -789,8 +707,7 @@ export const SurveyAssignmentModal = ({
 										key={a.id}
 										type="button"
 										onClick={() => handleToggleAuditor(a.id)}
-										disabled={isLocked}
-										className={`cursor-pointer rounded-xl border px-3 py-1.5 text-xs font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed ${
+										className={`cursor-pointer rounded-xl border px-3 py-1.5 text-xs font-semibold transition ${
 											isSelected
 												? "border-[#A41821] bg-[#A41821] text-white shadow-2xs"
 												: "border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
@@ -827,7 +744,6 @@ export const SurveyAssignmentModal = ({
 												type="number"
 												min="1"
 												max={selectedProductIds.length || 1}
-												disabled={!alloc.canModify || isLocked}
 												value={alloc.fromNumber}
 												onChange={(e) =>
 													handleRangeChange(
@@ -836,14 +752,13 @@ export const SurveyAssignmentModal = ({
 														e.target.value,
 													)
 												}
-												className="w-12 rounded border border-slate-300 bg-slate-50 px-1 py-0.5 font-mono text-center text-xs font-bold text-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+												className="w-12 rounded border border-slate-300 bg-slate-50 px-1 py-0.5 font-mono text-center text-xs font-bold text-slate-800"
 											/>
 											<span className="text-[10px] text-slate-500">to #</span>
 											<input
 												type="number"
 												min="1"
 												max={selectedProductIds.length || 1}
-												disabled={!alloc.canModify || isLocked}
 												value={alloc.toNumber}
 												onChange={(e) =>
 													handleRangeChange(
@@ -852,21 +767,19 @@ export const SurveyAssignmentModal = ({
 														e.target.value,
 													)
 												}
-												className="w-12 rounded border border-slate-300 bg-slate-50 px-1 py-0.5 font-mono text-center text-xs font-bold text-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+												className="w-12 rounded border border-slate-300 bg-slate-50 px-1 py-0.5 font-mono text-center text-xs font-bold text-slate-800"
 											/>
 											<span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] font-bold text-slate-600">
 												{alloc.count} items
 											</span>
-											{alloc.canModify && !isLocked && (
-												<button
-													type="button"
-													onClick={() => handleToggleAuditor(alloc.auditorId)}
-													className="text-slate-400 hover:text-[#A41821] p-1 text-xs cursor-pointer"
-													title="Remove auditor"
-												>
-													✕
-												</button>
-											)}
+											<button
+												type="button"
+												onClick={() => handleToggleAuditor(alloc.auditorId)}
+												className="text-slate-400 hover:text-[#A41821] p-1 text-xs cursor-pointer"
+												title="Remove auditor"
+											>
+												✕
+											</button>
 										</div>
 									</div>
 								);
@@ -892,7 +805,7 @@ export const SurveyAssignmentModal = ({
 								selectedProductIds.length === 0 ||
 								!openPeriods.length
 							}
-							className="cursor-pointer rounded-xl bg-[#A41821] px-5 py-2 font-bold text-white shadow-xs transition hover:bg-[#7F1219] active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+							className="cursor-pointer rounded-xl bg-[#A41821] px-5 py-2 font-bold text-white shadow-xs transition hover:bg-[#7F1219] active:scale-95 disabled:opacity-50"
 						>
 							{createBatch.isPending || updateAllocations.isPending
 								? "Processing Dispatch..."
