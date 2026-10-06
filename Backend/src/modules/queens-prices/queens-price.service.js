@@ -18,6 +18,59 @@ const QUEENS_PRICE_INCLUDE_RELATIONS = {
     },
   },
 };
+/**
+ * Automatically updates active PriceAnalysis records when a QueensPrice changes.
+ */
+export const syncPriceAnalysisBenchmark = async (productId, newPrice) => {
+  try {
+    const openPeriods = await prisma.surveyPeriod.findMany({
+      where: { status: "OPEN" },
+      select: { id: true },
+    });
+
+    for (const period of openPeriods) {
+      const analysis = await prisma.priceAnalysis.findUnique({
+        where: {
+          productId_surveyPeriodId: {
+            productId,
+            surveyPeriodId: period.id,
+          },
+        },
+      });
+
+      if (analysis) {
+        const avg = analysis.competitorAveragePrice
+          ? Number(analysis.competitorAveragePrice)
+          : null;
+        const newIndex = avg
+          ? Number(((Number(newPrice) / avg) * 100).toFixed(2))
+          : null;
+
+        let newAction = analysis.action;
+        if (newIndex !== null && analysis.targetIndex !== null) {
+          const target = Number(analysis.targetIndex);
+          const tolerance = 5.0; // standard tolerance band
+          if (newIndex > target + tolerance) newAction = "PRICE_DOWN";
+          else if (newIndex < target - tolerance) newAction = "PRICE_UP";
+          else newAction = "KEEP";
+        }
+
+        await prisma.priceAnalysis.update({
+          where: { id: analysis.id },
+          data: {
+            queensPrice: newPrice,
+            priceIndex: newIndex,
+            action: newAction,
+            calculatedAt: new Date(),
+          },
+        });
+      }
+    }
+  } catch (err) {
+    console.warn("⚠️ [QueensPrice] Auto-sync PriceAnalysis failed:", err.message);
+  }
+};
+
 
 /**
  * Checks if a candidate price interval overlaps with any existing QueensPrice for that product.
@@ -127,6 +180,8 @@ export const createQueensPrice = async ({
       },
       include: QUEENS_PRICE_INCLUDE_RELATIONS,
     });
+
+    await syncPriceAnalysisBenchmark(productId, price);
     return formatQueensPriceResponse(updated);
   }
 
@@ -173,7 +228,122 @@ export const createQueensPrice = async ({
     return created;
   });
 
+  // Synchronize active PriceAnalysis records across open survey periods
+  await syncPriceAnalysisBenchmark(productId, price);
+
   return formatQueensPriceResponse(result);
+};
+/**
+ * Updates a QueensPrice record.
+ * Enforces historical immutability: past/expired records cannot have their price or dates rewritten.
+ */
+export const updateQueensPrice = async (id, updates) => {
+  const existing = await prisma.queensPrice.findUnique({
+    where: { id },
+  });
+
+  if (!existing) {
+    throw new ApiError(404, "QueensPrice record not found");
+  }
+
+  const now = new Date();
+  const isExpired =
+    existing.effectiveTo !== null && new Date(existing.effectiveTo) <= now;
+
+  const isChangingPrice =
+    updates.price !== undefined &&
+    Number(updates.price) !== Number(existing.price);
+
+  const isChangingDates =
+    (updates.effectiveFrom &&
+      new Date(updates.effectiveFrom).getTime() !==
+      new Date(existing.effectiveFrom).getTime()) ||
+    (updates.effectiveTo !== undefined &&
+      (updates.effectiveTo === null
+        ? existing.effectiveTo !== null
+        : new Date(updates.effectiveTo).getTime() !==
+        new Date(existing.effectiveTo).getTime()));
+
+  // Historical Immutability check
+  if (isExpired && (isChangingPrice || isChangingDates)) {
+    throw new ApiError(
+      409,
+      "Historical/expired benchmark prices are immutable. Price and dates cannot be changed once the period has passed. Create a new price record instead.",
+    );
+  }
+
+  const effectiveFrom = updates.effectiveFrom
+    ? new Date(updates.effectiveFrom)
+    : existing.effectiveFrom;
+  const effectiveTo =
+    updates.effectiveTo !== undefined
+      ? updates.effectiveTo
+        ? new Date(updates.effectiveTo)
+        : null
+      : existing.effectiveTo;
+
+  if (effectiveTo && effectiveTo <= effectiveFrom) {
+    throw new ApiError(400, "effectiveTo must be strictly after effectiveFrom");
+  }
+
+  // If changing dates, verify no overlaps with other periods
+  if (isChangingDates) {
+    // Find any prior record whose effectiveTo was on the same boundary
+    const priorRecord = await prisma.queensPrice.findFirst({
+      where: {
+        productId: existing.productId,
+        id: { not: id },
+        effectiveFrom: { lt: effectiveFrom },
+      },
+      orderBy: { effectiveFrom: "desc" },
+    });
+
+    // If the prior record's effectiveTo slightly overlaps due to sub-day hours, auto-align boundary
+    if (
+      priorRecord &&
+      priorRecord.effectiveTo &&
+      new Date(priorRecord.effectiveTo) > effectiveFrom &&
+      new Date(priorRecord.effectiveTo).toISOString().slice(0, 10) ===
+      effectiveFrom.toISOString().slice(0, 10)
+    ) {
+      await prisma.queensPrice.update({
+        where: { id: priorRecord.id },
+        data: { effectiveTo: effectiveFrom },
+      });
+    }
+
+    const conflict = await checkOverlap(
+      existing.productId,
+      effectiveFrom,
+      effectiveTo,
+      id,
+    );
+    if (conflict) {
+      throw new ApiError(
+        409,
+        `Updated date interval overlaps with existing record [${conflict.id}]`,
+      );
+    }
+  }
+
+  const updated = await prisma.queensPrice.update({
+    where: { id },
+    data: {
+      price: updates.price !== undefined ? updates.price : existing.price,
+      effectiveFrom,
+      effectiveTo,
+      source:
+        updates.source !== undefined ? updates.source?.trim() : existing.source,
+      notes:
+        updates.notes !== undefined ? updates.notes?.trim() : existing.notes,
+    },
+    include: QUEENS_PRICE_INCLUDE_RELATIONS,
+  });
+
+  if (updates.price !== undefined) {
+    await syncPriceAnalysisBenchmark(existing.productId, updates.price);
+  }
+  return formatQueensPriceResponse(updated);
 };
 
 /**
@@ -398,115 +568,7 @@ export const listQueensPrices = async (query = {}) => {
   };
 };
 
-/**
- * Updates a QueensPrice record.
- * Enforces historical immutability: past/expired records cannot have their price or dates rewritten.
- */
-export const updateQueensPrice = async (id, updates) => {
-  const existing = await prisma.queensPrice.findUnique({
-    where: { id },
-  });
 
-  if (!existing) {
-    throw new ApiError(404, "QueensPrice record not found");
-  }
-
-  const now = new Date();
-  const isExpired =
-    existing.effectiveTo !== null && new Date(existing.effectiveTo) <= now;
-
-  const isChangingPrice =
-    updates.price !== undefined &&
-    Number(updates.price) !== Number(existing.price);
-
-  const isChangingDates =
-    (updates.effectiveFrom &&
-      new Date(updates.effectiveFrom).getTime() !==
-      new Date(existing.effectiveFrom).getTime()) ||
-    (updates.effectiveTo !== undefined &&
-      (updates.effectiveTo === null
-        ? existing.effectiveTo !== null
-        : new Date(updates.effectiveTo).getTime() !==
-        new Date(existing.effectiveTo).getTime()));
-
-  // Historical Immutability check
-  if (isExpired && (isChangingPrice || isChangingDates)) {
-    throw new ApiError(
-      409,
-      "Historical/expired benchmark prices are immutable. Price and dates cannot be changed once the period has passed. Create a new price record instead.",
-    );
-  }
-
-  const effectiveFrom = updates.effectiveFrom
-    ? new Date(updates.effectiveFrom)
-    : existing.effectiveFrom;
-  const effectiveTo =
-    updates.effectiveTo !== undefined
-      ? updates.effectiveTo
-        ? new Date(updates.effectiveTo)
-        : null
-      : existing.effectiveTo;
-
-  if (effectiveTo && effectiveTo <= effectiveFrom) {
-    throw new ApiError(400, "effectiveTo must be strictly after effectiveFrom");
-  }
-
-  // If changing dates, verify no overlaps with other periods
-  if (isChangingDates) {
-    // Find any prior record whose effectiveTo was on the same boundary
-    const priorRecord = await prisma.queensPrice.findFirst({
-      where: {
-        productId: existing.productId,
-        id: { not: id },
-        effectiveFrom: { lt: effectiveFrom },
-      },
-      orderBy: { effectiveFrom: "desc" },
-    });
-
-    // If the prior record's effectiveTo slightly overlaps due to sub-day hours, auto-align boundary
-    if (
-      priorRecord &&
-      priorRecord.effectiveTo &&
-      new Date(priorRecord.effectiveTo) > effectiveFrom &&
-      new Date(priorRecord.effectiveTo).toISOString().slice(0, 10) ===
-      effectiveFrom.toISOString().slice(0, 10)
-    ) {
-      await prisma.queensPrice.update({
-        where: { id: priorRecord.id },
-        data: { effectiveTo: effectiveFrom },
-      });
-    }
-
-    const conflict = await checkOverlap(
-      existing.productId,
-      effectiveFrom,
-      effectiveTo,
-      id,
-    );
-    if (conflict) {
-      throw new ApiError(
-        409,
-        `Updated date interval overlaps with existing record [${conflict.id}]`,
-      );
-    }
-  }
-
-  const updated = await prisma.queensPrice.update({
-    where: { id },
-    data: {
-      price: updates.price !== undefined ? updates.price : existing.price,
-      effectiveFrom,
-      effectiveTo,
-      source:
-        updates.source !== undefined ? updates.source?.trim() : existing.source,
-      notes:
-        updates.notes !== undefined ? updates.notes?.trim() : existing.notes,
-    },
-    include: QUEENS_PRICE_INCLUDE_RELATIONS,
-  });
-
-  return formatQueensPriceResponse(updated);
-};
 
 /**
  * Deletes a QueensPrice record.

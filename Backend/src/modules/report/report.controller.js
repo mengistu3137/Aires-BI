@@ -20,6 +20,31 @@ const paramsFrom = (req) => ({
   user: req.user,
 });
 
+
+export const getAiSummary = async (req, res, next) => {
+  try {
+    const summary = await observationReportService.getAiReportSummary(
+      paramsFrom(req)
+    );
+    res.status(200).json({ status: "success", data: summary });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const downloadAiDocxReport = async (req, res, next) => {
+  try {
+    const file = await observationReportService.generateAiObservationReportDocx(
+      paramsFrom(req)
+    );
+    sendFile(res, file);
+  } catch (error) {
+    next(error);
+  }
+};
+
+
+
 export const getReportSummary = async (req, res, next) => {
   try {
     const result = await observationReportService.getObservationReportSummary(
@@ -63,4 +88,6 @@ export const observationReportController = {
   getReportSummary,
   downloadPdfReport,
   downloadExcelReport,
+  getAiSummary,          // ← Added
+  downloadAiDocxReport,  // ← Added
 };

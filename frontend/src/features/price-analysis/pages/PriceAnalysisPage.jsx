@@ -14,6 +14,7 @@ import { PriceAnalysisMobileList } from "../components/PriceAnalysisMobileList.j
 import { PriceAnalysisEmptyState } from "../components/PriceAnalysisEmptyState.jsx";
 import { PriceAnalysisSummaryBar } from "../components/PriceAnalysisSummaryBar.jsx";
 import { RecalculateConfirmModal } from "../components/RecalculateConfirmModal.jsx";
+import { ExecutiveAiReportModal } from "../components/ExecutiveAiReportModal.jsx";
 import { exportPriceAnalysisExcelRequest } from "@/services/api/price-analysis.api.js";
 import { RapidPriceAdjustmentDrawer } from "../components/RapidPriceAdjustmentDrawer.jsx";
 
@@ -25,6 +26,7 @@ export const PriceAnalysisPage = () => {
 	const [search, setSearch] = useState("");
 	const [showRecalcModal, setShowRecalcModal] = useState(false);
 	const [showRapidDrawer, setShowRapidDrawer] = useState(false);
+	const [showAiReportModal, setShowAiReportModal] = useState(false);
 	const [recalcSummary, setRecalcSummary] = useState(null);
 	const [isExporting, setIsExporting] = useState(false);
 
@@ -155,6 +157,16 @@ export const PriceAnalysisPage = () => {
 				</div>
 
 				<div className="flex flex-wrap items-center gap-2">
+					{isManager && surveyPeriodId && (
+						<button
+							type="button"
+							onClick={() => setShowAiReportModal(true)}
+							className="inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-[#A41821]/20 bg-red-50/80 px-3.5 py-2.5 text-xs font-bold text-[#A41821] hover:bg-red-100/70 transition shadow-2xs active:scale-95"
+						>
+							<span>⚡ Executive AI Brief</span>
+						</button>
+					)}
+
 					{isManager && flaggedAnalyses.length > 0 && (
 						<button
 							type="button"
@@ -342,7 +354,7 @@ export const PriceAnalysisPage = () => {
 					<div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 pt-3 border-t border-slate-100">
 						<div className="flex items-center justify-between text-[11px]">
 							<span className="font-bold text-slate-600">
-							Daily Fresh (92% Target):
+								Daily Fresh (92% Target):
 							</span>
 							<span className="font-mono font-bold text-slate-800">
 								{readiness.freshStream.approved} / {readiness.freshStream.total}{" "}
@@ -446,6 +458,14 @@ export const PriceAnalysisPage = () => {
 				isOpen={showRapidDrawer}
 				onClose={() => setShowRapidDrawer(false)}
 				analyses={flaggedAnalyses}
+			/>
+
+			{/* Groq Executive AI Report Modal */}
+			<ExecutiveAiReportModal
+				isOpen={showAiReportModal}
+				onClose={() => setShowAiReportModal(false)}
+				surveyPeriodId={surveyPeriodId}
+				surveyPeriodName={analyses[0]?.surveyPeriod?.name}
 			/>
 		</div>
 	);

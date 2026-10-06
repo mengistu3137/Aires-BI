@@ -953,12 +953,8 @@ const performSave = useCallback(
 			currentProducts.find((p) => p.id === productId)?.name || "Item",
 		);
 
-		// Existing server row that has not yet been approved by a manager
-		const isExistingServerRow =
-			existing &&
-			existing.id &&
-			!existing.__local &&
-			existing.review?.status === "PENDING";
+		// Existing server row: allowed to be updated regardless of review status
+		const isExistingServerRow = existing && existing.id && !existing.__local;
 
 		// Direct online update if row already exists on server
 		if (isExistingServerRow && online) {

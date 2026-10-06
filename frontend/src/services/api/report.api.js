@@ -3,6 +3,33 @@
 // (the one that already adds the auth token / base URL "/api/v1").
 import { apiClient } from "../client.js";
 
+/**
+ * Fetch Groq AI pricing summary (Daily 20 Fresh or Weekly 100 FMCG)
+ */
+export const getAiReportSummaryRequest = async ({ surveyPeriodId, reportType, forceRefresh = false }) => {
+  const response = await apiClient.get("/reports/ai-summary", {
+    params: { surveyPeriodId, reportType, forceRefresh },
+  });
+  return response.data?.data;
+};
+
+/**
+ * Download editable Word Document (.docx)
+ */
+export const downloadAiDocxReportRequest = async ({ surveyPeriodId, reportType }) => {
+  const response = await apiClient.get("/reports/ai-docx", {
+    params: { surveyPeriodId, reportType },
+    responseType: "blob",
+    timeout: 3 * 60 * 1000,
+  });
+
+  const disposition = response.headers?.["content-disposition"] || "";
+  const match = /filename="?([^"]+)"?/.exec(disposition);
+  const filename = match?.[1] || `Queens_Price_Report_${Date.now()}.docx`;
+
+  return { blob: response.data, filename };
+};
+
 // Matches the backend router mount: /api/v1/reports/(summary|pdf|excel)
 // If you mounted it as "/reports/observations", change it here only.
 const REPORTS_BASE = "/reports";

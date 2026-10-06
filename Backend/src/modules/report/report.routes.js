@@ -8,6 +8,22 @@ const router = Router({ mergeParams: true });
 
 router.use(authenticate);
 
+// AI Executive Summary (JSON Preview)
+router.get(
+  "/ai-summary",
+  restrictTo("ADMIN", "MANAGER"),
+  validate(observationReportQuerySchema, "query"),
+  observationReportController.getAiSummary
+);
+
+// AI Executive Word Document (.docx) Export
+router.get(
+  "/ai-docx",
+  restrictTo("ADMIN", "MANAGER"),
+  validate(observationReportQuerySchema, "query"),
+  observationReportController.downloadAiDocxReport
+);
+
 // ========================================================
 // REPORTS: /api/v1/reports/...
 // Query: surveyPeriodId (required)
