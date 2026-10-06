@@ -183,29 +183,40 @@ export const parseMarkdownToBlocks = (markdown) => {
 };
 
 /* ── Report metadata (shared by all renderers) ── */
+export const getReportMeta = (reportType, surveyPeriodName) => {
+    const isFresh = reportType === "FRESH_CORNER";
+    const isUltra = reportType === "ULTRA_SENSITIVE";
 
-export const getReportMeta = (reportType, surveyPeriodName) => ({
-    title: "QUEENS SUPERMARKET PLC - PRICE INTELLIGENCE REPORT",
-    subtitle:
-        reportType === "FRESH_CORNER"
-            ? "20 Daily Fresh Produce Items · Real-Time Approved & Pending Market Audit"
-            : "100 Ultra-Sensitive FMCG Goods · Carrefour 95% Parity Index Benchmark",
-    date: new Date().toLocaleDateString("en-US", {
-        month: "long",
-        day: "numeric",
-        year: "numeric",
-    }),
-    baseline: surveyPeriodName || "Active Period",
-    scope:
-        reportType === "FRESH_CORNER"
-            ? "Fresh Corner, Garment, Straight Market"
-            : "Shoa, Abadir, Allmart, Bambis",
-    preparedBy: "Pricing Intelligence Unit, Aires Communication PLC",
-    signoff:
-        "Verified & Finalized by: Aires Communication PLC / Carrefour Integration Team",
-    reportType,
-    fileSlug: reportType === "FRESH_CORNER" ? "Daily-Fresh-20" : "FMCG-Core-100",
-});
+    let subtitle = "Comprehensive Daily Fresh Produce & FMCG Core Intelligence";
+    let scope = "Fresh Corner, Garment, Straight Market, Shoa, Abadir, Allmart, Bambis";
+    let fileSlug = "Comprehensive-All";
+
+    if (isFresh) {
+        subtitle = "20 Daily Fresh Produce Items · Real-Time Approved & Pending Market Audit";
+        scope = "Fresh Corner, Garment Market, Straight Market, Queens Benchmark";
+        fileSlug = "Daily-Fresh-20";
+    } else if (isUltra) {
+        subtitle = "100 Ultra-Sensitive FMCG Goods · Carrefour 95% Parity Index Benchmark";
+        scope = "Shoa, Abadir, Allmart, Bambis";
+        fileSlug = "FMCG-Core-100";
+    }
+
+    return {
+        title: "QUEENS SUPERMARKET PLC - PRICE INTELLIGENCE REPORT",
+        subtitle,
+        date: new Date().toLocaleDateString("en-US", {
+            month: "long",
+            day: "numeric",
+            year: "numeric",
+        }),
+        baseline: surveyPeriodName || "Active Period",
+        scope,
+        preparedBy: "Pricing Intelligence Unit, Aires Communication PLC",
+        signoff: "Verified & Finalized by: Aires Communication PLC / Carrefour Integration Team",
+        reportType,
+        fileSlug,
+    };
+};
 
 /* ─────────────────────────────────────────────────────────────────────────────
     Times New Roman HTML export.

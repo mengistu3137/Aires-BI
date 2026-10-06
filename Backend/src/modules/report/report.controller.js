@@ -7,24 +7,27 @@ const sendFile = (res, { buffer, filename, contentType }) => {
     `attachment; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
   );
   res.setHeader("Content-Length", buffer.length);
-  // Lets browser clients (fetch/axios) read the filename from the response
   res.setHeader("Access-Control-Expose-Headers", "Content-Disposition");
   res.setHeader("Cache-Control", "no-store");
   res.status(200).end(buffer);
 };
 
 const paramsFrom = (req) => ({
-  surveyPeriodId: req.query.surveyPeriodId,
-  storeId: req.query.storeId,
-  reportType: req.query.reportType,
+  surveyPeriodId: req.query.surveyPeriodId || undefined,
+  rangeType: req.query.rangeType || undefined,
+  startDate: req.query.startDate || undefined,
+  endDate: req.query.endDate || undefined,
+  storeId: req.query.storeId || undefined,
+  reportType: req.query.reportType || undefined,
+  forceRefresh:
+    req.query.forceRefresh === "true" || req.query.forceRefresh === true,
   user: req.user,
 });
-
 
 export const getAiSummary = async (req, res, next) => {
   try {
     const summary = await observationReportService.getAiReportSummary(
-      paramsFrom(req)
+      paramsFrom(req),
     );
     res.status(200).json({ status: "success", data: summary });
   } catch (error) {
@@ -35,15 +38,13 @@ export const getAiSummary = async (req, res, next) => {
 export const downloadAiDocxReport = async (req, res, next) => {
   try {
     const file = await observationReportService.generateAiObservationReportDocx(
-      paramsFrom(req)
+      paramsFrom(req),
     );
     sendFile(res, file);
   } catch (error) {
     next(error);
   }
 };
-
-
 
 export const getReportSummary = async (req, res, next) => {
   try {
@@ -88,6 +89,6 @@ export const observationReportController = {
   getReportSummary,
   downloadPdfReport,
   downloadExcelReport,
-  getAiSummary,          // ← Added
-  downloadAiDocxReport,  // ← Added
+  getAiSummary,
+  downloadAiDocxReport,
 };

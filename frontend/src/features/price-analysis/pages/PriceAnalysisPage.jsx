@@ -157,7 +157,8 @@ export const PriceAnalysisPage = () => {
 				</div>
 
 				<div className="flex flex-wrap items-center gap-2">
-					{isManager && surveyPeriodId && (
+					{/* Always show Executive AI Brief for Managers, supporting all ranges & periods */}
+					{isManager && (
 						<button
 							type="button"
 							onClick={() => setShowAiReportModal(true)}
@@ -464,8 +465,10 @@ export const PriceAnalysisPage = () => {
 			<ExecutiveAiReportModal
 				isOpen={showAiReportModal}
 				onClose={() => setShowAiReportModal(false)}
-				surveyPeriodId={surveyPeriodId}
-				surveyPeriodName={analyses[0]?.surveyPeriod?.name}
+				surveyPeriodId={surveyPeriodId || undefined}
+				surveyPeriodName={
+					surveyPeriodId ? analyses[0]?.surveyPeriod?.name : "All Survey Cycles"
+				}
 			/>
 		</div>
 	);

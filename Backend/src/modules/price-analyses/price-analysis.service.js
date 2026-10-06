@@ -813,205 +813,103 @@ export const listPriceAnalyses = async (query = {}) => {
 };
 
 /**
- * Builds an .xlsx buffer for every PriceAnalysis record.
- *
- * Optional filter: surveyPeriodId
- *
- * Includes:
- *   - A "Report Info" sheet with metadata
- *   - A "Price Analysis" sheet with one row per product and
- *     one column per store, plus Min / Avg / Index / Target / Action.
- *   - A "Legend" block to the right of the table explaining the
- *     Action pills and Index color scale.
- *
- * Only APPROVED competitor observations are included — matching the
- * same filter that feeds the analysis calculation.
+ * Normalizes category string to determine if it is Ultra-Sensitive FMCG.
  */
-export const generatePriceAnalysisExcel = async ({ surveyPeriodId } = {}) => {
-  // 1. Load the survey period (for metadata + filename)
-  const surveyPeriod = surveyPeriodId
-    ? await prisma.surveyPeriod.findUnique({
-      where: { id: surveyPeriodId },
-      select: {
-        id: true,
-        name: true,
-        startDate: true,
-        endDate: true,
-        status: true,
-      },
-    })
-    : null;
+const isUltraSensitiveCategory = (category) => {
+  const norm = String(category || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+  return norm === "ultrasensitive";
+};
 
-  // 2. Load all analyses for the period (or all periods if none specified)
-  const where = {};
-  if (surveyPeriodId) where.surveyPeriodId = surveyPeriodId;
+/**
+ * Resolves a normalized competitor key and clean column label.
+ */
+const resolveCompetitorMeta = (competitorName, storeName) => {
+  const norm = String(competitorName || storeName || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
 
-  const analyses = await prisma.priceAnalysis.findMany({
-    where,
-    orderBy: { calculatedAt: "desc" },
-    include: ANALYSIS_INCLUDE_RELATIONS,
-  });
+  if (norm.includes("garment")) return { key: "comp_garment", label: "Garment" };
+  if (norm.includes("freshcorner")) return { key: "comp_fresh_corner", label: "Fresh Corner" };
+  if (norm.includes("straight")) return { key: "comp_straight", label: "Straight Market" };
+  if (norm.includes("shoa")) return { key: "comp_shoa", label: "Shoa" };
+  if (norm.includes("abadir")) return { key: "comp_abadir", label: "Abadir" };
+  if (norm.includes("allmart")) return { key: "comp_allmart", label: "Allmart" };
+  if (norm.includes("bambi")) return { key: "comp_bambis", label: "Bambis" };
 
-  if (analyses.length === 0) {
-    throw new ApiError(404, "No price analysis records to export");
-  }
+  const cleanLabel = (competitorName || storeName || "Competitor")
+    .replace(/\s*[-–(].*$/, "")
+    .trim();
+  return { key: `comp_${norm}`, label: cleanLabel };
+};
 
-  // 3. Fetch approved competitor prices for all products
-  const competitorMap = await fetchApprovedCompetitorPrices(analyses);
+/**
+ * Standard canonical competitor columns per commercial stream.
+ */
+const CANONICAL_COMPETITORS = {
+  FRESH_CORNER: [
+    { key: "comp_garment", label: "Garment" },
+    { key: "comp_fresh_corner", label: "Fresh Corner" },
+    { key: "comp_straight", label: "Straight Market" },
+  ],
+  ULTRA_SENSITIVE: [
+    { key: "comp_shoa", label: "Shoa" },
+    { key: "comp_abadir", label: "Abadir" },
+    { key: "comp_allmart", label: "Allmart" },
+    { key: "comp_bambis", label: "Bambis" },
+  ],
+};
 
-  // 4. Discover store columns across all analyses
-  const storeMap = new Map();
-  for (const [, list] of competitorMap) {
-    for (const cp of list) {
-      if (cp.storeId && !storeMap.has(cp.storeId)) {
-        storeMap.set(cp.storeId, {
-          storeId: cp.storeId,
-          storeName: cp.storeName || "Unknown store",
-          competitorName: cp.competitorName || null,
-        });
+/**
+ * Builds an analysis table worksheet for a specific stream (Fresh Corner or Ultra-Sensitive).
+ */
+const buildStreamAnalysisSheet = (
+  workbook,
+  {
+    streamType, // "FRESH_CORNER" | "ULTRA_SENSITIVE" | "ALL"
+    sheetName,
+    tabColor,
+    analyses,
+    competitorMap,
+    PALETTE,
+    INDEX_SCALE,
+    ACTION_SCALE,
+    thinGrid,
+    fillCell,
+  },
+) => {
+  // 1. Establish canonical competitor columns for this stream
+  const baseColumns = CANONICAL_COMPETITORS[streamType] || [];
+  const compColumnsMap = new Map(baseColumns.map((c) => [c.key, c]));
+
+  // Discover if any additional competitors were observed for items in this stream
+  for (const a of analyses) {
+    const cpList = competitorMap.get(a.productId) || [];
+    for (const cp of cpList) {
+      const meta = resolveCompetitorMeta(cp.competitorName, cp.storeName);
+      if (!compColumnsMap.has(meta.key)) {
+        compColumnsMap.set(meta.key, meta);
       }
     }
   }
-  const storeColumns = [...storeMap.values()].sort((a, b) =>
-    (a.storeName || "").localeCompare(b.storeName || ""),
-  );
 
-  // 5. Build the workbook
-  const workbook = new ExcelJS.Workbook();
-  workbook.creator = "Aires-BI";
-  workbook.created = new Date();
+  const competitorColumns = [...compColumnsMap.values()];
 
-  // ────────────────────────────────────────────────────────────
-  // Color system — one palette shared by both sheets
-  // ────────────────────────────────────────────────────────────
-  const PALETTE = {
-    brandDark: "FF063970", // navy — title banner / header fill
-    brandTeal: "FFD9A441", // warm gold — accent bars / borders (pairs with navy)
-    brandTealLight: "FFDCEAF7", // light navy tint — legend section headers
-    headerBg: "FF063970", // navy — table header fill
-    headerBorder: "FFD9A441", // gold — header underline
-    white: "FFFFFFFF",
-    bandEven: "FFFFFFFF",
-    bandOdd: "FFF8FAFC", // slate-50
-    gridLine: "FFE2E8F0", // slate-200
-    labelText: "FF334155", // slate-700
-    mutedText: "FF94A3B8", // slate-400
-    queensFill: "FFFEF3C7", // amber-100 — benchmark price
-    queensText: "FF92400E", // amber-800
-    minFill: "FFECFDF5", // emerald-50
-    minText: "FF047857", // emerald-700
-    avgFill: "FFEFF6FF", // blue-50
-    avgText: "FF1D4ED8", // blue-700
-    targetFill: "FFF1F5F9", // slate-100
-    targetText: "FF475569", // slate-600
-  };
-
-  // Semantic scales — kept apart so meaning stays consistent across sheets
-  const INDEX_SCALE = {
-    good: { bg: "FFD1FAE5", text: "FF065F46" }, // emerald — on target
-    warn: { bg: "FFFEF3C7", text: "FF92400E" }, // amber — drifting
-    bad: { bg: "FFFEE2E2", text: "FF991B1B" }, // red — off target
-    neutral: { bg: "FFF1F5F9", text: "FF64748B" }, // slate — n/a
-  };
-
-  const ACTION_SCALE = {
-    KEEP: { bg: "FFD1FAE5", text: "FF065F46", label: "Keep" },
-    PRICE_DOWN: { bg: "FFFFEDD5", text: "FF9A3412", label: "Price Down" },
-    PRICE_UP: { bg: "FFDBEAFE", text: "FF1E40AF", label: "Price Up" },
-    REVIEW: { bg: "FFFEE2E2", text: "FF991B1B", label: "Review" },
-    DEFAULT: { bg: "FFF1F5F9", text: "FF475569", label: "—" },
-  };
-
-  const thinGrid = {
-    top: { style: "thin", color: { argb: PALETTE.gridLine } },
-    left: { style: "thin", color: { argb: PALETTE.gridLine } },
-    bottom: { style: "thin", color: { argb: PALETTE.gridLine } },
-    right: { style: "thin", color: { argb: PALETTE.gridLine } },
-  };
-
-  const fillCell = (cell, argb) => {
-    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb } };
-  };
-
-  // ────────────────────────────────────────────────────────────
-  // Sheet 1 — Report Info
-  // ────────────────────────────────────────────────────────────
-  const infoSheet = workbook.addWorksheet("Report Info", {
-    properties: { tabColor: { argb: PALETTE.brandTeal } },
-  });
-  infoSheet.columns = [
-    { key: "field", width: 24 },
-    { key: "value", width: 50 },
-  ];
-
-  // Title banner (merged, dark navy, teal accent underline)
-  infoSheet.mergeCells("A1:B1");
-  const titleCell = infoSheet.getCell("A1");
-  titleCell.value = "Price Analysis Report";
-  titleCell.font = { bold: true, size: 16, color: { argb: PALETTE.white } };
-  titleCell.alignment = { vertical: "middle", horizontal: "left", indent: 1 };
-  fillCell(titleCell, PALETTE.brandDark);
-  infoSheet.getRow(1).height = 32;
-  infoSheet.getCell("A1").border = {
-    bottom: { style: "medium", color: { argb: PALETTE.brandTeal } },
-  };
-  infoSheet.getCell("B1").border = {
-    bottom: { style: "medium", color: { argb: PALETTE.brandTeal } },
-  };
-  fillCell(infoSheet.getCell("B1"), PALETTE.brandDark);
-
-  infoSheet.addRow(["", ""]); // spacer
-
-  const infoRows = [
-    ["Survey Period", surveyPeriod?.name || "All survey periods"],
-    ["Period ID", surveyPeriod?.id || "—"],
-    [
-      "Period Dates",
-      surveyPeriod
-        ? `${new Date(surveyPeriod.startDate).toISOString().slice(0, 10)} → ${new Date(surveyPeriod.endDate).toISOString().slice(0, 10)}`
-        : "—",
-    ],
-    ["Period Status", surveyPeriod?.status || "—"],
-    ["Generated At", new Date().toISOString()],
-    ["Total Products", analyses.length],
-    ["Total Columns", 4 + storeColumns.length + 6],
-  ];
-
-  infoRows.forEach(([field, value], i) => {
-    const row = infoSheet.addRow({ field, value });
-    row.height = 20;
-    const bandArgb = i % 2 === 0 ? PALETTE.bandOdd : PALETTE.bandEven;
-    const labelCell = row.getCell(1);
-    const valueCell = row.getCell(2);
-    fillCell(labelCell, bandArgb);
-    fillCell(valueCell, bandArgb);
-    labelCell.font = { bold: true, color: { argb: PALETTE.labelText } };
-    valueCell.font = { color: { argb: PALETTE.labelText } };
-    labelCell.alignment = { vertical: "middle", indent: 1 };
-    valueCell.alignment = { vertical: "middle", indent: 1 };
-    labelCell.border = thinGrid;
-    valueCell.border = thinGrid;
+  // 2. Create worksheet
+  const sheet = workbook.addWorksheet(sheetName, {
+    properties: { tabColor: { argb: tabColor } },
   });
 
-  // ────────────────────────────────────────────────────────────
-  // Sheet 2 — Price Analysis
-  // ────────────────────────────────────────────────────────────
-  const sheet = workbook.addWorksheet("Price Analysis", {
-    properties: { tabColor: { argb: PALETTE.brandDark } },
-  });
-
-  // Column definitions
   sheet.columns = [
     { header: "Product", key: "product", width: 32 },
     { header: "SKU", key: "sku", width: 16 },
     { header: "Category", key: "category", width: 18 },
     { header: "Queens Price (ETB)", key: "queens", width: 18 },
-    ...storeColumns.map((s) => ({
-      header: s.competitorName
-        ? `${s.storeName} (${s.competitorName})`
-        : s.storeName,
-      key: `store_${s.storeId}`,
-      width: 22,
+    ...competitorColumns.map((c) => ({
+      header: c.label,
+      key: c.key,
+      width: 18,
     })),
     { header: "Min Competitor (ETB)", key: "min", width: 20 },
     { header: "Avg Competitor (ETB)", key: "avg", width: 20 },
@@ -1027,7 +925,7 @@ export const generatePriceAnalysisExcel = async ({ surveyPeriodId } = {}) => {
     colIndexByKey[col.key] = idx + 1;
   });
 
-  // Style the header row — dark banner with a teal underline for contrast
+  // 3. Header styling
   const headerRow = sheet.getRow(1);
   headerRow.height = 26;
   for (let c = 1; c <= totalCols; c++) {
@@ -1045,13 +943,21 @@ export const generatePriceAnalysisExcel = async ({ surveyPeriodId } = {}) => {
     };
   }
 
-  // Freeze header row + the first three identifying columns
+  // Freeze header and identification columns (Product, SKU, Category)
   sheet.views = [{ state: "frozen", xSplit: 3, ySplit: 1 }];
 
-  // Populate data rows
+  // 4. Populate rows
   for (const a of analyses) {
     const cpList = competitorMap.get(a.productId) || [];
-    const priceByStore = new Map(cpList.map((cp) => [cp.storeId, cp.price]));
+
+    // Map prices by competitor column key (resolving peer stores of the same competitor)
+    const priceByCompetitor = new Map();
+    for (const cp of cpList) {
+      const meta = resolveCompetitorMeta(cp.competitorName, cp.storeName);
+      if (!priceByCompetitor.has(meta.key) || cp.price < priceByCompetitor.get(meta.key)) {
+        priceByCompetitor.set(meta.key, cp.price);
+      }
+    }
 
     const row = {
       product: a.product?.name || "",
@@ -1074,10 +980,9 @@ export const generatePriceAnalysisExcel = async ({ surveyPeriodId } = {}) => {
         : "",
     };
 
-    for (const s of storeColumns) {
-      const v = priceByStore.get(s.storeId);
-      row[`store_${s.storeId}`] =
-        v !== undefined && v !== null ? Number(v) : null;
+    for (const c of competitorColumns) {
+      const v = priceByCompetitor.get(c.key);
+      row[c.key] = v !== undefined && v !== null ? Number(v) : null;
     }
 
     sheet.addRow(row);
@@ -1089,10 +994,10 @@ export const generatePriceAnalysisExcel = async ({ surveyPeriodId } = {}) => {
     "avg",
     "index",
     "target",
-    ...storeColumns.map((s) => `store_${s.storeId}`),
+    ...competitorColumns.map((c) => c.key),
   ];
 
-  // ── Pass 1: base zebra striping + grid lines across every data cell ──
+  // Pass 1: Zebra striping & gridlines
   for (let rowIdx = 2; rowIdx <= sheet.rowCount; rowIdx++) {
     const bandArgb = rowIdx % 2 === 0 ? PALETTE.bandOdd : PALETTE.bandEven;
     for (let c = 1; c <= totalCols; c++) {
@@ -1103,7 +1008,7 @@ export const generatePriceAnalysisExcel = async ({ surveyPeriodId } = {}) => {
     }
   }
 
-  // ── Pass 2: numeric formatting + right alignment (store/min/avg/etc.) ──
+  // Pass 2: Numeric currency formatting
   for (const key of numericKeys) {
     const colIdx = colIndexByKey[key];
     if (!colIdx) continue;
@@ -1120,7 +1025,7 @@ export const generatePriceAnalysisExcel = async ({ surveyPeriodId } = {}) => {
     }
   }
 
-  // ── Pass 3: semantic highlight fills for benchmark / min / avg / target ──
+  // Pass 3: Semantic highlight fills
   const semanticColumns = [
     { key: "queens", bg: PALETTE.queensFill, text: PALETTE.queensText },
     { key: "min", bg: PALETTE.minFill, text: PALETTE.minText },
@@ -1132,18 +1037,15 @@ export const generatePriceAnalysisExcel = async ({ surveyPeriodId } = {}) => {
     if (!colIdx) continue;
     for (let rowIdx = 2; rowIdx <= sheet.rowCount; rowIdx++) {
       const cell = sheet.getCell(rowIdx, colIdx);
-      if (cell.value === "—") continue; // keep muted style for empty values
+      if (cell.value === "—") continue;
       fillCell(cell, bg);
       cell.font = { color: { argb: text }, bold: key === "queens" };
     }
   }
 
-  // ── Pass 4: Price Index — color-scaled against Target Index ──
-  // Bands are derived from the SAME tolerance the helper uses to decide
-  // KEEP vs PRICE_UP/PRICE_DOWN (PRICE_ANALYSIS_CONFIG.TOLERANCE_BAND_PERCENT),
-  // so the cell color never disagrees with the Action pill next to it.
-  const tolerance = Number(PRICE_ANALYSIS_CONFIG.TOLERANCE_BAND_PERCENT); // e.g. 5
-  const nearEdgeBand = tolerance / 2; // e.g. 2.5 — "safe but watch it"
+  // Pass 4: Price Index color scaling
+  const tolerance = Number(PRICE_ANALYSIS_CONFIG.TOLERANCE_BAND_PERCENT);
+  const nearEdgeBand = tolerance / 2;
 
   const indexColIdx = colIndexByKey["index"];
   const targetColIdx = colIndexByKey["target"];
@@ -1154,23 +1056,22 @@ export const generatePriceAnalysisExcel = async ({ surveyPeriodId } = {}) => {
         targetColIdx && sheet.getCell(rowIdx, targetColIdx).value !== "—"
           ? Number(sheet.getCell(rowIdx, targetColIdx).value)
           : null;
-      const indexVal = indexCell.value !== "—" ? Number(indexCell.value) : null;
+      const indexVal =
+        indexCell.value !== "—" ? Number(indexCell.value) : null;
 
       let scale = INDEX_SCALE.neutral;
       if (indexVal !== null && targetVal !== null) {
         const diff = Math.abs(indexVal - targetVal);
-        if (diff <= nearEdgeBand)
-          scale = INDEX_SCALE.good; // safely inside tolerance
-        else if (diff <= tolerance)
-          scale = INDEX_SCALE.warn; // still KEEP, but near the edge
-        else scale = INDEX_SCALE.bad; // outside tolerance — already actioned
+        if (diff <= nearEdgeBand) scale = INDEX_SCALE.good;
+        else if (diff <= tolerance) scale = INDEX_SCALE.warn;
+        else scale = INDEX_SCALE.bad;
       }
       fillCell(indexCell, scale.bg);
       indexCell.font = { color: { argb: scale.text }, bold: true };
     }
   }
 
-  // ── Pass 5: Action column — solid "pill" fill per action type ──
+  // Pass 5: Action column pills
   const actionColIdx = colIndexByKey["action"];
   if (actionColIdx) {
     for (let rowIdx = 2; rowIdx <= sheet.rowCount; rowIdx++) {
@@ -1182,15 +1083,13 @@ export const generatePriceAnalysisExcel = async ({ surveyPeriodId } = {}) => {
     }
   }
 
-  // Autofilter across the full header so users can sort/filter in Excel
+  // Autofilter
   sheet.autoFilter = {
     from: { row: 1, column: 1 },
     to: { row: 1, column: totalCols },
   };
 
-  // ────────────────────────────────────────────────────────────
-  // Legend — placed a couple of columns to the right of the table
-  // ────────────────────────────────────────────────────────────
+  // 5. Legend on the right
   const legendCol = totalCols + 2;
   const legendLetter = sheet.getColumn(legendCol).letter;
   const swatchLetter = sheet.getColumn(legendCol + 1).letter;
@@ -1249,6 +1148,204 @@ export const generatePriceAnalysisExcel = async ({ surveyPeriodId } = {}) => {
       swatchCell.border = thinGrid;
     }
     legendRowIdx += 1;
+  }
+};
+export const generatePriceAnalysisExcel = async ({ surveyPeriodId } = {}) => {
+  // 1. Load survey period
+  const surveyPeriod = surveyPeriodId
+    ? await prisma.surveyPeriod.findUnique({
+      where: { id: surveyPeriodId },
+      select: {
+        id: true,
+        name: true,
+        startDate: true,
+        endDate: true,
+        status: true,
+      },
+    })
+    : null;
+
+  // 2. Load all analyses
+  const where = {};
+  if (surveyPeriodId) where.surveyPeriodId = surveyPeriodId;
+
+  const analyses = await prisma.priceAnalysis.findMany({
+    where,
+    orderBy: { calculatedAt: "desc" },
+    include: ANALYSIS_INCLUDE_RELATIONS,
+  });
+
+  if (analyses.length === 0) {
+    throw new ApiError(404, "No price analysis records to export");
+  }
+
+  // 3. Fetch approved competitor prices
+  const competitorMap = await fetchApprovedCompetitorPrices(analyses);
+
+  // 4. Partition analyses into Fresh Corner vs. Ultra-Sensitive
+  const freshAnalyses = analyses.filter(
+    (a) => !isUltraSensitiveCategory(a.product?.category),
+  );
+  const ultraAnalyses = analyses.filter((a) =>
+    isUltraSensitiveCategory(a.product?.category),
+  );
+
+  // 5. Build workbook
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = "Aires Communication PLC";
+  workbook.created = new Date();
+
+  // Color system
+  const PALETTE = {
+    brandDark: "FF063970",
+    brandTeal: "FFD9A441",
+    brandTealLight: "FFDCEAF7",
+    headerBg: "FF063970",
+    headerBorder: "FFD9A441",
+    white: "FFFFFFFF",
+    bandEven: "FFFFFFFF",
+    bandOdd: "FFF8FAFC",
+    gridLine: "FFE2E8F0",
+    labelText: "FF334155",
+    mutedText: "FF94A3B8",
+    queensFill: "FFFEF3C7",
+    queensText: "FF92400E",
+    minFill: "FFECFDF5",
+    minText: "FF047857",
+    avgFill: "FFEFF6FF",
+    avgText: "FF1D4ED8",
+    targetFill: "FFF1F5F9",
+    targetText: "FF475569",
+    freshTab: "FF017C4D",
+    ultraTab: "FFA41821",
+  };
+
+  const INDEX_SCALE = {
+    good: { bg: "FFD1FAE5", text: "FF065F46" },
+    warn: { bg: "FFFEF3C7", text: "FF92400E" },
+    bad: { bg: "FFFEE2E2", text: "FF991B1B" },
+    neutral: { bg: "FFF1F5F9", text: "FF64748B" },
+  };
+
+  const ACTION_SCALE = {
+    KEEP: { bg: "FFD1FAE5", text: "FF065F46", label: "Keep" },
+    PRICE_DOWN: { bg: "FFFFEDD5", text: "FF9A3412", label: "Price Down" },
+    PRICE_UP: { bg: "FFDBEAFE", text: "FF1E40AF", label: "Price Up" },
+    REVIEW: { bg: "FFFEE2E2", text: "FF991B1B", label: "Review" },
+    DEFAULT: { bg: "FFF1F5F9", text: "FF475569", label: "—" },
+  };
+
+  const thinGrid = {
+    top: { style: "thin", color: { argb: PALETTE.gridLine } },
+    left: { style: "thin", color: { argb: PALETTE.gridLine } },
+    bottom: { style: "thin", color: { argb: PALETTE.gridLine } },
+    right: { style: "thin", color: { argb: PALETTE.gridLine } },
+  };
+
+  const fillCell = (cell, argb) => {
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb } };
+  };
+
+  // ────────────────────────────────────────────────────────────
+  // Sheet 1: Report Info
+  // ────────────────────────────────────────────────────────────
+  const infoSheet = workbook.addWorksheet("Report Info", {
+    properties: { tabColor: { argb: PALETTE.brandTeal } },
+  });
+  infoSheet.columns = [
+    { key: "field", width: 26 },
+    { key: "value", width: 50 },
+  ];
+
+  infoSheet.mergeCells("A1:B1");
+  const titleCell = infoSheet.getCell("A1");
+  titleCell.value = "Price Analysis Report";
+  titleCell.font = { bold: true, size: 16, color: { argb: PALETTE.white } };
+  titleCell.alignment = { vertical: "middle", horizontal: "left", indent: 1 };
+  fillCell(titleCell, PALETTE.brandDark);
+  infoSheet.getRow(1).height = 32;
+
+  infoSheet.addRow(["", ""]);
+
+  const infoRows = [
+    ["Survey Period", surveyPeriod?.name || "All survey periods"],
+    ["Period ID", surveyPeriod?.id || "—"],
+    [
+      "Period Dates",
+      surveyPeriod
+        ? `${new Date(surveyPeriod.startDate).toISOString().slice(0, 10)} → ${new Date(surveyPeriod.endDate).toISOString().slice(0, 10)}`
+        : "—",
+    ],
+    ["Period Status", surveyPeriod?.status || "—"],
+    ["Generated At", new Date().toISOString()],
+    ["Prepared By", "Aires Communication PLC"],
+    ["Total Products Analyzed", analyses.length],
+    ["Fresh Corner Items", freshAnalyses.length],
+    ["Ultra-Sensitive FMCG Items", ultraAnalyses.length],
+  ];
+
+  infoRows.forEach(([field, value], i) => {
+    const row = infoSheet.addRow({ field, value });
+    row.height = 20;
+    const bandArgb = i % 2 === 0 ? PALETTE.bandOdd : PALETTE.bandEven;
+    const labelCell = row.getCell(1);
+    const valueCell = row.getCell(2);
+    fillCell(labelCell, bandArgb);
+    fillCell(valueCell, bandArgb);
+    labelCell.font = { bold: true, color: { argb: PALETTE.labelText } };
+    valueCell.font = { color: { argb: PALETTE.labelText } };
+    labelCell.alignment = { vertical: "middle", indent: 1 };
+    valueCell.alignment = { vertical: "middle", indent: 1 };
+    labelCell.border = thinGrid;
+    valueCell.border = thinGrid;
+  });
+
+  // ────────────────────────────────────────────────────────────
+  // Sheet 2: Fresh Corner Tab
+  if (freshAnalyses.length > 0) {
+    buildStreamAnalysisSheet(workbook, {
+      streamType: "FRESH_CORNER",
+      sheetName: "Fresh Corner",
+      tabColor: PALETTE.freshTab,
+      analyses: freshAnalyses,
+      competitorMap,
+      PALETTE,
+      INDEX_SCALE,
+      ACTION_SCALE,
+      thinGrid,
+      fillCell,
+    });
+  }
+
+  // Sheet 3: Ultra-Sensitive Tab
+  if (ultraAnalyses.length > 0) {
+    buildStreamAnalysisSheet(workbook, {
+      streamType: "ULTRA_SENSITIVE",
+      sheetName: "Ultra-Sensitive",
+      tabColor: PALETTE.ultraTab,
+      analyses: ultraAnalyses,
+      competitorMap,
+      PALETTE,
+      INDEX_SCALE,
+      ACTION_SCALE,
+      thinGrid,
+      fillCell,
+    });
+  }
+
+  // Fallback: If for any reason neither was categorized, render full set
+  if (freshAnalyses.length === 0 && ultraAnalyses.length === 0) {
+    buildStreamAnalysisSheet(workbook, {
+      sheetName: "Price Analysis",
+      tabColor: PALETTE.brandDark,
+      analyses,
+      competitorMap,
+      PALETTE,
+      INDEX_SCALE,
+      ACTION_SCALE,
+      thinGrid,
+      fillCell,
+    });
   }
 
   // 6. Serialize

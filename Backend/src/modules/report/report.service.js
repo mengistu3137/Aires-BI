@@ -12,120 +12,6 @@ import {
   normalizeReportType,
 } from "./report.config.js";
 
-/**
- * Generates an AI-synthesized executive brief tailored specifically for:
- * 1. Daily Fresh Corner (20 items, approved & pending)
- * 2. Weekly Ultra-Sensitive (100 items, FMCG parity)
- */
-export const getAiReportSummary = async (params) => {
-  const model = await loadReportModel(params);
-  const reportType = params.reportType || "FRESH_CORNER";
-  const isFresh = reportType === "FRESH_CORNER";
-
-  const section = model.sections?.[0];
-  const totalProducts =
-    section?.categories?.reduce((acc, c) => acc + c.products.length, 0) || 0;
-
-  // Extract key pricing insights across all columns
-  const insightsPayload = {
-    reportType,
-    surveyPeriod: model.period.name,
-    scope: isFresh
-      ? "Daily Fresh Produce (20 items - Approved & Pending)"
-      : "Weekly Ultra-Sensitive FMCG (100 items)",
-    competitors:
-      section?.columns
-        ?.filter((c) => c.kind === "COMPETITOR")
-        .map((c) => c.label) || [],
-    sampleProducts: (section?.categories?.[0]?.products || [])
-      .slice(0, 15)
-      .map((p) => ({
-        name: p.name,
-        unit: p.unit,
-        prices: p.cells,
-      })),
-  };
-
-  const prompt = isFresh
-    ? `
-You are the Chief Fresh Produce Pricing Strategist for Queens Supermarket PLC / Carrefour Ethiopia.
-Generate a structured C-level executive pricing brief for today's **Daily Fresh Shift** (20 Daily Fresh produce items):
-
-Survey Context: ${JSON.stringify(insightsPayload, null, 2)}
-
-Structure your report into these exact sections:
-1. Executive Summary & Morning Sourcing Realities (Garment wholesale vs Fresh Corner retail)
-2. Critical Cost Floor Warnings (Lame Dairy & ELFORA Ex-Factory gates vs Queen's shelf prices)
-3. Immediate Margin Optimization & Price Directives (Identify overpriced vs underpriced produce)
-4. Out-of-Stock Action Plan 
-
-Tone: Decisive, urgent, operational, referencing exact Ethiopian Birr (ETB) price figures.
-`
-    : `
-You are the Lead Commercial Pricing Intelligence Director for Queens Supermarket PLC / MIDROC Investment Group.
-Generate a structured C-level executive pricing brief for this week's **100 Ultra-Sensitive FMCG** benchmark:
-
-Survey Context: ${JSON.stringify(insightsPayload, null, 2)}
-
-Structure your report into these exact sections:
-1. Executive Summary & Carrefour 95% FMCG Parity Index Compliance
-2. Competitor Price Drift & Market Threats (Shoa, Abadir, Allmart, Bambis)
-3. Immediate Margin Recovery & Upward Adjustment Windows
-4. Strategic Positioning & Promotion Directives for Upcoming Trading Window
-
-Tone: Corporate, analytical, C-suite grade. Mention specific margin opportunities.
-`;
-
-  // Dynamically resolve active Groq reasoning model
-  const activeModel = await getActiveGroqModel("reasoning");
-
-  const completion = await groq.chat.completions.create({
-    model: activeModel,
-    messages: [
-      { role: "system", content: "You write high-level corporate retail pricing briefs." },
-      { role: "user", content: prompt },
-    ],
-    temperature: 0.2,
-  });
-
-  const narrative = completion.choices[0].message.content;
-
-  return {
-    reportType,
-    totalProducts,
-    period: model.period,
-    generatedAt: new Date(),
-    narrative,
-  };
-};
-
-/**
- * Builds and returns the editable Word Document (.docx) buffer.
- */
-export const generateAiObservationReportDocx = async (params) => {
-  const model = await loadReportModel(params);
-  const { narrative } = await getAiReportSummary(params);
-  const reportType = params.reportType || "FRESH_CORNER";
-
-  const buffer = await buildObservationReportDocx({
-    model,
-    aiNarrative: narrative,
-    reportType,
-  });
-
-  const periodSlug = slugify(model.period.name);
-  const typeSlug = reportType.toLowerCase().replace(/_/g, "-");
-  const filename = `Queens_AI_Pricing_Report_${typeSlug}_${periodSlug}_${new Date().toISOString().slice(0, 10)}.docx`;
-
-  return {
-    buffer,
-    filename,
-    contentType:
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  };
-};
-
-
 // Rejected observations are not valid evidence; cancelled audits are ignored.
 const EXCLUDED_REVIEW_STATUSES = ["REJECTED"];
 const EXCLUDED_AUDIT_STATUSES = ["CANCELLED"];
@@ -148,19 +34,8 @@ const PRODUCT_SELECT = {
   unit: true,
 };
 
-// ------------------------------------------------------------------
-// Helpers
-// ------------------------------------------------------------------
-
 const REVIEW_RANK = { APPROVED: 0, PENDING: 1, NEEDS_REVIEW: 2, REJECTED: 3 };
 
-/**
- * When a product has several observations for the same competitor
- * (any of its stores) in the same survey period:
- *   1. AVAILABLE observations win over OUT_OF_STOCK / NOT_FOUND
- *   2. then APPROVED > PENDING > NEEDS_REVIEW
- *   3. then the most recently captured one
- */
 const compareObservations = (a, b) => {
   const aAvail = a.availability === "AVAILABLE" ? 0 : 1;
   const bAvail = b.availability === "AVAILABLE" ? 0 : 1;
@@ -207,11 +82,6 @@ const byText = (a, b) =>
 
 const categoryOf = (product) => product.category?.trim() || UNCATEGORIZED;
 
-// ------------------------------------------------------------------
-// Data loading
-// ------------------------------------------------------------------
-
-/** Current Queens price per product: effective now, newest effectiveFrom wins. */
 const loadCurrentQueensPrices = async (productIds) => {
   const result = new Map();
   if (productIds.length === 0) return result;
@@ -238,33 +108,168 @@ const loadCurrentQueensPrices = async (productIds) => {
   }
   return result;
 };
+// In Backend/src/modules/report/report.service.js
 
-const loadRawData = async ({ surveyPeriodId, storeId, needsQueens }) => {
-  const [period, store] = await Promise.all([
-    prisma.surveyPeriod.findUnique({ where: { id: surveyPeriodId } }),
-    storeId
-      ? prisma.store.findUnique({
-          where: { id: storeId },
-          select: STORE_SELECT,
-        })
-      : Promise.resolve(null),
-  ]);
+const resolveDateRange = async ({ surveyPeriodId, rangeType, startDate, endDate }) => {
+  const now = new Date();
 
-  if (!period) throw new ApiError(404, "Survey period not found");
+  // 1. Explicit Week Range
+  if (rangeType === "WEEK") {
+    const start = new Date(now);
+    start.setDate(now.getDate() - 7);
+    return {
+      startDate: start,
+      endDate: now,
+      periodName: `Past 7 Days (${start.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${now.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })})`,
+      periodId: "range-week",
+      isDateBoundOnly: true,
+    };
+  }
+
+  // 2. Explicit Month Range
+  if (rangeType === "MONTH") {
+    const start = new Date(now);
+    start.setDate(now.getDate() - 30);
+    return {
+      startDate: start,
+      endDate: now,
+      periodName: `Past 30 Days (${start.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${now.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })})`,
+      periodId: "range-month",
+      isDateBoundOnly: true,
+    };
+  }
+
+  // 3. Custom Date Range
+  if (startDate && endDate) {
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    if (!isNaN(start.getTime()) && !isNaN(end.getTime())) {
+      if (String(endDate).length <= 10) {
+        end.setHours(23, 59, 59, 999);
+      }
+      return {
+        startDate: start,
+        endDate: end,
+        periodName: `Custom Range (${start.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${end.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })})`,
+        periodId: "range-custom",
+        isDateBoundOnly: true,
+      };
+    }
+  }
+
+  // 4. Any Specific Survey Period (OPEN, CLOSED, or DRAFT)
+  if (surveyPeriodId && surveyPeriodId !== "ALL" && surveyPeriodId !== "all") {
+    const period = await prisma.surveyPeriod.findUnique({
+      where: { id: surveyPeriodId },
+    });
+    if (!period) throw new ApiError(404, `Survey period '${surveyPeriodId}' not found`);
+    return {
+      startDate: period.startDate,
+      endDate: period.endDate,
+      periodName: `${period.name}${period.status ? ` (${period.status})` : ""}`,
+      periodId: period.id,
+      periodRecord: period,
+      isDateBoundOnly: false,
+    };
+  }
+
+  // 5. Automatic Fallback: Latest active open period, or latest closed period
+  const latestPeriod =
+    (await prisma.surveyPeriod.findFirst({
+      where: { status: "OPEN" },
+      orderBy: { startDate: "desc" },
+    })) ||
+    (await prisma.surveyPeriod.findFirst({
+      orderBy: { startDate: "desc" },
+    }));
+
+  if (latestPeriod) {
+    return {
+      startDate: latestPeriod.startDate,
+      endDate: latestPeriod.endDate,
+      periodName: `${latestPeriod.name}${latestPeriod.status ? ` (${latestPeriod.status})` : ""}`,
+      periodId: latestPeriod.id,
+      periodRecord: latestPeriod,
+      isDateBoundOnly: false,
+    };
+  }
+
+  return {
+    startDate: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000),
+    endDate: now,
+    periodName: "All Survey Data",
+    periodId: "all-data",
+    isDateBoundOnly: true,
+  };
+};
+
+const loadRawData = async ({
+  surveyPeriodId,
+  rangeType,
+  startDate,
+  endDate,
+  storeId,
+  needsQueens,
+}) => {
+  const rangeInfo = await resolveDateRange({ surveyPeriodId, rangeType, startDate, endDate });
+
+  const store = storeId
+    ? await prisma.store.findUnique({
+      where: { id: storeId },
+      select: STORE_SELECT,
+    })
+    : null;
+
   if (storeId && !store) throw new ApiError(404, "Store not found");
 
-  const auditWhere = {
-    surveyPeriodId,
-    status: { notIn: EXCLUDED_AUDIT_STATUSES },
-    ...(storeId ? { storeId } : {}),
+  const period = rangeInfo.periodRecord || {
+    id: rangeInfo.periodId,
+    name: rangeInfo.periodName,
+    startDate: rangeInfo.startDate,
+    endDate: rangeInfo.endDate,
+    status: rangeInfo.periodRecord?.status || "OPEN",
   };
+
+  // Build the observation filter
+  const observationWhere = {
+    audit: {
+      status: { notIn: EXCLUDED_AUDIT_STATUSES },
+      ...(storeId ? { storeId } : {}),
+    },
+    reviewStatus: { notIn: EXCLUDED_REVIEW_STATUSES },
+  };
+
+  if (rangeInfo.periodRecord) {
+    // Exact survey period binding (OPEN or CLOSED) — no date cutoff
+    observationWhere.audit.surveyPeriodId = rangeInfo.periodRecord.id;
+  } else if (rangeInfo.isDateBoundOnly) {
+    // Pure date range filtering
+    observationWhere.capturedAt = {
+      gte: rangeInfo.startDate,
+      lte: rangeInfo.endDate,
+    };
+  }
+
+  // Build the assignment items filter
+  const assignmentWhere = {
+    assignment: {
+      status: { not: "CANCELLED" },
+      ...(storeId ? { storeId } : {}),
+    },
+  };
+
+  if (rangeInfo.periodRecord) {
+    assignmentWhere.assignment.surveyPeriodId = rangeInfo.periodRecord.id;
+  } else if (rangeInfo.isDateBoundOnly) {
+    assignmentWhere.assignment.surveyPeriod = {
+      startDate: { lte: rangeInfo.endDate },
+      endDate: { gte: rangeInfo.startDate },
+    };
+  }
 
   const [observations, assignmentItems] = await Promise.all([
     prisma.priceObservation.findMany({
-      where: {
-        audit: auditWhere,
-        reviewStatus: { notIn: EXCLUDED_REVIEW_STATUSES },
-      },
+      where: observationWhere,
       orderBy: { capturedAt: "desc" },
       select: {
         id: true,
@@ -282,13 +287,7 @@ const loadRawData = async ({ surveyPeriodId, storeId, needsQueens }) => {
       },
     }),
     prisma.assignmentItem.findMany({
-      where: {
-        assignment: {
-          surveyPeriodId,
-          status: { not: "CANCELLED" },
-          ...(storeId ? { storeId } : {}),
-        },
-      },
+      where: assignmentWhere,
       select: {
         productId: true,
         product: { select: PRODUCT_SELECT },
@@ -313,45 +312,22 @@ const loadRawData = async ({ surveyPeriodId, storeId, needsQueens }) => {
   return { period, store, observations, assignmentItems, queensPrices };
 };
 
-// ------------------------------------------------------------------
-// Report model
-// ------------------------------------------------------------------
 
-/**
- * Builds one section (= one report type) of the report.
- *
- *   section.columns[]                    one column per competitor (+ Queens Price)
- *   section.categories[].products[].cells[columnKey]
- *     - record     -> chosen observation for that competitor/product
- *                     (Queens Price column: { kind: "QUEENS", price, ... })
- *     - null       -> product was assigned to the competitor's stores but nothing was recorded
- *     - undefined  -> no data / not on the checklist (rendered blank)
- *
- * Returns null when the section has nothing to show.
- */
-const buildSection = (
-  config,
-  { observations, assignmentItems, queensPrices, store },
-) => {
+const buildSection = (config, { observations, assignmentItems, queensPrices, store }) => {
   let columns = config.columns;
 
-  // Single-store export: keep only that store's competitor (+ Queens Price)
   if (store) {
     const storeColumn = matchColumn(columns, store.competitor?.name);
     if (!storeColumn) return null;
-    columns = columns.filter(
-      (c) => c.kind === "QUEENS" || c.key === storeColumn.key,
-    );
+    columns = columns.filter((c) => c.kind === "QUEENS" || c.key === storeColumn.key);
   }
 
   const competitorColumns = columns.filter((c) => c.kind === "COMPETITOR");
   const queensColumn = columns.find((c) => c.kind === "QUEENS") || null;
 
   const productsMap = new Map();
-  const pairs = new Map(); // `${columnKey}|${productId}` -> { columnKey, productId, observations[] }
-  const columnStores = new Map(
-    competitorColumns.map((c) => [c.key, new Set()]),
-  );
+  const pairs = new Map();
+  const columnStores = new Map(competitorColumns.map((c) => [c.key, new Set()]));
 
   const registerProduct = (p) => {
     if (!p || productsMap.has(p.id)) return;
@@ -372,12 +348,8 @@ const buildSection = (
     return pairs.get(key);
   };
 
-  // Expected checklist (assigned products) so missing items can be reported
   for (const item of assignmentItems) {
-    const column = matchColumn(
-      competitorColumns,
-      item.assignment.store?.competitor?.name,
-    );
+    const column = matchColumn(competitorColumns, item.assignment.store?.competitor?.name);
     if (!column || !config.acceptsCategory(categoryOf(item.product))) continue;
 
     columnStores.get(column.key).add(item.assignment.storeId);
@@ -385,7 +357,6 @@ const buildSection = (
     getPair(column.key, item.productId);
   }
 
-  // Recorded observations
   for (const obs of observations) {
     const obsStore = obs.audit.store;
     const column = matchColumn(competitorColumns, obsStore?.competitor?.name);
@@ -398,7 +369,6 @@ const buildSection = (
 
   if (pairs.size === 0) return null;
 
-  // Pick one observation per competitor/product (across all its stores)
   let duplicatesResolved = 0;
   for (const pair of pairs.values()) {
     const sorted = [...pair.observations].sort(compareObservations);
@@ -407,31 +377,30 @@ const buildSection = (
 
     pair.record = best
       ? {
-          observationId: best.id,
-          kind: "OBSERVATION",
-          columnKey: pair.columnKey,
-          productId: pair.productId,
-          storeId: best.audit.store.id,
-          storeName: best.audit.store.name,
-          city: best.audit.store.city ?? null,
-          area: best.audit.store.area ?? null,
-          availability: best.availability,
-          price:
-            best.price !== null && best.price !== undefined
-              ? Number(best.price)
-              : null,
-          observedUnit: best.observedUnit ?? null,
-          packageSize: best.packageSize ?? null,
-          capturedAt: best.capturedAt,
-          reviewStatus: best.reviewStatus,
-          notes: best.notes ?? null,
-          auditorName: best.auditor?.name ?? "",
-          alternativesCount: sorted.length - 1,
-        }
+        observationId: best.id,
+        kind: "OBSERVATION",
+        columnKey: pair.columnKey,
+        productId: pair.productId,
+        storeId: best.audit.store.id,
+        storeName: best.audit.store.name,
+        city: best.audit.store.city ?? null,
+        area: best.audit.store.area ?? null,
+        availability: best.availability,
+        price:
+          best.price !== null && best.price !== undefined
+            ? Number(best.price)
+            : null,
+        observedUnit: best.observedUnit ?? null,
+        packageSize: best.packageSize ?? null,
+        capturedAt: best.capturedAt,
+        reviewStatus: best.reviewStatus,
+        notes: best.notes ?? null,
+        auditorName: best.auditor?.name ?? "",
+        alternativesCount: sorted.length - 1,
+      }
       : null;
   }
 
-  // Rows grouped by category
   const categoriesMap = new Map();
   for (const product of productsMap.values()) {
     if (!categoriesMap.has(product.category)) {
@@ -473,14 +442,9 @@ const buildSection = (
       }),
   }));
 
-  // Summary (Queens Price is our own price list, so it is not part of the audit counters)
   const totalCounters = blankCounters();
-  const categoryCounters = new Map(
-    categories.map((c) => [c.name, blankCounters()]),
-  );
-  const columnCounters = new Map(
-    competitorColumns.map((c) => [c.key, blankCounters()]),
-  );
+  const categoryCounters = new Map(categories.map((c) => [c.name, blankCounters()]));
+  const columnCounters = new Map(competitorColumns.map((c) => [c.key, blankCounters()]));
   const review = { APPROVED: 0, PENDING: 0, NEEDS_REVIEW: 0 };
   let lowest = null;
   let highest = null;
@@ -497,10 +461,7 @@ const buildSection = (
       if (review[pair.record.reviewStatus] !== undefined) {
         review[pair.record.reviewStatus] += 1;
       }
-      if (
-        pair.record.availability === "AVAILABLE" &&
-        pair.record.price !== null
-      ) {
+      if (pair.record.availability === "AVAILABLE" && pair.record.price !== null) {
         const entry = {
           product: product.name,
           productCode: product.code,
@@ -561,11 +522,6 @@ const buildSection = (
   };
 };
 
-/**
- * Builds the model used by the JSON summary, the PDF and the Excel report.
- *
- *   model.sections[]  - one per report type (Fresh Corner / Ultra-Sensitive)
- */
 export const buildReportModel = ({
   period,
   store,
@@ -594,8 +550,8 @@ export const buildReportModel = ({
     throw new ApiError(
       404,
       store
-        ? `No price observations or assignments found for this store in the selected survey period${label}`
-        : `No price observations or assignments found for the selected survey period${label}`,
+        ? `No price observations or assignments found for this store in the selected range${label}`
+        : `No price observations or assignments found for the selected range${label}`,
     );
   }
 
@@ -613,13 +569,13 @@ export const buildReportModel = ({
     },
     store: store
       ? {
-          id: store.id,
-          name: store.name,
-          city: store.city ?? null,
-          area: store.area ?? null,
-          competitorId: store.competitor?.id ?? null,
-          competitorName: store.competitor?.name ?? "",
-        }
+        id: store.id,
+        name: store.name,
+        city: store.city ?? null,
+        area: store.area ?? null,
+        competitorId: store.competitor?.id ?? null,
+        competitorName: store.competitor?.name ?? "",
+      }
       : null,
     sections,
   };
@@ -627,14 +583,15 @@ export const buildReportModel = ({
 
 const loadReportModel = async ({
   surveyPeriodId,
+  rangeType,
+  startDate,
+  endDate,
   storeId,
   reportType,
   user,
 }) => {
-  const cleanPeriodId = String(surveyPeriodId ?? "").trim();
+  const cleanPeriodId = surveyPeriodId ? String(surveyPeriodId).trim() : undefined;
   const cleanStoreId = storeId ? String(storeId).trim() : undefined;
-
-  if (!cleanPeriodId) throw new ApiError(400, "surveyPeriodId is required");
 
   const requested = normalizeReportType(reportType);
   if (requested === null) {
@@ -647,8 +604,11 @@ const loadReportModel = async ({
 
   const raw = await loadRawData({
     surveyPeriodId: cleanPeriodId,
+    rangeType,
+    startDate,
+    endDate,
     storeId: cleanStoreId,
-    needsQueens: reportTypes.includes("FRESH_CORNER"),
+    needsQueens: reportTypes.includes("FRESH_CORNER") || reportTypes.length > 1,
   });
 
   return buildReportModel({ ...raw, reportTypes, user });
@@ -664,9 +624,142 @@ const buildFilename = (model, extension) => {
   return `${parts.join("_")}.${extension}`;
 };
 
-// ------------------------------------------------------------------
-// Public API
-// ------------------------------------------------------------------
+export const getAiReportSummary = async (params) => {
+  const model = await loadReportModel(params);
+  const reportType = params.reportType || "ALL";
+
+  const totalProducts = model.sections.reduce(
+    (acc, s) => acc + (s.categories?.reduce((cAcc, c) => cAcc + c.products.length, 0) || 0),
+    0,
+  );
+
+  const sectionsPayload = model.sections.map((section) => ({
+    sectionType: section.type,
+    label: section.label,
+    competitors: section.columns.filter((c) => c.kind === "COMPETITOR").map((c) => c.label),
+    totals: section.summary?.totals,
+    sampleHighlights: section.categories.flatMap((cat) =>
+      cat.products.slice(0, 10).map((prod) => ({
+        category: cat.name,
+        name: prod.name,
+        unit: prod.unit,
+        prices: prod.cells,
+      })),
+    ),
+  }));
+
+  const contextJson = JSON.stringify(
+    {
+      timeframe: model.period.name,
+      range: {
+        startDate: model.period.startDate,
+        endDate: model.period.endDate,
+      },
+      reportScope: reportType,
+      sections: sectionsPayload,
+    },
+    null,
+    2,
+  );
+
+  let prompt = "";
+  if (reportType === "FRESH_CORNER") {
+    prompt = `
+You are the Chief Fresh Produce Pricing Strategist for Queens Supermarket PLC / Carrefour Ethiopia.
+Generate a decisive C-level executive pricing brief for this produce period (${model.period.name}):
+
+Market Intelligence Context:
+${contextJson}
+
+Structure your report into these exact sections:
+1. Executive Summary & Morning Sourcing Realities (Garment wholesale vs Fresh Corner retail)
+2. Critical Cost Floor Warnings (Lame Dairy & ELFORA Ex-Factory gates vs Queen's shelf prices)
+3. Immediate Margin Optimization & Price Directives (Identify overpriced vs underpriced produce)
+4. Out-of-Stock Action Plan & Produce Sourcing Recommendations
+
+Tone: Decisive, urgent, operational, referencing exact Ethiopian Birr (ETB) figures and competitor discrepancies.
+`;
+  } else if (reportType === "ULTRA_SENSITIVE") {
+    prompt = `
+You are the Lead Commercial Pricing Intelligence Director for Queens Supermarket PLC / MIDROC Investment Group.
+Generate a structured C-level executive pricing brief for this FMCG benchmarking window (${model.period.name}):
+
+Market Intelligence Context:
+${contextJson}
+
+Structure your report into these exact sections:
+1. Executive Summary & Carrefour 95% FMCG Parity Index Compliance
+2. Competitor Price Drift & Market Threats (Shoa, Abadir, Allmart, Bambis)
+3. Immediate Margin Recovery & Upward Adjustment Windows
+4. Strategic Positioning & Promotion Directives for Upcoming Trading Window
+
+Tone: Corporate, analytical, C-suite grade. Mention specific margin opportunities.
+`;
+  } else {
+    prompt = `
+You are the Chief Commercial Officer & Head of Retail Pricing for Queens Supermarket PLC / MIDROC Investment Group.
+Generate an integrated comprehensive executive pricing intelligence brief for both **Daily Fresh Produce** and **100 Ultra-Sensitive FMCG** across this timeframe (${model.period.name}):
+
+Market Intelligence Context:
+${contextJson}
+
+Structure your report into these exact sections:
+1. Executive Summary & Overall Price Competitiveness Index
+2. Daily Fresh Produce Realities (Fresh Corner, Garment wholesale vs Queen's shelf benchmark)
+3. FMCG Core Parity Analysis (Shoa, Abadir, Allmart, Bambis vs Carrefour 95% target)
+4. Immediate Margin Recovery Directives (Overpriced vs underpriced items)
+5. Availability, Stockouts & Strategic Supply Recommendations
+
+Tone: Highly authoritative, executive-grade retail intelligence. Use ETB figures and concrete competitor comparisons.
+`;
+  }
+
+  const activeModel = await getActiveGroqModel("reasoning");
+
+  const completion = await groq.chat.completions.create({
+    model: activeModel,
+    messages: [
+      { role: "system", content: "You write high-level corporate retail pricing briefs." },
+      { role: "user", content: prompt },
+    ],
+    temperature: 0.2,
+  });
+
+  const narrative = completion.choices[0].message.content;
+
+  return {
+    reportType,
+    rangeType: params.rangeType || (params.surveyPeriodId ? "PERIOD" : "CUSTOM"),
+    totalProducts,
+    period: model.period,
+    generatedAt: new Date(),
+    narrative,
+    sections: model.sections,
+  };
+};
+
+export const generateAiObservationReportDocx = async (params) => {
+  const model = await loadReportModel(params);
+  const { narrative } = await getAiReportSummary(params);
+  const reportType = params.reportType || "ALL";
+
+  const buffer = await buildObservationReportDocx({
+    model,
+    aiNarrative: narrative,
+    reportType,
+  });
+
+  const periodSlug = slugify(model.period.name);
+  const typeSlug = reportType.toLowerCase().replace(/_/g, "-");
+  const filename = `Queens_AI_Pricing_Report_${typeSlug}_${periodSlug}_${new Date().toISOString().slice(0, 10)}.docx`;
+
+  return {
+    buffer,
+    filename,
+    contentType:
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  };
+};
 
 export const getObservationReportSummary = async (params) => {
   const model = await loadReportModel(params);
@@ -687,7 +780,6 @@ export const getObservationReportSummary = async (params) => {
 };
 
 export const generateObservationReportPdf = async (params) => {
-  console.log("Generating PDF report for", params);
   const model = await loadReportModel(params);
   const buffer = await buildObservationReportPdf(model);
   return {
@@ -708,12 +800,10 @@ export const generateObservationReportExcel = async (params) => {
   };
 };
 
-
-
 export const observationReportService = {
   getObservationReportSummary,
   generateObservationReportPdf,
   generateObservationReportExcel,
-  getAiReportSummary,             // ← Added
-  generateAiObservationReportDocx, // ← Added
+  getAiReportSummary,
+  generateAiObservationReportDocx,
 };
