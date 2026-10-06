@@ -1433,26 +1433,36 @@ const performSave = useCallback(
 	);
 };
 
+
 const BackButton = ({ navigate, auditId }) => (
-	<button
-		type="button"
-		onClick={() => navigate(`/audits/${auditId}`)}
-		className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-100"
-	>
-		<svg
-			className="h-4 w-4"
-			fill="none"
-			viewBox="0 0 24 24"
-			stroke="currentColor"
-			aria-hidden="true"
+	<div className="flex items-center gap-1.5">
+		<button
+			type="button"
+			onClick={() => navigate("/audits")}
+			className="inline-flex cursor-pointer items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
 		>
-			<path
-				strokeLinecap="round"
-				strokeLinejoin="round"
-				strokeWidth={2}
-				d="M15 19l-7-7 7-7"
-			/>
-		</svg>
-		Audit
-	</button>
+			<svg
+				className="h-3.5 w-3.5"
+				fill="none"
+				viewBox="0 0 24 24"
+				stroke="currentColor"
+			>
+				<path
+					strokeLinecap="round"
+					strokeLinejoin="round"
+					strokeWidth={2}
+					d="M15 19l-7-7 7-7"
+				/>
+			</svg>
+			All visits
+		</button>
+		<span className="text-xs text-slate-300">/</span>
+		<button
+			type="button"
+			onClick={() => navigate(`/audits/${auditId}`)}
+			className="inline-flex cursor-pointer items-center gap-1 rounded-lg px-2 py-1 text-xs font-bold text-slate-700 transition hover:bg-slate-100"
+		>
+			Visit overview
+		</button>
+	</div>
 );
