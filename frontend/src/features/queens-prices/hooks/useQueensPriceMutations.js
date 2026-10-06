@@ -6,21 +6,20 @@ import {
   deleteQueensPriceRequest,
 } from "@/services/api/queens-prices.api.js";
 
+/**
+ * Invalidate Queens price and downstream Price Analysis & Dashboard queries
+ */
 const invalidateQueensPriceQueries = (queryClient, { id, productId } = {}) => {
-  queryClient.invalidateQueries({ queryKey: ["queens-prices", "list"] });
-  if (id) {
-    queryClient.invalidateQueries({
-      queryKey: ["queens-prices", "detail", id],
-    });
-  }
-  if (productId) {
-    queryClient.invalidateQueries({
-      queryKey: ["queens-prices", "history", productId],
-    });
-    queryClient.invalidateQueries({
-      queryKey: ["queens-prices", "current", productId],
-    });
-  }
+  // 1. Queens Prices Cache
+  queryClient.invalidateQueries({ queryKey: ["queens-prices"] });
+
+  // 2. Price Analysis Cache (List, Detail, Readiness)
+  queryClient.invalidateQueries({ queryKey: ["price-analysis"] });
+
+  // 3. Operational Dashboard & Alerts
+  queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+  queryClient.invalidateQueries({ queryKey: ["alerts"] });
+  queryClient.invalidateQueries({ queryKey: ["products"] });
 };
 
 export const useCreateQueensPrice = () => {
@@ -29,7 +28,6 @@ export const useCreateQueensPrice = () => {
   return useMutation({
     mutationFn: createQueensPriceRequest,
     onSuccess: (data, variables) => {
-      // Suppress generic toast if caller requested custom toast
       if (!variables?.skipToast) {
         toast.success("Queens price created", {
           id: "queens-price-toast",
@@ -44,6 +42,7 @@ export const useCreateQueensPrice = () => {
     meta: { skipGlobalToast: true },
   });
 };
+
 export const useUpdateQueensPrice = () => {
   const queryClient = useQueryClient();
 
