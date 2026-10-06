@@ -2,6 +2,8 @@ import prisma from "../../config/db.js";
 import ApiError from "../../utils/api-error.js";
 import { buildObservationReportPdf } from "./report.pdf.js";
 import { buildObservationReportExcel } from "./report.excel.js";
+import { groq, getActiveGroqModel } from "../../config/groq.js";
+import { buildObservationReportDocx } from "./report.docx.js";
 import { slugify } from "./report.utils.js";
 import {
   REPORT_TYPES,
@@ -9,6 +11,120 @@ import {
   matchColumn,
   normalizeReportType,
 } from "./report.config.js";
+
+/**
+ * Generates an AI-synthesized executive brief tailored specifically for:
+ * 1. Daily Fresh Corner (20 items, approved & pending)
+ * 2. Weekly Ultra-Sensitive (100 items, FMCG parity)
+ */
+export const getAiReportSummary = async (params) => {
+  const model = await loadReportModel(params);
+  const reportType = params.reportType || "FRESH_CORNER";
+  const isFresh = reportType === "FRESH_CORNER";
+
+  const section = model.sections?.[0];
+  const totalProducts =
+    section?.categories?.reduce((acc, c) => acc + c.products.length, 0) || 0;
+
+  // Extract key pricing insights across all columns
+  const insightsPayload = {
+    reportType,
+    surveyPeriod: model.period.name,
+    scope: isFresh
+      ? "Daily Fresh Produce (20 items - Approved & Pending)"
+      : "Weekly Ultra-Sensitive FMCG (100 items)",
+    competitors:
+      section?.columns
+        ?.filter((c) => c.kind === "COMPETITOR")
+        .map((c) => c.label) || [],
+    sampleProducts: (section?.categories?.[0]?.products || [])
+      .slice(0, 15)
+      .map((p) => ({
+        name: p.name,
+        unit: p.unit,
+        prices: p.cells,
+      })),
+  };
+
+  const prompt = isFresh
+    ? `
+You are the Chief Fresh Produce Pricing Strategist for Queens Supermarket PLC / Carrefour Ethiopia.
+Generate a structured C-level executive pricing brief for today's **Daily Fresh Shift** (20 Daily Fresh produce items):
+
+Survey Context: ${JSON.stringify(insightsPayload, null, 2)}
+
+Structure your report into these exact sections:
+1. Executive Summary & Morning Sourcing Realities (Garment wholesale vs Fresh Corner retail)
+2. Critical Cost Floor Warnings (Lame Dairy & ELFORA Ex-Factory gates vs Queen's shelf prices)
+3. Immediate Margin Optimization & Price Directives (Identify overpriced vs underpriced produce)
+4. Out-of-Stock Action Plan 
+
+Tone: Decisive, urgent, operational, referencing exact Ethiopian Birr (ETB) price figures.
+`
+    : `
+You are the Lead Commercial Pricing Intelligence Director for Queens Supermarket PLC / MIDROC Investment Group.
+Generate a structured C-level executive pricing brief for this week's **100 Ultra-Sensitive FMCG** benchmark:
+
+Survey Context: ${JSON.stringify(insightsPayload, null, 2)}
+
+Structure your report into these exact sections:
+1. Executive Summary & Carrefour 95% FMCG Parity Index Compliance
+2. Competitor Price Drift & Market Threats (Shoa, Abadir, Allmart, Bambis)
+3. Immediate Margin Recovery & Upward Adjustment Windows
+4. Strategic Positioning & Promotion Directives for Upcoming Trading Window
+
+Tone: Corporate, analytical, C-suite grade. Mention specific margin opportunities.
+`;
+
+  // Dynamically resolve active Groq reasoning model
+  const activeModel = await getActiveGroqModel("reasoning");
+
+  const completion = await groq.chat.completions.create({
+    model: activeModel,
+    messages: [
+      { role: "system", content: "You write high-level corporate retail pricing briefs." },
+      { role: "user", content: prompt },
+    ],
+    temperature: 0.2,
+  });
+
+  const narrative = completion.choices[0].message.content;
+
+  return {
+    reportType,
+    totalProducts,
+    period: model.period,
+    generatedAt: new Date(),
+    narrative,
+  };
+};
+
+/**
+ * Builds and returns the editable Word Document (.docx) buffer.
+ */
+export const generateAiObservationReportDocx = async (params) => {
+  const model = await loadReportModel(params);
+  const { narrative } = await getAiReportSummary(params);
+  const reportType = params.reportType || "FRESH_CORNER";
+
+  const buffer = await buildObservationReportDocx({
+    model,
+    aiNarrative: narrative,
+    reportType,
+  });
+
+  const periodSlug = slugify(model.period.name);
+  const typeSlug = reportType.toLowerCase().replace(/_/g, "-");
+  const filename = `Queens_AI_Pricing_Report_${typeSlug}_${periodSlug}_${new Date().toISOString().slice(0, 10)}.docx`;
+
+  return {
+    buffer,
+    filename,
+    contentType:
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  };
+};
+
 
 // Rejected observations are not valid evidence; cancelled audits are ignored.
 const EXCLUDED_REVIEW_STATUSES = ["REJECTED"];
@@ -592,8 +708,12 @@ export const generateObservationReportExcel = async (params) => {
   };
 };
 
+
+
 export const observationReportService = {
   getObservationReportSummary,
   generateObservationReportPdf,
   generateObservationReportExcel,
+  getAiReportSummary,             // ← Added
+  generateAiObservationReportDocx, // ← Added
 };

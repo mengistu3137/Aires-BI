@@ -5,6 +5,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import toast from "react-hot-toast";
 import { useObservation } from "../hooks/useObservation.js";
+import { useObservationAI } from "../hooks/useObservationAI.js";
 import { useObservations } from "../hooks/useObservations.js";
 import {
 	useApproveObservation,
@@ -104,6 +105,13 @@ export const ObservationDetailPage = () => {
 	const isPending = observation?.review?.status === "PENDING";
 	const canApprove = isManager && isPending && !isUnsynced;
 	const canReject = isManager && isPending && !isUnsynced;
+
+	// Groq AI Anomaly Guardian — screen pending observations for price anomalies
+	const { data: aiScreen, isLoading: isAILoading } = useObservationAI(
+		
+		observationId,
+		isManager && isPending,
+	);
 
 	// Advance to next without creating duplicate toast notifications
 	const advanceToNext = () => {
@@ -385,6 +393,69 @@ export const ObservationDetailPage = () => {
 							/>
 						</div>
 					</Section>
+				)}
+
+				{/* Groq AI Anomaly Guardian Card */}
+				{isManager && isPending && (
+					<div className="mx-4 mt-4 sm:mx-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs">
+						<div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/70 px-4 py-2.5">
+							<div className="flex items-center gap-2">
+								<span className="flex h-5 w-5 items-center justify-center rounded-lg bg-[#FE7914] text-[11px] font-black text-white">
+									⚡
+								</span>
+								<span className="text-xs font-black text-slate-800">
+									 AI Anomaly Guardian
+								</span>
+								
+							</div>
+
+							{isAILoading ? (
+								<span className="text-[10px] font-bold text-slate-400 animate-pulse">
+									Screening observation…
+								</span>
+							) : (
+								<span
+									className={`rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider ${
+										aiScreen?.risk === "CRITICAL" || aiScreen?.risk === "HIGH"
+											? "bg-red-50 text-[#A41821] border border-red-200"
+											: aiScreen?.risk === "MEDIUM"
+												? "bg-amber-50 text-[#FE7914] border border-amber-200"
+												: "bg-emerald-50 text-[#017C4D] border border-emerald-200"
+									}`}
+								>
+									{aiScreen?.risk || "LOW"} Risk
+								</span>
+							)}
+						</div>
+
+						<div className="p-4 space-y-2">
+							{isAILoading ? (
+								<div className="space-y-1.5 py-1">
+									<div className="h-3 w-3/4 rounded-md bg-slate-100 animate-pulse" />
+									<div className="h-3 w-1/2 rounded-md bg-slate-100 animate-pulse" />
+								</div>
+							) : (
+								<>
+									<p className="text-xs font-medium text-slate-700 leading-relaxed">
+										{aiScreen?.reason ||
+											"Observation appears consistent with market baselines."}
+									</p>
+
+									{aiScreen?.isAnomaly && (
+										<div className="flex items-center gap-2 pt-1 text-[11px] font-bold text-[#A41821]">
+											<span>
+												⚠️ Variance:{" "}
+												{aiScreen.variancePercentage
+													? `${aiScreen.variancePercentage}%`
+													: "Outlier"}
+											</span>
+											<span>• Suggested: {aiScreen.suggestedReviewAction}</span>
+										</div>
+									)}
+								</>
+							)}
+						</div>
+					</div>
 				)}
 			</div>
 

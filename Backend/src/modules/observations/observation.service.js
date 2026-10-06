@@ -400,6 +400,7 @@ export const listAllObservations = async ({ user, query = {} }) => {
   };
 };
 
+
 export const updateObservation = async ({ observationId, user, updates }) => {
   const observation = await prisma.priceObservation.findUnique({
     where: { id: observationId },
@@ -417,19 +418,7 @@ export const updateObservation = async ({ observationId, user, updates }) => {
     );
   }
 
-  // Approved field evidence cannot be mutated by field auditors
-  if (
-    observation.reviewStatus === "APPROVED" &&
-    user.role === "FIELD_AUDITOR"
-  ) {
-    throw new ApiError(
-      409,
-      "Cannot modify an observation that has already been APPROVED by a supervisor",
-    );
-  }
-
-  // Allow updates while IN_PROGRESS or COMPLETED as long as reviewStatus is PENDING
-  // Only CANCELLED visits are strictly forbidden
+  // Only cancelled audits are strictly forbidden from mutation
   if (
     user.role === "FIELD_AUDITOR" &&
     observation.audit.status === "CANCELLED"
@@ -455,6 +444,7 @@ export const updateObservation = async ({ observationId, user, updates }) => {
     newAvailability,
     newPrice,
   );
+
   if (!priceCheck.isValid) {
     throw new ApiError(400, priceCheck.message);
   }
@@ -477,7 +467,9 @@ export const updateObservation = async ({ observationId, user, updates }) => {
           ? updates.evidencePhotoUrl
           : observation.evidencePhotoUrl,
       notes:
-        updates.notes !== undefined ? updates.notes?.trim() : observation.notes,
+        updates.notes !== undefined
+          ? updates.notes?.trim()
+          : observation.notes,
       reviewStatus:
         observation.reviewStatus === "REJECTED" ||
           observation.reviewStatus === "NEEDS_REVIEW"

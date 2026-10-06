@@ -24,7 +24,7 @@ import periodRoutes from "./modules/period/period.routes.js";
 import assignmentRoutes from "./modules/assignment/assignment.routes.js";
 import dashboardRoutes from "./modules/dashboard/dashboard.routes.js";
 import reportRoutes from "./modules/report/report.routes.js";
-
+import aiRoutes from "./modules/ai/ai.routes.js";
 const app = express();
 
 // Security and utility middleware
@@ -67,6 +67,7 @@ app.get("/health", (req, res) => {
 // REGISTER SYSTEM ROUTES
 // ==========================================
 app.use("/api/v1/reports", reportRoutes);
+app.use("/api/v1/ai", aiRoutes);
 
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/users", userRoutes);

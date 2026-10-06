@@ -35,6 +35,8 @@ const ANALYSIS_INCLUDE_RELATIONS = {
   },
 };
 
+
+
 /**
  * Fetches APPROVED competitor prices for each (productId, surveyPeriodId)
  * pair in the given analysis records. Returns a Map keyed by productId.
@@ -132,25 +134,30 @@ const formatAnalysisWithCompetitors = (analysis, competitorMap) => {
     competitorPrices: competitors,
   };
 };
-
 /**
- * Resolves the historical Queens benchmark price for a given product and survey period.
- *
- * Strategy:
- *   1. Prefer the benchmark effective on the period's startDate (strict historical reference).
- *   2. If none exists, fall back to the most recent benchmark that was effective
- *      at any point during or before the period's endDate. This handles cases
- *      where the benchmark was created after the period started — a common
- *      operational pattern.
+ * Resolves the active Queens benchmark price for a given product and survey period.
+ * Strictly prioritizes CURRENT active benchmarks (effectiveTo = null) for OPEN cycles.
  */
-export const resolveBenchmarkForSurveyPeriod = async (
-  productId,
-  surveyPeriod,
-) => {
+export const resolveBenchmarkForSurveyPeriod = async (productId, surveyPeriod) => {
+  const now = new Date();
+
+  // 1. For active/OPEN survey periods, strictly prioritize the CURRENT active benchmark
+  if (!surveyPeriod || surveyPeriod.status === "OPEN") {
+    const currentBenchmark = await prisma.queensPrice.findFirst({
+      where: {
+        productId,
+        effectiveFrom: { lte: now },
+        OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
+      },
+      orderBy: { effectiveFrom: "desc" },
+    });
+    if (currentBenchmark) return currentBenchmark;
+  }
+
   const startDate = new Date(surveyPeriod.startDate);
   const endDate = new Date(surveyPeriod.endDate);
 
-  // 1. Strict historical: benchmark effective at start of period
+  // 2. Strict historical: benchmark effective at start of period
   let benchmark = await prisma.queensPrice.findFirst({
     where: {
       productId,
@@ -162,7 +169,7 @@ export const resolveBenchmarkForSurveyPeriod = async (
 
   if (benchmark) return benchmark;
 
-  // 2. Fallback: most recent benchmark effective before the period ended
+  // 3. Fallback: most recent benchmark effective before the period ended
   benchmark = await prisma.queensPrice.findFirst({
     where: {
       productId,
@@ -171,9 +178,14 @@ export const resolveBenchmarkForSurveyPeriod = async (
     orderBy: { effectiveFrom: "desc" },
   });
 
-  return benchmark || null;
-};
+  if (benchmark) return benchmark;
 
+  // 4. Ultimate fallback: most recent benchmark record
+  return prisma.queensPrice.findFirst({
+    where: { productId },
+    orderBy: { effectiveFrom: "desc" },
+  });
+};
 /**
  * Retrieves calculation readiness metrics for a survey period:
  * Counts assigned products, approved observations, and items pending review.
@@ -669,7 +681,7 @@ export const getProductSurveyPeriodAnalysis = async (
 };
 
 /**
- * List Price Analyses with filtering and pagination.
+ * List Price Analyses with filtering, pagination, and active CURRENT benchmark resolution.
  */
 export const listPriceAnalyses = async (query = {}) => {
   const {
@@ -688,17 +700,13 @@ export const listPriceAnalyses = async (query = {}) => {
   const limit = Math.min(200, Math.max(1, parseInt(rawLimit, 10) || 20));
 
   const where = {};
-
   if (surveyPeriodId) where.surveyPeriodId = surveyPeriodId;
   if (productId) where.productId = productId;
   if (action) where.action = action;
-
   if (category) {
     where.product = { ...(where.product || {}), category };
   }
 
-  // Date filtering: asOfDate takes precedence (single-day pin), otherwise
-  // fall back to the from/to range.
   if (asOfDate) {
     where.calculatedAt = {
       gte: new Date(`${asOfDate}T00:00:00.000Z`),
@@ -729,13 +737,75 @@ export const listPriceAnalyses = async (query = {}) => {
     }),
   ]);
 
-  // Attach approved competitor prices for all analyses on this page
+  // Fetch approved competitor prices for all analyses on this page
   const competitorMap = await fetchApprovedCompetitorPrices(records);
+
+  // Strictly resolve CURRENT active benchmarks (effectiveTo = null / Present)
+  const now = new Date();
+  const activeBenchmarks = await prisma.queensPrice.findMany({
+    where: {
+      productId: { in: records.map((r) => r.productId) },
+      effectiveFrom: { lte: now },
+      OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
+    },
+    orderBy: { effectiveFrom: "desc" },
+  });
+
+  const activeBenchmarkMap = new Map();
+  for (const b of activeBenchmarks) {
+    if (!activeBenchmarkMap.has(b.productId)) {
+      activeBenchmarkMap.set(b.productId, b);
+    }
+  }
+
+  const enrichedRecords = records.map((r) => {
+    // Priority: Active CURRENT benchmark (effectiveTo = null) > snapshot
+    const activeBenchmark = activeBenchmarkMap.get(r.productId);
+    const activePrice = activeBenchmark
+      ? Number(activeBenchmark.price)
+      : Number(r.queensPrice);
+
+    const avg =
+      r.competitorAveragePrice !== null
+        ? Number(r.competitorAveragePrice)
+        : null;
+
+    // Dynamically recalculate priceIndex & action if benchmark price was updated
+    const liveIndexDecimal = avg ? calculatePriceIndex(activePrice, avg) : null;
+    const liveIndex =
+      liveIndexDecimal !== null
+        ? Number(liveIndexDecimal)
+        : r.priceIndex !== null
+          ? Number(r.priceIndex)
+          : null;
+
+    const liveAction = determinePriceAction({
+      priceIndex: liveIndex !== null ? new Prisma.Decimal(liveIndex) : null,
+      targetIndex:
+        r.targetIndex !== null ? new Prisma.Decimal(r.targetIndex) : null,
+      observationCount: (competitorMap.get(r.productId) || []).length,
+    });
+
+    const rec = calculateRecommendedPrice(avg, r.targetIndex);
+
+    const base = formatPriceAnalysisResponse({
+      ...r,
+      queensPrice: activePrice,
+      priceIndex: liveIndex,
+      action: liveAction,
+      recommendedPrice: rec !== null ? Number(rec) : null,
+    });
+
+    return {
+      ...base,
+      competitorPrices: competitorMap.get(r.productId) || [],
+    };
+  });
 
   const totalPages = Math.ceil(total / limit) || 1;
 
   return {
-    data: records.map((r) => formatAnalysisWithCompetitors(r, competitorMap)),
+    data: enrichedRecords,
     meta: { page, limit, total, totalPages },
   };
 };

@@ -1,15 +1,6 @@
 import { z } from "zod";
 import { REPORT_TYPE_KEYS, normalizeReportType } from "./report.config.js";
 
-/**
- * Query for all report endpoints:
- *   GET /reports/(summary|pdf|excel)?surveyPeriodId=...&reportType=...&storeId=...
- *
- * - surveyPeriodId is required.
- * - reportType is optional: FRESH_CORNER | ULTRA_SENSITIVE.
- *   Omit it (or send ALL) to get both reports in one document.
- * - storeId is optional. An empty value (?storeId=) is treated as "not provided".
- */
 export const observationReportQuerySchema = z.object({
   surveyPeriodId: z
     .string({ required_error: "surveyPeriodId is required" })
@@ -28,4 +19,5 @@ export const observationReportQuerySchema = z.object({
     .trim()
     .optional()
     .transform((value) => (value ? value : undefined)),
+  forceRefresh: z.coerce.boolean().optional(),
 });
