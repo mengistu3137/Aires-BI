@@ -1,4 +1,6 @@
 import prisma from "../../config/db.js";
+import pkg from "@prisma/client";
+const { Prisma } = pkg;
 import ApiError from "../../utils/api-error.js";
 import {
   calculateCompetitorAggregates,
