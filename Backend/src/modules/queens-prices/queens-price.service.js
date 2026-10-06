@@ -1,5 +1,7 @@
 import prisma from "../../config/db.js";
 import ApiError from "../../utils/api-error.js";
+import pkg from "@prisma/client";
+const { Prisma } = pkg;
 import {
   periodsOverlap,
   formatQueensPriceResponse,
