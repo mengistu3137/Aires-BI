@@ -15,348 +15,378 @@ import { useReportDownload } from "../hooks/useReportDownload.js";
 import { ReportExportMenu } from "../components/ReportExportMenu.jsx";
 
 export const ObservationsPage = () => {
-  const navigate = useNavigate();
-  const { isManager, isAdmin } = useAuth();
-  console.log("isManager", isManager, "isAdmin", isAdmin);
-  const isOnline = useOnlineStatus();
-  const [searchParams, setSearchParams] = useSearchParams();
+	const navigate = useNavigate();
+	const { isManager, isAdmin } = useAuth();
+	const isOnline = useOnlineStatus();
+	const [searchParams, setSearchParams] = useSearchParams();
 
-  const [search, setSearch] = useState("");
+	const [search, setSearch] = useState("");
 
-  // URL-backed filters
-  const availability = searchParams.get("availability") || "";
-  const reviewStatus = searchParams.get("reviewStatus") || "";
-  const storeId = searchParams.get("storeId") || "";
-  const surveyPeriodId = searchParams.get("surveyPeriodId") || "";
-  const page = Number(searchParams.get("page") || 1);
+	// URL-backed filters
+	const availability = searchParams.get("availability") || "";
+	const reviewStatus = searchParams.get("reviewStatus") || "";
+	const storeId = searchParams.get("storeId") || "";
+	const surveyPeriodId = searchParams.get("surveyPeriodId") || "";
+	const page = Number(searchParams.get("page") || 1);
 
-  const setFilter = (key, value) => {
-    const next = new URLSearchParams(searchParams);
-    if (!value) next.delete(key);
-    else next.set(key, value);
-    if (key !== "page") next.set("page", "1");
-    setSearchParams(next, { replace: true });
-  };
+	const setFilter = (key, value) => {
+		const next = new URLSearchParams(searchParams);
+		if (!value) next.delete(key);
+		else next.set(key, value);
+		if (key !== "page") next.set("page", "1");
+		setSearchParams(next, { replace: true });
+	};
 
-  const filters = useMemo(
-    () => ({
-      page,
-      limit: 20,
-      availability: availability || undefined,
-      reviewStatus: reviewStatus || undefined,
-      storeId: storeId || undefined,
-      surveyPeriodId: surveyPeriodId || undefined,
-    }),
-    [page, availability, reviewStatus, storeId, surveyPeriodId]
-  );
+	const filters = useMemo(
+		() => ({
+			page,
+			limit: 20,
+			availability: availability || undefined,
+			reviewStatus: reviewStatus || undefined,
+			storeId: storeId || undefined,
+			surveyPeriodId: surveyPeriodId || undefined,
+		}),
+		[page, availability, reviewStatus, storeId, surveyPeriodId],
+	);
 
-  const { data, isLoading, isError, error } = useObservations(filters);
+	const { data, isLoading, isError, error } = useObservations(filters);
 
-  const observations = data?.observations || [];
-  const meta = data?.meta || { page: 1, totalPages: 1, total: 0 };
+	const observations = data?.observations || [];
+	const meta = data?.meta || { page: 1, totalPages: 1, total: 0 };
 
-  // Stores — used to populate the store filter dropdown.
-  // We use the shared stores hook (same cache key as elsewhere in the app).
-  const { stores = [], isLoading: storesLoading } = useStores();
+	// Stores — used to populate the store filter dropdown.
+	// We use the shared stores hook (same cache key as elsewhere in the app).
+	const { stores = [], isLoading: storesLoading } = useStores();
 
-  // Survey periods (same cache as SurveyPeriodSelector) — used for readable labels
-  const { data: periods = [] } = useSurveyPeriods();
-  const selectedPeriod = periods.find((p) => p.id === surveyPeriodId);
-  const selectedStore = stores.find((s) => s.id === storeId);
+	// Survey periods (same cache as SurveyPeriodSelector) — used for readable labels
+	const { data: periods = [] } = useSurveyPeriods();
 
-  // Report export (PDF / Excel) — uses the selected period + store filters
-  const { download, downloading } = useReportDownload();
-  // reportType: "FRESH_CORNER" | "ULTRA_SENSITIVE" | undefined (= both in one file)
-  const handleExport = (format, reportType) =>
-    download(format, {
-      surveyPeriodId,
-      storeId: storeId || undefined,
-      reportType: reportType || undefined,
-    });
+	// Active/most recent cycle — first OPEN period, else first in the list
+	// (assumes the API returns periods sorted newest-first; verify below)
+	const activePeriod = periods.find((p) => p.status === "OPEN") || periods[0];
 
-  // Client-side search across the loaded page
-  const visibleObservations = useMemo(() => {
-    if (!search.trim()) return observations;
-    const term = search.toLowerCase();
-    return observations.filter((o) => {
-      const name = o.product?.name?.toLowerCase() || "";
-      const sku = o.product?.sku?.toLowerCase() || "";
-      const store = o.audit?.store?.name?.toLowerCase() || "";
-      const auditor = o.auditor?.name?.toLowerCase() || "";
-      return (
-        name.includes(term) || sku.includes(term) || store.includes(term) || auditor.includes(term)
-      );
-    });
-  }, [observations, search]);
+	// URL params are always strings while record ids may be numeric —
+	// compare defensively so lookups don't silently fail
+	const selectedPeriod = periods.find(
+		(p) => String(p.id) === String(surveyPeriodId),
+	);
+	const selectedStore = stores.find((s) => String(s.id) === String(storeId));
 
-  const hasActiveFilters = Boolean(
-    availability || reviewStatus || storeId || surveyPeriodId || search
-  );
+	// If "All survey periods" is selected in filters, fallback to the active cycle for report export
+	const effectivePeriodId = surveyPeriodId || activePeriod?.id || undefined;
 
-  const handleClearFilters = () => {
-    setSearch("");
-    setSearchParams({}, { replace: true });
-  };
+	// Report export (PDF / Excel) — uses the effective period + store filters
+	const { download, downloading } = useReportDownload();
+	// reportType: "FRESH_CORNER" | "ULTRA_SENSITIVE" | undefined (= both in one file)
+	const handleExport = (format, reportType) =>
+		download(format, {
+			surveyPeriodId: effectivePeriodId,
+			storeId: storeId || undefined,
+			reportType: reportType || undefined,
+		});
 
-  return (
-    <div className="space-y-4">
-      {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-lg font-black text-slate-800">Observations</h1>
-          <p className="mt-0.5 text-xs text-slate-500">
-            {isManager || isAdmin
-              ? "All competitor price observations collected across field audits."
-              : "Your price observations collected during field audits."}
-          </p>
-        </div>
+	// Client-side search across the loaded page
+	const visibleObservations = useMemo(() => {
+		if (!search.trim()) return observations;
+		const term = search.toLowerCase();
+		return observations.filter((o) => {
+			const name = o.product?.name?.toLowerCase() || "";
+			const sku = o.product?.sku?.toLowerCase() || "";
+			const store = o.audit?.store?.name?.toLowerCase() || "";
+			const auditor = o.auditor?.name?.toLowerCase() || "";
+			return (
+				name.includes(term) ||
+				sku.includes(term) ||
+				store.includes(term) ||
+				auditor.includes(term)
+			);
+		});
+	}, [observations, search]);
 
-        {/* Export (managers/admins only — matches backend restrictTo) */}
-        {(isManager || isAdmin) && (
-          <ReportExportMenu
-            surveyPeriodId={surveyPeriodId}
-            periodLabel={selectedPeriod?.name || "Selected survey period"}
-            scopeLabel={selectedStore ? selectedStore.name : "All competitors"}
-            onDownload={handleExport}
-            downloading={downloading}
-            disabled={!isOnline}
-          />
-        )}
-      </div>
+	const hasActiveFilters = Boolean(
+		availability || reviewStatus || storeId || surveyPeriodId || search,
+	);
 
-      {/* Offline banner */}
-      {!isOnline && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
-          <span className="font-bold">Offline:</span> showing the last loaded data. This list will
-          refresh automatically once you're back online.
-        </div>
-      )}
+	const handleClearFilters = () => {
+		setSearch("");
+		setSearchParams({}, { replace: true });
+	};
 
-      {/* Context filters: Store + Survey period */}
-      <div className="grid grid-cols-1 gap-3 rounded-2xl border border-slate-200 bg-white p-3.5 shadow-xs sm:grid-cols-2">
-        {/* Store filter */}
-        <div>
-          <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-slate-400">
-            Store
-          </label>
-          <div className="relative">
-            <select
-              value={storeId}
-              onChange={(e) => setFilter("storeId", e.target.value)}
-              disabled={storesLoading}
-              className="w-full appearance-none rounded-xl border border-slate-200 bg-slate-50/70 px-3.5 py-2.5 pr-9 text-xs font-semibold text-slate-800 focus:border-[#A41821] focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-[#A41821] disabled:opacity-50"
-            >
-              <option value="">{storesLoading ? "Loading stores…" : "All stores"}</option>
-              {stores.map((store) => (
-                <option key={store.id} value={store.id}>
-                  {store.name}
-                  {store.area ? ` — ${store.area}` : ""}
-                </option>
-              ))}
-            </select>
-            <svg
-              className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              aria-hidden="true"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M19 9l-7 7-7-7"
-              />
-            </svg>
-          </div>
-        </div>
+	return (
+		<div className="space-y-4">
+			{/* Header */}
+			<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+				<div>
+					<h1 className="text-lg font-black text-slate-800">Observations</h1>
+					<p className="mt-0.5 text-xs text-slate-500">
+						{isManager || isAdmin
+							? "All competitor price observations collected across field audits."
+							: "Your price observations collected during field audits."}
+					</p>
+				</div>
 
-        {/* Survey period filter */}
-        <SurveyPeriodSelector
-          value={surveyPeriodId}
-          onChange={(value) => setFilter("surveyPeriodId", value)}
-          label="Survey period"
-          placeholder="All survey periods"
-          className="sm:max-w-none"
-        />
-      </div>
+				{/* Export (managers/admins only — matches backend restrictTo) */}
+				{(isManager || isAdmin) && (
+					<ReportExportMenu
+						surveyPeriodId={effectivePeriodId}
+						periodLabel={
+							selectedPeriod?.name ||
+							(activePeriod
+								? `${activePeriod.name} (Active Cycle)`
+								: "All survey periods")
+						}
+						scopeLabel={selectedStore ? selectedStore.name : "All competitors"}
+						onDownload={handleExport}
+						downloading={downloading}
+						disabled={!isOnline}
+					/>
+				)}
+			</div>
 
-      {/* Availability + review filters */}
-      <ObservationFilters
-        search={search}
-        onSearchChange={setSearch}
-        availability={availability}
-        onAvailabilityChange={(v) => setFilter("availability", v)}
-        reviewStatus={reviewStatus}
-        onReviewStatusChange={(v) => setFilter("reviewStatus", v)}
-      />
+			{/* Offline banner */}
+			{!isOnline && (
+				<div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+					<span className="font-bold">Offline:</span> showing the last loaded
+					data. This list will refresh automatically once you're back online.
+				</div>
+			)}
 
-      {/* Export hint: a survey period is required for reports */}
-      {isManager && !surveyPeriodId && (
-        <p className="-mt-1 text-[11px] text-slate-500">
-          Select a <span className="font-bold">survey period</span> to export a PDF or Excel report.
-          Pick the report (Fresh Corner, Ultra-Sensitive or both) in the export menu. Columns are
-          grouped by competitor; choose a store to export just that store’s competitor, or leave it
-          on “All stores” for the full comparison.
-        </p>
-      )}
+			{/* Context filters: Store + Survey period */}
+			<div className="grid grid-cols-1 gap-3 rounded-2xl border border-slate-200 bg-white p-3.5 shadow-xs sm:grid-cols-2">
+				{/* Store filter */}
+				<div>
+					<label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-slate-400">
+						Store
+					</label>
+					<div className="relative">
+						<select
+							value={storeId}
+							onChange={(e) => setFilter("storeId", e.target.value)}
+							disabled={storesLoading}
+							className="w-full appearance-none rounded-xl border border-slate-200 bg-slate-50/70 px-3.5 py-2.5 pr-9 text-xs font-semibold text-slate-800 focus:border-[#A41821] focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-[#A41821] disabled:opacity-50"
+						>
+							<option value="">
+								{storesLoading ? "Loading stores…" : "All stores"}
+							</option>
+							{stores.map((store) => (
+								<option key={store.id} value={store.id}>
+									{store.name}
+									{store.area ? ` — ${store.area}` : ""}
+								</option>
+							))}
+						</select>
+						<svg
+							className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+							fill="none"
+							viewBox="0 0 24 24"
+							stroke="currentColor"
+							aria-hidden="true"
+						>
+							<path
+								strokeLinecap="round"
+								strokeLinejoin="round"
+								strokeWidth={2}
+								d="M19 9l-7 7-7-7"
+							/>
+						</svg>
+					</div>
+				</div>
 
-      {/* Active filter chips */}
-      {hasActiveFilters && (
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-            Active:
-          </span>
-          {storeId && (
-            <FilterChip
-              label={`Store: ${selectedStore?.name || storeId}`}
-              onRemove={() => setFilter("storeId", "")}
-            />
-          )}
-          {surveyPeriodId && (
-            <FilterChip
-              label={`Period: ${selectedPeriod?.name || surveyPeriodId}`}
-              onRemove={() => setFilter("surveyPeriodId", "")}
-            />
-          )}
-          {availability && (
-            <FilterChip
-              label={`Availability: ${prettyEnum(availability)}`}
-              onRemove={() => setFilter("availability", "")}
-            />
-          )}
-          {reviewStatus && (
-            <FilterChip
-              label={`Review: ${prettyEnum(reviewStatus)}`}
-              onRemove={() => setFilter("reviewStatus", "")}
-            />
-          )}
-          {search.trim() && (
-            <FilterChip label={`Search: "${search.trim()}"`} onRemove={() => setSearch("")} />
-          )}
-          <button
-            type="button"
-            onClick={handleClearFilters}
-            className="ml-1 text-[11px] font-bold text-[#A41821] hover:underline"
-          >
-            Clear all
-          </button>
-        </div>
-      )}
+				{/* Survey period filter */}
+				<SurveyPeriodSelector
+					value={surveyPeriodId}
+					onChange={(value) => setFilter("surveyPeriodId", value)}
+					label="Survey period"
+					placeholder="All survey periods"
+					className="sm:max-w-none"
+				/>
+			</div>
 
-      {/* Summary */}
-      {!isLoading && !isError && observations.length > 0 && (
-        <ObservationsSummaryBar observations={observations} meta={meta} />
-      )}
+			{/* Availability + review filters */}
+			<ObservationFilters
+				search={search}
+				onSearchChange={setSearch}
+				availability={availability}
+				onAvailabilityChange={(v) => setFilter("availability", v)}
+				reviewStatus={reviewStatus}
+				onReviewStatusChange={(v) => setFilter("reviewStatus", v)}
+			/>
 
-      {/* Loading */}
-      {isLoading && (
-        <div className="flex items-center justify-center py-12">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-[#A41821] border-t-transparent" />
-        </div>
-      )}
+			{/* Export hint: exports fall back to the active cycle when no period is selected */}
+			{isManager && !surveyPeriodId && activePeriod && (
+				<p className="-mt-1 text-[11px] text-slate-500">
+					No survey period selected — exports will use the{" "}
+					<span className="font-bold">{activePeriod.name}</span> cycle. Pick a
+					different cycle above, and choose the report (Fresh Corner,
+					Ultra-Sensitive or both) in the export menu. Columns are grouped by
+					competitor; choose a store to export just that store’s competitor, or
+					leave it on “All stores” for the full comparison.
+				</p>
+			)}
 
-      {/* Error */}
-      {isError && (
-        <div
-          className={`rounded-2xl border p-4 ${
-            isOnline ? "border-red-200 bg-red-50" : "border-amber-200 bg-amber-50"
-          }`}
-        >
-          <p className={`text-xs font-medium ${isOnline ? "text-[#A41821]" : "text-amber-800"}`}>
-            {isOnline
-              ? error?.message || "Unable to load observations"
-              : "You're offline and this list hasn't loaded yet. It will load automatically once you're back online."}
-          </p>
-        </div>
-      )}
+			{/* Active filter chips */}
+			{hasActiveFilters && (
+				<div className="flex flex-wrap items-center gap-1.5">
+					<span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+						Active:
+					</span>
+					{storeId && (
+						<FilterChip
+							label={`Store: ${selectedStore?.name || storeId}`}
+							onRemove={() => setFilter("storeId", "")}
+						/>
+					)}
+					{surveyPeriodId && (
+						<FilterChip
+							label={`Period: ${selectedPeriod?.name || surveyPeriodId}`}
+							onRemove={() => setFilter("surveyPeriodId", "")}
+						/>
+					)}
+					{availability && (
+						<FilterChip
+							label={`Availability: ${prettyEnum(availability)}`}
+							onRemove={() => setFilter("availability", "")}
+						/>
+					)}
+					{reviewStatus && (
+						<FilterChip
+							label={`Review: ${prettyEnum(reviewStatus)}`}
+							onRemove={() => setFilter("reviewStatus", "")}
+						/>
+					)}
+					{search.trim() && (
+						<FilterChip
+							label={`Search: "${search.trim()}"`}
+							onRemove={() => setSearch("")}
+						/>
+					)}
+					<button
+						type="button"
+						onClick={handleClearFilters}
+						className="ml-1 text-[11px] font-bold text-[#A41821] hover:underline"
+					>
+						Clear all
+					</button>
+				</div>
+			)}
 
-      {/* Content */}
-      {!isLoading && !isError && (
-        <>
-          {visibleObservations.length === 0 ? (
-            hasActiveFilters ? (
-              <ObservationEmptyState
-                title="No observations match your filters"
-                description="Try adjusting or clearing the current filters."
-                action={
-                  <button
-                    type="button"
-                    onClick={handleClearFilters}
-                    className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-50"
-                  >
-                    Clear filters
-                  </button>
-                }
-              />
-            ) : (
-              <ObservationEmptyState
-                title="No observations recorded yet"
-                description="Observations appear here once auditors collect them during field visits."
-              />
-            )
-          ) : (
-            <>
-              <div className="hidden md:block">
-                <ObservationListTable observations={visibleObservations} />
-              </div>
-              <div className="space-y-2 md:hidden">
-                {visibleObservations.map((o) => (
-                  <ObservationListItemGlobal key={o.id} observation={o} />
-                ))}
-              </div>
-            </>
-          )}
+			{/* Summary */}
+			{!isLoading && !isError && observations.length > 0 && (
+				<ObservationsSummaryBar observations={observations} meta={meta} />
+			)}
 
-          {/* Pagination */}
-          {meta.totalPages > 1 && (
-            <div className="flex items-center justify-between pt-2">
-              <button
-                type="button"
-                disabled={page === 1}
-                onClick={() => setFilter("page", String(Math.max(1, page - 1)))}
-                className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-40"
-              >
-                Previous
-              </button>
-              <span className="text-xs font-semibold text-slate-500">
-                Page {meta.page} of {meta.totalPages}
-              </span>
-              <button
-                type="button"
-                disabled={page >= meta.totalPages}
-                onClick={() => setFilter("page", String(page + 1))}
-                className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-40"
-              >
-                Next
-              </button>
-            </div>
-          )}
-        </>
-      )}
-    </div>
-  );
+			{/* Loading */}
+			{isLoading && (
+				<div className="flex items-center justify-center py-12">
+					<div className="h-8 w-8 animate-spin rounded-full border-4 border-[#A41821] border-t-transparent" />
+				</div>
+			)}
+
+			{/* Error */}
+			{isError && (
+				<div
+					className={`rounded-2xl border p-4 ${
+						isOnline
+							? "border-red-200 bg-red-50"
+							: "border-amber-200 bg-amber-50"
+					}`}
+				>
+					<p
+						className={`text-xs font-medium ${isOnline ? "text-[#A41821]" : "text-amber-800"}`}
+					>
+						{isOnline
+							? error?.message || "Unable to load observations"
+							: "You're offline and this list hasn't loaded yet. It will load automatically once you're back online."}
+					</p>
+				</div>
+			)}
+
+			{/* Content */}
+			{!isLoading && !isError && (
+				<>
+					{visibleObservations.length === 0 ? (
+						hasActiveFilters ? (
+							<ObservationEmptyState
+								title="No observations match your filters"
+								description="Try adjusting or clearing the current filters."
+								action={
+									<button
+										type="button"
+										onClick={handleClearFilters}
+										className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-50"
+									>
+										Clear filters
+									</button>
+								}
+							/>
+						) : (
+							<ObservationEmptyState
+								title="No observations recorded yet"
+								description="Observations appear here once auditors collect them during field visits."
+							/>
+						)
+					) : (
+						<>
+							<div className="hidden md:block">
+								<ObservationListTable observations={visibleObservations} />
+							</div>
+							<div className="space-y-2 md:hidden">
+								{visibleObservations.map((o) => (
+									<ObservationListItemGlobal key={o.id} observation={o} />
+								))}
+							</div>
+						</>
+					)}
+
+					{/* Pagination */}
+					{meta.totalPages > 1 && (
+						<div className="flex items-center justify-between pt-2">
+							<button
+								type="button"
+								disabled={page === 1}
+								onClick={() => setFilter("page", String(Math.max(1, page - 1)))}
+								className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-40"
+							>
+								Previous
+							</button>
+							<span className="text-xs font-semibold text-slate-500">
+								Page {meta.page} of {meta.totalPages}
+							</span>
+							<button
+								type="button"
+								disabled={page >= meta.totalPages}
+								onClick={() => setFilter("page", String(page + 1))}
+								className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-40"
+							>
+								Next
+							</button>
+						</div>
+					)}
+				</>
+			)}
+		</div>
+	);
 };
 
 const FilterChip = ({ label, onRemove }) => (
-  <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-semibold text-slate-700">
-    {label}
-    <button
-      type="button"
-      onClick={onRemove}
-      className="rounded-full p-0.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700"
-      aria-label={`Remove ${label}`}
-    >
-      ✕
-    </button>
-  </span>
+	<span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-semibold text-slate-700">
+		{label}
+		<button
+			type="button"
+			onClick={onRemove}
+			className="rounded-full p-0.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+			aria-label={`Remove ${label}`}
+		>
+			✕
+		</button>
+	</span>
 );
 
 const prettyEnum = (value) => {
-  if (!value) return "";
-  return value
-    .toLowerCase()
-    .split("_")
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(" ");
+	if (!value) return "";
+	return value
+		.toLowerCase()
+		.split("_")
+		.map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+		.join(" ");
 };

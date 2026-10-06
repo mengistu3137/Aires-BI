@@ -1,5 +1,9 @@
-import React, { useState, useMemo } from "react";
-import { getAiReportSummaryRequest } from "@/services/api/report.api.js";
+import React, { useState, useEffect, useMemo } from "react";
+import {
+	getAiReportSummaryRequest,
+	downloadReportRequest,
+} from "@/services/api/report.api.js";
+import { useSurveyPeriods } from "@/features/survey/hooks/useSurveyPeriods.js";
 import toast from "react-hot-toast";
 import {
 	INLINE_REGEX,
@@ -14,8 +18,6 @@ import {
 } from "../utils/aiReportDocument.js";
 
 const SERIF_STACK = "'Times New Roman', 'Liberation Serif', Times, serif";
-
-/* ── React inline markdown renderer ── */
 
 export const renderFormattedInline = (text) => {
 	if (!text) return null;
@@ -49,8 +51,6 @@ export const renderFormattedInline = (text) => {
 		);
 	});
 };
-
-/* ── React block renderer (Word-look tables: full grid, square corners) ── */
 
 const renderBlock = (block, idx, isA4View) => {
 	const bodyClass = isA4View ? "text-[13px]" : "text-sm";
@@ -187,8 +187,6 @@ const FormattedDocumentViewer = ({ markdown, isA4View = false }) => {
 	);
 };
 
-/* ── A4 preview — emulates the printed Word page in Times New Roman ── */
-
 const A4Preview = ({ markdown, meta }) => (
 	<div
 		className="mx-auto max-w-2xl bg-white border border-slate-300 rounded-sm shadow-xl p-8 sm:p-12 space-y-5 text-slate-800"
@@ -227,12 +225,150 @@ const A4Preview = ({ markdown, meta }) => (
 	</div>
 );
 
-/* ── Modal ── */
+const GatheredDataView = ({ sections }) => {
+	if (!sections || sections.length === 0) {
+		return (
+			<div className="p-8 text-center bg-white rounded-2xl border border-slate-200">
+				<p className="text-xs text-slate-500">
+					No competitor matrix data returned for this range.
+				</p>
+			</div>
+		);
+	}
+
+	return (
+		<div className="space-y-6">
+			{sections.map((section, sIdx) => (
+				<div
+					key={sIdx}
+					className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-xs"
+				>
+					<div className="px-5 py-3.5 bg-slate-50/80 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+						<div>
+							<h3 className="text-xs font-black uppercase tracking-wider text-slate-900">
+								{section.label}
+							</h3>
+							<p className="text-[11px] text-slate-500">
+								{section.description}
+							</p>
+						</div>
+						<div className="flex items-center gap-2">
+							<span className="text-[10px] font-bold uppercase tracking-wider bg-slate-200/60 text-slate-700 px-2.5 py-1 rounded-lg">
+								{section.summary?.totals?.products || 0} Products
+							</span>
+							<span className="text-[10px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-1 rounded-lg">
+								{section.summary?.totals?.coveragePct || 0}% Coverage
+							</span>
+						</div>
+					</div>
+
+					<div className="overflow-x-auto">
+						<table className="w-full border-collapse text-left text-xs">
+							<thead>
+								<tr className="bg-slate-100 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[10px]">
+									<th className="px-3.5 py-2.5">Product</th>
+									<th className="px-2.5 py-2.5 w-16">Unit</th>
+									{section.columns.map((col) => (
+										<th
+											key={col.key}
+											className={`px-3 py-2.5 ${
+												col.kind === "QUEENS"
+													? "bg-amber-50/80 text-amber-900 font-black border-l border-amber-200"
+													: ""
+											}`}
+										>
+											{col.label}
+										</th>
+									))}
+								</tr>
+							</thead>
+							<tbody className="divide-y divide-slate-100">
+								{section.categories?.map((cat) => (
+									<React.Fragment key={cat.name}>
+										<tr className="bg-slate-50/60">
+											<td
+												colSpan={section.columns.length + 2}
+												className="px-3.5 py-1.5 text-[10px] font-black uppercase tracking-wider text-slate-500"
+											>
+												{cat.name} ({cat.products.length})
+											</td>
+										</tr>
+										{cat.products.map((prod) => (
+											<tr
+												key={prod.id}
+												className="hover:bg-slate-50/50 transition"
+											>
+												<td className="px-3.5 py-2 font-semibold text-slate-800">
+													{prod.name}
+													{prod.code && (
+														<span className="block font-mono text-[9px] text-slate-400">
+															{prod.code}
+														</span>
+													)}
+												</td>
+												<td className="px-2.5 py-2 text-slate-500 font-mono text-[11px]">
+													{prod.unit}
+												</td>
+												{section.columns.map((col) => {
+													const cell = prod.cells?.[col.key];
+													if (!cell) {
+														return (
+															<td
+																key={col.key}
+																className="px-3 py-2 text-slate-300 italic font-mono text-[11px]"
+															>
+																—
+															</td>
+														);
+													}
+													const isAvailable = cell.availability === "AVAILABLE";
+													return (
+														<td
+															key={col.key}
+															className={`px-3 py-2 ${
+																col.kind === "QUEENS"
+																	? "bg-amber-50/40 border-l border-amber-100 font-black"
+																	: ""
+															}`}
+														>
+															{isAvailable && cell.price !== null ? (
+																<span className="font-mono font-bold text-slate-900">
+																	{cell.price.toFixed(2)} ETB
+																</span>
+															) : (
+																<span className="inline-flex rounded bg-rose-50 px-1.5 py-0.5 text-[9px] font-bold uppercase text-rose-700">
+																	{cell.availability?.replace(/_/g, " ") ||
+																		"OUT OF STOCK"}
+																</span>
+															)}
+														</td>
+													);
+												})}
+											</tr>
+										))}
+									</React.Fragment>
+								))}
+							</tbody>
+						</table>
+					</div>
+				</div>
+			))}
+		</div>
+	);
+};
 
 const VIEW_TABS = [
 	{ id: "DOCS_A4", label: "📄 Word (A4)" },
+	{ id: "GATHERED_DATA", label: "📊 Gathered Data" },
 	{ id: "NARRATIVE", label: "📝 Narrative" },
 	{ id: "EDIT", label: "✏️ Edit" },
+];
+
+const RANGE_OPTIONS = [
+	{ id: "PERIOD", label: "Current Cycle" },
+	{ id: "WEEK", label: "Past 7 Days" },
+	{ id: "MONTH", label: "Past 30 Days" },
+	{ id: "CUSTOM", label: "Custom Range" },
 ];
 
 export const ExecutiveAiReportModal = ({
@@ -241,16 +377,45 @@ export const ExecutiveAiReportModal = ({
 	surveyPeriodId,
 	surveyPeriodName,
 }) => {
-	const [reportType, setReportType] = useState("FRESH_CORNER");
-	const [viewMode, setViewMode] = useState("DOCS_A4"); // DOCS_A4 | NARRATIVE | EDIT
+	const { data: periods = [] } = useSurveyPeriods();
+
+	const [reportType, setReportType] = useState("ALL");
+	const [rangeType, setRangeType] = useState("PERIOD");
+	const [startDate, setStartDate] = useState("");
+	const [endDate, setEndDate] = useState("");
+	const [selectedCycleId, setSelectedCycleId] = useState(surveyPeriodId || "");
+
+	const [viewMode, setViewMode] = useState("DOCS_A4");
 	const [aiData, setAiData] = useState(null);
-	const [draft, setDraft] = useState(""); // editable markdown — source of truth
+	const [draft, setDraft] = useState("");
 	const [isGenerating, setIsGenerating] = useState(false);
 	const [isDownloading, setIsDownloading] = useState(false);
+	const [isDownloadingExcel, setIsDownloadingExcel] = useState(false);
+
+	// Keep the in-modal picker in sync when the parent cycle prop changes
+	useEffect(() => {
+		if (surveyPeriodId) setSelectedCycleId(surveyPeriodId);
+	}, [surveyPeriodId]);
+
+	// <select> values are always strings — compare defensively against record ids
+	const activePeriodRecord = useMemo(
+		() => periods.find((p) => String(p.id) === String(selectedCycleId)),
+		[periods, selectedCycleId],
+	);
+
+	const activePeriodLabel = useMemo(() => {
+		if (rangeType === "WEEK") return "Past 7 Days";
+		if (rangeType === "MONTH") return "Past 30 Days";
+		if (rangeType === "CUSTOM" && startDate && endDate)
+			return `${startDate} to ${endDate}`;
+		return (
+			activePeriodRecord?.name || surveyPeriodName || "Active Survey Cycle"
+		);
+	}, [rangeType, startDate, endDate, activePeriodRecord, surveyPeriodName]);
 
 	const meta = useMemo(
-		() => getReportMeta(reportType, surveyPeriodName),
-		[reportType, surveyPeriodName],
+		() => getReportMeta(reportType, activePeriodLabel),
+		[reportType, activePeriodLabel],
 	);
 
 	if (!isOpen) return null;
@@ -259,20 +424,26 @@ export const ExecutiveAiReportModal = ({
 	const isEditing = viewMode === "EDIT";
 
 	const handleGenerate = async (force = false) => {
+		if (rangeType === "CUSTOM" && (!startDate || !endDate)) {
+			toast.error("Please pick both start and end dates for custom range.");
+			return;
+		}
+
 		setIsGenerating(true);
 		if (force) setAiData(null);
 		try {
 			const data = await getAiReportSummaryRequest({
-				surveyPeriodId,
-				reportType,
+				surveyPeriodId:
+					rangeType === "PERIOD" ? selectedCycleId || undefined : undefined,
+				rangeType,
+				startDate: rangeType === "CUSTOM" ? startDate : undefined,
+				endDate: rangeType === "CUSTOM" ? endDate : undefined,
+				reportType: reportType === "ALL" ? undefined : reportType,
 				forceRefresh: force,
 			});
 			setAiData(data);
-			if (data?.isCached) {
-				toast("Loaded cached summary (Data unchanged)", { icon: "⚡" });
-			} else {
-				toast.success("Executive intelligence brief generated ✓");
-			}
+			setDraft(data?.narrative || "");
+			toast.success("Executive intelligence brief & market data loaded ✓");
 		} catch (err) {
 			toast.error(
 				err?.response?.data?.message || "Failed to generate AI brief",
@@ -282,10 +453,10 @@ export const ExecutiveAiReportModal = ({
 		}
 	};
 
-	const handleSelectType = (type) => {
+	const handleSelectScope = (type) => {
 		if (
 			isEdited &&
-			!window.confirm("Switching scope will discard your edits. Continue?")
+			!window.confirm("Switching stream scope will discard edits. Continue?")
 		)
 			return;
 		setReportType(type);
@@ -294,8 +465,30 @@ export const ExecutiveAiReportModal = ({
 		setViewMode("DOCS_A4");
 	};
 
-	/* Open the full Times New Roman A4 document in a new browser tab —
-       editable, printable to PDF, and copyable into Word / Google Docs. */
+	const handleSelectRange = (range) => {
+		if (
+			isEdited &&
+			!window.confirm("Switching time range will discard edits. Continue?")
+		)
+			return;
+		setRangeType(range);
+		setAiData(null);
+		setDraft("");
+		setViewMode("DOCS_A4");
+	};
+
+	const handleSelectCycle = (cycleId) => {
+		if (
+			isEdited &&
+			!window.confirm("Switching survey cycle will discard edits. Continue?")
+		)
+			return;
+		setSelectedCycleId(cycleId);
+		setAiData(null);
+		setDraft("");
+		setViewMode("DOCS_A4");
+	};
+
 	const handleOpenInNewTab = () => {
 		const html = buildStandaloneHtml(draft, meta);
 		const url = URL.createObjectURL(new Blob([html], { type: "text/html" }));
@@ -305,12 +498,9 @@ export const ExecutiveAiReportModal = ({
 			toast.error("Pop-up blocked — allow pop-ups to open the document.");
 			return;
 		}
-		// Give the new tab time to load before releasing the blob.
 		setTimeout(() => URL.revokeObjectURL(url), 60_000);
 	};
 
-	/* Copy the fully-styled document to the clipboard as rich text —
-       paste directly into Word or Google Docs with formatting intact. */
 	const handleCopyForDocs = async () => {
 		const inner = buildDocumentInnerHtml(draft, meta);
 		const html = `<div style="font-family:'Times New Roman',Times,serif;">${inner}</div>`;
@@ -319,16 +509,14 @@ export const ExecutiveAiReportModal = ({
 		if (ok) {
 			toast.success("Copied — paste into Word or Google Docs ✓");
 		} else {
-			toast.error("Copy failed — use “Open in New Tab” and copy there.");
+			toast.error("Copy failed — use 'Open in New Tab' and copy there.");
 		}
 	};
 
-	/* Client-side .docx: Times New Roman, real Word tables, includes edits. */
 	const handleDownloadDocx = async () => {
 		setIsDownloading(true);
 		try {
 			const { blob, filename } = await buildAiReportDocxBlob(draft, meta);
-
 			const url = window.URL.createObjectURL(blob);
 			const a = document.createElement("a");
 			a.href = url;
@@ -337,17 +525,38 @@ export const ExecutiveAiReportModal = ({
 			a.click();
 			document.body.removeChild(a);
 			window.URL.revokeObjectURL(url);
-
 			toast.success("Word document downloaded ✓");
-		} catch (err) {
-			const msg = String(err?.message || "");
-			toast.error(
-				msg.includes("Failed to fetch") || msg.includes("Unable to load")
-					? "Word export library missing — run: npm install docx"
-					: "Failed to generate Word document",
-			);
+		} catch {
+			toast.error("Failed to generate Word document");
 		} finally {
 			setIsDownloading(false);
+		}
+	};
+
+	const handleDownloadExcel = async () => {
+		setIsDownloadingExcel(true);
+		try {
+			const { blob, filename } = await downloadReportRequest("excel", {
+				surveyPeriodId:
+					rangeType === "PERIOD" ? selectedCycleId || undefined : undefined,
+				rangeType,
+				startDate: rangeType === "CUSTOM" ? startDate : undefined,
+				endDate: rangeType === "CUSTOM" ? endDate : undefined,
+				reportType: reportType === "ALL" ? undefined : reportType,
+			});
+			const url = window.URL.createObjectURL(blob);
+			const a = document.createElement("a");
+			a.href = url;
+			a.download = filename || `Queens_Price_Gathered_Data_${Date.now()}.xlsx`;
+			document.body.appendChild(a);
+			a.click();
+			document.body.removeChild(a);
+			window.URL.revokeObjectURL(url);
+			toast.success("Gathered data Excel spreadsheet downloaded ✓");
+		} catch {
+			toast.error("Failed to download Excel report");
+		} finally {
+			setIsDownloadingExcel(false);
 		}
 	};
 
@@ -355,7 +564,7 @@ export const ExecutiveAiReportModal = ({
 		<div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-900/60 backdrop-blur-xs">
 			<div
 				className={`relative flex flex-col w-full ${
-					isEditing ? "max-w-6xl" : "max-w-4xl"
+					isEditing ? "max-w-6xl" : "max-w-5xl"
 				} max-h-[92vh] bg-slate-100 rounded-2xl shadow-2xl border border-slate-200 overflow-hidden transition-all`}
 			>
 				{/* Topbar */}
@@ -366,10 +575,10 @@ export const ExecutiveAiReportModal = ({
 						</span>
 						<div>
 							<h2 className="text-sm font-black text-slate-900 leading-tight">
-								Executive AI Intelligence Report
+								Executive AI Intelligence & Market Summary
 							</h2>
 							<p className="text-[11px] text-slate-500 font-medium">
-								{surveyPeriodName || "Survey Cycle"}
+								{activePeriodLabel}
 								{isEdited && (
 									<span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-700">
 										EDITED
@@ -409,16 +618,86 @@ export const ExecutiveAiReportModal = ({
 
 				{/* Content */}
 				<div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-4">
-					{/* Scope Selector */}
+					{/* Timeframe Scope Selector */}
+					<div className="space-y-1.5">
+						<label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+							Select Aggregation Timeframe
+						</label>
+						<div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+							{RANGE_OPTIONS.map((range) => (
+								<button
+									key={range.id}
+									type="button"
+									onClick={() => handleSelectRange(range.id)}
+									className={`px-3 py-2 text-xs font-bold rounded-xl border transition text-center cursor-pointer ${
+										rangeType === range.id
+											? "border-[#A41821] bg-red-50 text-[#A41821] shadow-2xs"
+											: "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+									}`}
+								>
+									{range.label}
+								</button>
+							))}
+						</div>
+
+						{rangeType === "CUSTOM" && (
+							<div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+								<div>
+									<label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+										Start Date
+									</label>
+									<input
+										type="date"
+										value={startDate}
+										onChange={(e) => setStartDate(e.target.value)}
+										className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-800"
+									/>
+								</div>
+								<div>
+									<label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+										End Date
+									</label>
+									<input
+										type="date"
+										value={endDate}
+										onChange={(e) => setEndDate(e.target.value)}
+										className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-800"
+									/>
+								</div>
+							</div>
+						)}
+
+						{rangeType === "PERIOD" && periods.length > 0 && (
+							<div className="pt-2">
+								<label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+									Select Specific Survey Cycle (Open or Closed)
+								</label>
+								<select
+									value={selectedCycleId}
+									onChange={(e) => handleSelectCycle(e.target.value)}
+									className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-800"
+								>
+									<option value="">Latest Active Cycle (Default)</option>
+									{periods.map((p) => (
+										<option key={p.id} value={p.id}>
+											{p.name} · {p.status}
+										</option>
+									))}
+								</select>
+							</div>
+						)}
+					</div>
+
+					{/* Stream Scope Selector */}
 					<div className="space-y-1.5">
 						<label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
 							Select Intelligence Stream Scope
 						</label>
-						<div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+						<div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
 							<button
 								type="button"
 								disabled={isGenerating}
-								onClick={() => handleSelectType("FRESH_CORNER")}
+								onClick={() => handleSelectScope("FRESH_CORNER")}
 								className={`flex flex-col p-3 rounded-xl border text-left transition cursor-pointer bg-white ${
 									reportType === "FRESH_CORNER"
 										? "border-[#017C4D] ring-2 ring-[#017C4D]/30"
@@ -430,19 +709,18 @@ export const ExecutiveAiReportModal = ({
 										🥬 Daily Fresh Produce
 									</span>
 									<span className="font-mono text-[10px] font-bold text-[#017C4D] bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-										20 Products
+										20 Items
 									</span>
 								</div>
 								<p className="mt-1 text-[11px] text-slate-500">
-									Daily morning shift. Evaluates approved &amp; pending prices
-									across Fresh Corner, Garment, and Lamberet ex-factory gates.
+									Fresh Corner, Garment, and Lamberet ex-factory gates.
 								</p>
 							</button>
 
 							<button
 								type="button"
 								disabled={isGenerating}
-								onClick={() => handleSelectType("ULTRA_SENSITIVE")}
+								onClick={() => handleSelectScope("ULTRA_SENSITIVE")}
 								className={`flex flex-col p-3 rounded-xl border text-left transition cursor-pointer bg-white ${
 									reportType === "ULTRA_SENSITIVE"
 										? "border-[#A41821] ring-2 ring-[#A41821]/30"
@@ -454,46 +732,66 @@ export const ExecutiveAiReportModal = ({
 										🛒 Weekly FMCG Core
 									</span>
 									<span className="font-mono text-[10px] font-bold text-[#A41821] bg-red-50 px-2 py-0.5 rounded border border-red-200">
-										100 Products
+										100 Items
 									</span>
 								</div>
 								<p className="mt-1 text-[11px] text-slate-500">
-									Full weekly survey. Evaluates 95% Carrefour target parity,
-									price drift, and margin recovery across Shoa, Abadir, Allmart,
-									and Bambis.
+									Shoa, Abadir, Allmart, and Bambis 95% FMCG parity.
+								</p>
+							</button>
+
+							<button
+								type="button"
+								disabled={isGenerating}
+								onClick={() => handleSelectScope("ALL")}
+								className={`flex flex-col p-3 rounded-xl border text-left transition cursor-pointer bg-white ${
+									reportType === "ALL"
+										? "border-[#1F4E79] ring-2 ring-[#1F4E79]/30"
+										: "border-slate-200 hover:bg-slate-50"
+								}`}
+							>
+								<div className="flex items-center justify-between">
+									<span className="text-xs font-bold text-slate-900">
+										🌐 Combined Stream
+									</span>
+									<span className="font-mono text-[10px] font-bold text-[#1F4E79] bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+										120 Items
+									</span>
+								</div>
+								<p className="mt-1 text-[11px] text-slate-500">
+									Both Daily Fresh and FMCG Core multi-stream brief.
 								</p>
 							</button>
 						</div>
 					</div>
 
-					{/* Generate */}
+					{/* Trigger Generate */}
 					{!aiData && (
 						<div className="py-8 text-center bg-white rounded-2xl border border-slate-200 p-8 shadow-xs">
 							<button
 								type="button"
-								onClick={handleGenerate}
+								onClick={() => handleGenerate(false)}
 								disabled={isGenerating}
 								className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-[#A41821] hover:bg-[#7F1219] px-6 py-3 text-xs font-bold text-white shadow-xs transition active:scale-95 disabled:opacity-50"
 							>
 								{isGenerating ? (
 									<>
 										<div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-										<span>Generating summary...</span>
+										<span>
+											Aggregating gathered data &amp; generating brief...
+										</span>
 									</>
 								) : (
 									<span>
-										✦ Generate{" "}
-										{reportType === "FRESH_CORNER"
-											? "Daily Fresh Produce (20 Items)"
-											: "Weekly FMCG Core (100 Items)"}{" "}
-										Brief
+										✦ Generate Summary &amp; Load Competitor Matrix (
+										{activePeriodLabel})
 									</span>
 								)}
 							</button>
 						</div>
 					)}
 
-					{/* Document area */}
+					{/* Output Viewer */}
 					{aiData && (
 						<div className="space-y-3">
 							<div className="flex flex-wrap items-center justify-between gap-2 px-1">
@@ -501,14 +799,11 @@ export const ExecutiveAiReportModal = ({
 									<span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
 										{viewMode === "DOCS_A4" &&
 											"Word Document Preview (A4 · Times New Roman)"}
+										{viewMode === "GATHERED_DATA" &&
+											"Gathered Competitor Matrix (Raw Comparison)"}
 										{viewMode === "NARRATIVE" && "Clean Executive Narrative"}
 										{viewMode === "EDIT" && "Edit Markdown · Live A4 Preview"}
 									</span>
-									{aiData.isCached && (
-										<span className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 font-mono text-[9px] font-bold text-[#017C4D]">
-											⚡ Instant (Data Unchanged)
-										</span>
-									)}
 								</div>
 								<div className="flex items-center gap-3">
 									{isEdited && (
@@ -522,7 +817,7 @@ export const ExecutiveAiReportModal = ({
 									)}
 									<button
 										type="button"
-										onClick={() => handleGenerate(true)} // ← Pass true for forceRefresh
+										onClick={() => handleGenerate(true)}
 										disabled={isGenerating}
 										className="text-[11px] font-bold text-[#A41821] hover:underline cursor-pointer disabled:opacity-50"
 									>
@@ -531,26 +826,12 @@ export const ExecutiveAiReportModal = ({
 								</div>
 							</div>
 
-							{/* Mobile view switcher */}
-							<div className="flex sm:hidden gap-1 rounded-xl border border-slate-200 bg-slate-100 p-1 text-[11px] font-bold">
-								{VIEW_TABS.map((tab) => (
-									<button
-										key={tab.id}
-										type="button"
-										onClick={() => setViewMode(tab.id)}
-										className={`flex-1 px-2 py-1 rounded-lg ${
-											viewMode === tab.id
-												? "bg-white text-slate-900 shadow-2xs"
-												: "text-slate-500"
-										}`}
-									>
-										{tab.label}
-									</button>
-								))}
-							</div>
-
 							{viewMode === "DOCS_A4" && (
 								<A4Preview markdown={draft} meta={meta} />
+							)}
+
+							{viewMode === "GATHERED_DATA" && (
+								<GatheredDataView sections={aiData.sections} />
 							)}
 
 							{viewMode === "NARRATIVE" && (
@@ -566,15 +847,8 @@ export const ExecutiveAiReportModal = ({
 											value={draft}
 											onChange={(e) => setDraft(e.target.value)}
 											spellCheck
-											className="min-h-[520px] lg:h-[640px] w-full resize-y rounded-xl border border-slate-300 bg-white p-4 font-mono text-[12px] leading-relaxed text-slate-800 shadow-xs focus:border-[#1F4E79] focus:outline-none focus:ring-2 focus:ring-[#1F4E79]/20"
+											className="min-h-[520px] lg:h-[640px] w-full resize-y rounded-xl border border-slate-300 bg-white p-4 font-mono text-[12px] leading-relaxed text-slate-800 shadow-xs focus:border-[#1F4E79] focus:outline-hidden focus:ring-2 focus:ring-[#1F4E79]/20"
 										/>
-										<p className="mt-1.5 text-[10px] text-slate-500">
-											Tip: <code>## Heading</code>,{" "}
-											<code>**Key Insight:** text</code> for callouts,{" "}
-											<code>- item</code> for bullets, and{" "}
-											<code>| a | b |</code> for tables. Edits flow into the
-											preview, new tab, clipboard copy, and the .docx download.
-										</p>
 									</div>
 									<div className="lg:h-[640px] overflow-y-auto rounded-xl bg-slate-200/60 p-3">
 										<A4Preview markdown={draft} meta={meta} />
@@ -599,9 +873,9 @@ export const ExecutiveAiReportModal = ({
 						<div className="flex flex-wrap items-center gap-2">
 							<button
 								type="button"
-								onClick={handleCopyForDocs}
-								className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50 transition active:scale-95"
-								title="Copy formatted document — paste into Word or Google Docs"
+								onClick={handleDownloadExcel}
+								disabled={isDownloadingExcel}
+								className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-emerald-600 bg-white px-4 py-2.5 text-xs font-bold text-emerald-700 hover:bg-emerald-50 transition active:scale-95 disabled:opacity-50"
 							>
 								<svg
 									className="w-4 h-4"
@@ -613,10 +887,22 @@ export const ExecutiveAiReportModal = ({
 										strokeLinecap="round"
 										strokeLinejoin="round"
 										strokeWidth={2}
-										d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"
+										d="M12 10v6m0 0l-3-3m3 3l3-3M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"
 									/>
 								</svg>
-								<span>Copy for Word / Google Docs</span>
+								<span>
+									{isDownloadingExcel
+										? "Exporting Excel..."
+										: "Export Gathered Excel"}
+								</span>
+							</button>
+
+							<button
+								type="button"
+								onClick={handleCopyForDocs}
+								className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50 transition active:scale-95"
+							>
+								<span>Copy for Docs</span>
 							</button>
 
 							<button
@@ -624,19 +910,6 @@ export const ExecutiveAiReportModal = ({
 								onClick={handleOpenInNewTab}
 								className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-[#1F4E79] bg-white px-4 py-2.5 text-xs font-bold text-[#1F4E79] hover:bg-[#1F4E79]/5 transition active:scale-95"
 							>
-								<svg
-									className="w-4 h-4"
-									fill="none"
-									viewBox="0 0 24 24"
-									stroke="currentColor"
-								>
-									<path
-										strokeLinecap="round"
-										strokeLinejoin="round"
-										strokeWidth={2}
-										d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
-									/>
-								</svg>
 								<span>Open in New Tab</span>
 							</button>
 
@@ -646,25 +919,10 @@ export const ExecutiveAiReportModal = ({
 								disabled={isDownloading}
 								className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-[#017C4D] hover:bg-[#015E3A] px-5 py-2.5 text-xs font-bold text-white shadow-xs transition active:scale-95 disabled:opacity-50"
 							>
-								<svg
-									className="w-4 h-4"
-									fill="none"
-									viewBox="0 0 24 24"
-									stroke="currentColor"
-								>
-									<path
-										strokeLinecap="round"
-										strokeLinejoin="round"
-										strokeWidth={2}
-										d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-									/>
-								</svg>
 								<span>
 									{isDownloading
 										? "Building Word Doc..."
-										: isEdited
-											? "Download Edited Word (.docx)"
-											: "Download Word (.docx)"}
+										: "Download Word (.docx)"}
 								</span>
 							</button>
 						</div>
