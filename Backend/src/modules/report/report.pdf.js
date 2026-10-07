@@ -18,10 +18,10 @@ const C = {
   white: "#FFFFFF",
   amber: "#D97706",
   // Chart Series Colors matching executive manual report
-  chartQueens: "#1B4332",       // Dark Green
-  chartComp1: "#2D6A4F",        // Medium Green
-  chartComp2: "#D97706",        // Amber / Orange
-  chartComp3: "#0284C7",        // Sky Blue
+  chartQueens: "#1B4332", // Dark Green
+  chartComp1: "#2D6A4F", // Medium Green
+  chartComp2: "#D97706", // Amber / Orange
+  chartComp3: "#0284C7", // Sky Blue
 };
 
 const bottomLimit = (doc) => doc.page.height - doc.page.margins.bottom;
@@ -71,10 +71,11 @@ const drawExecutiveCoverPage = (doc, model) => {
   y += 16;
 
   const primarySection = model.sections?.[0];
-  const competitorsList = primarySection?.columns
-    ?.filter((c) => c.kind === "COMPETITOR")
-    .map((c) => c.label)
-    .join(" and ") || "Garment Vegetable Market and Fresh Corner";
+  const competitorsList =
+    primarySection?.columns
+      ?.filter((c) => c.kind === "COMPETITOR")
+      .map((c) => c.label)
+      .join(" and ") || "Garment Vegetable Market and Fresh Corner";
 
   const overviewText = `This official management intelligence dashboard report presents verified retail and wholesale price indices captured live by our dedicated field surveyors on ${dateStr}. All datasets representing ${competitorsList} were collected via direct on-site store audits and physical tracking of active trading bays. The Queens Price column reflects active catalog baseline thresholds, while the competitor data reflects the verified live shelf pricing metrics recorded during this operational window to guarantee authentic market benchmarking.`;
 
@@ -175,13 +176,20 @@ const drawPriceComparisonChart = (doc, model, x0, y0, totalW) => {
 
     columns.forEach((col, cIdx) => {
       const cell = prod.cells?.[col.key];
-      const price = cell && cell.availability === "AVAILABLE" && cell.price ? Number(cell.price) : 0;
+      const price =
+        cell && cell.availability === "AVAILABLE" && cell.price
+          ? Number(cell.price)
+          : 0;
       const barH = (price / maxPrice) * chartH;
       const barX = groupX + cIdx * barW;
       const barY = chartY + chartH - barH;
 
       if (barH > 0) {
-        doc.save().rect(barX, barY, barW - 1, barH).fill(seriesColors[cIdx % seriesColors.length]).restore();
+        doc
+          .save()
+          .rect(barX, barY, barW - 1, barH)
+          .fill(seriesColors[cIdx % seriesColors.length])
+          .restore();
       }
     });
 
@@ -198,11 +206,20 @@ const drawPriceComparisonChart = (doc, model, x0, y0, totalW) => {
   });
 
   // Base X-Axis line
-  doc.save().lineWidth(1).strokeColor(C.textDark).moveTo(chartX, chartY + chartH).lineTo(chartX + chartW, chartY + chartH).stroke().restore();
+  doc
+    .save()
+    .lineWidth(1)
+    .strokeColor(C.textDark)
+    .moveTo(chartX, chartY + chartH)
+    .lineTo(chartX + chartW, chartY + chartH)
+    .stroke()
+    .restore();
 };
 
 // ──────────────────────────────────────────────────────────────────
-// Page 2+: Master Pricing Matrix & Sourcing Insights
+// Page 2+: Master Pricing Matrix (uses per-category layout — category
+// name printed once per category, not repeated per product) &
+// Field Summary Sourcing Insights.
 // ──────────────────────────────────────────────────────────────────
 
 const drawMatrixTable = (doc, section, startY) => {
@@ -252,11 +269,27 @@ const drawMatrixTable = (doc, section, startY) => {
   });
   y += headerH;
 
-  // Table Data Rows
+  // Table Data Rows — iterate per category so the category name
+  // appears once per category (matching the report config), not
+  // repeated on every product row.
   let counter = 1;
   let zebra = false;
 
   for (const cat of section.categories) {
+    // Category header band (spans full table width)
+    const catHeaderH = 16;
+    if (y + catHeaderH > bottomLimit(doc) - 70) {
+      doc.addPage();
+      y = doc.page.margins.top;
+    }
+    doc.save().rect(left, y, W, catHeaderH).fill(C.zebra).restore();
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(8)
+      .fillColor(C.headerBlue)
+      .text(cat.name, left + 4, y + 4, { width: W - 8, align: "left" });
+    y += catHeaderH;
+
     for (const prod of cat.products) {
       const rowH = 18;
       if (y + rowH > bottomLimit(doc) - 70) {
@@ -270,20 +303,53 @@ const drawMatrixTable = (doc, section, startY) => {
       zebra = !zebra;
 
       // Grid line
-      doc.save().lineWidth(0.5).strokeColor(C.border).moveTo(left, y + rowH).lineTo(left + W, y + rowH).stroke().restore();
+      doc
+        .save()
+        .lineWidth(0.5)
+        .strokeColor(C.border)
+        .moveTo(left, y + rowH)
+        .lineTo(left + W, y + rowH)
+        .stroke()
+        .restore();
 
       curX = left;
       // No.
-      doc.font("Helvetica").fontSize(7.5).fillColor(C.muted).text(String(counter++), curX + 2, y + 5, { width: noW - 4, align: "center" });
+      doc
+        .font("Helvetica")
+        .fontSize(7.5)
+        .fillColor(C.muted)
+        .text(String(counter++), curX + 2, y + 5, {
+          width: noW - 4,
+          align: "center",
+        });
       curX += noW;
-      // Category
-      doc.font("Helvetica").fontSize(7.5).fillColor(C.textDark).text(cat.name, curX + 2, y + 5, { width: catW - 4, align: "left" });
+      // Category — left blank since category header band above already
+      // identifies the category (avoids "dairy dairy dairy ..." repetition).
+      doc
+        .font("Helvetica")
+        .fontSize(7.5)
+        .fillColor(C.muted)
+        .text("", curX + 2, y + 5, { width: catW - 4, align: "left" });
       curX += catW;
       // Name
-      doc.font("Helvetica-Bold").fontSize(7.5).fillColor(C.textDark).text(prod.name, curX + 2, y + 5, { width: nameW - 4, align: "left" });
+      doc
+        .font("Helvetica-Bold")
+        .fontSize(7.5)
+        .fillColor(C.textDark)
+        .text(prod.name, curX + 2, y + 5, {
+          width: nameW - 4,
+          align: "left",
+        });
       curX += nameW;
       // Unit
-      doc.font("Helvetica").fontSize(7.5).fillColor(C.muted).text(prod.unit, curX + 2, y + 5, { width: unitW - 4, align: "center" });
+      doc
+        .font("Helvetica")
+        .fontSize(7.5)
+        .fillColor(C.muted)
+        .text(prod.unit, curX + 2, y + 5, {
+          width: unitW - 4,
+          align: "center",
+        });
       curX += unitW;
 
       // Price Columns
@@ -306,7 +372,10 @@ const drawMatrixTable = (doc, section, startY) => {
           .font("Helvetica")
           .fontSize(7.5)
           .fillColor(color)
-          .text(valStr, curX + 2, y + 5, { width: compW - 6, align: "right" });
+          .text(valStr, curX + 2, y + 5, {
+            width: compW - 6,
+            align: "right",
+          });
         curX += compW;
       });
 
@@ -324,7 +393,11 @@ const drawMatrixTable = (doc, section, startY) => {
     y += 18;
   }
 
-  doc.font("Helvetica-Bold").fontSize(10).fillColor(C.textDark).text("Field Summary Sourcing & Insights", left, y);
+  doc
+    .font("Helvetica-Bold")
+    .fontSize(10)
+    .fillColor(C.textDark)
+    .text("Field Summary Sourcing & Insights", left, y);
   y += 14;
 
   const insights = [
@@ -361,7 +434,14 @@ const drawFooters = (doc) => {
     const originalBottom = doc.page.margins.bottom;
     doc.page.margins.bottom = 0;
 
-    doc.save().lineWidth(0.5).strokeColor(C.border).moveTo(left, y - 6).lineTo(left + width, y - 6).stroke().restore();
+    doc
+      .save()
+      .lineWidth(0.5)
+      .strokeColor(C.border)
+      .moveTo(left, y - 6)
+      .lineTo(left + width, y - 6)
+      .stroke()
+      .restore();
 
     doc.font("Helvetica").fontSize(7.5).fillColor(C.muted);
     doc.text(
@@ -404,11 +484,13 @@ export const buildObservationReportPdf = (model) =>
       drawExecutiveCoverPage(doc, model);
 
       // Page 2+: Master Price Matrix & Sourcing Notes
-      doc.addPage();
-      const firstSection = model.sections?.[0];
-      if (firstSection) {
-        drawMatrixTable(doc, firstSection, doc.page.margins.top);
-      }
+      // Loop over all sections (both report types) so the config-driven
+      // layout is honored.
+      const sections = model.sections || [];
+      sections.forEach((section) => {
+        doc.addPage();
+        drawMatrixTable(doc, section, doc.page.margins.top);
+      });
 
       drawFooters(doc);
       doc.end();

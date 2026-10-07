@@ -22,16 +22,18 @@ const saveBlob = (blob, filename) => {
  * Handles PDF / Excel report downloads for a survey period (+ optional store
  * and optional reportType: "FRESH_CORNER" | "ULTRA_SENSITIVE", omit for both).
  * `downloading` is null | "pdf" | "excel" so the UI can show per-format spinners.
+ *
+ * IMPORTANT: surveyPeriodId is OPTIONAL.
+ *   - When supplied → report is scoped to that period.
+ *   - When omitted  → backend reports on ALL survey data gathered so far.
  */
 export const useReportDownload = () => {
   const [downloading, setDownloading] = useState(null);
 
   const download = useCallback(
-    async (format, { surveyPeriodId, storeId, reportType }) => {
-      if (!surveyPeriodId) {
-        toast.error("Select a survey period first");
-        return;
-      }
+    async (format, { surveyPeriodId, storeId, reportType } = {}) => {
+      // surveyPeriodId is OPTIONAL. When omitted, the backend reports on
+      // ALL survey data gathered so far (no period filter applied).
       if (downloading) return; // one download at a time
 
       setDownloading(format);

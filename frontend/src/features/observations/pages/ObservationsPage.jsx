@@ -61,10 +61,6 @@ export const ObservationsPage = () => {
 	// Survey periods (same cache as SurveyPeriodSelector) — used for readable labels
 	const { data: periods = [] } = useSurveyPeriods();
 
-	// Active/most recent cycle — first OPEN period, else first in the list
-	// (assumes the API returns periods sorted newest-first; verify below)
-	const activePeriod = periods.find((p) => p.status === "OPEN") || periods[0];
-
 	// URL params are always strings while record ids may be numeric —
 	// compare defensively so lookups don't silently fail
 	const selectedPeriod = periods.find(
@@ -72,15 +68,17 @@ export const ObservationsPage = () => {
 	);
 	const selectedStore = stores.find((s) => String(s.id) === String(storeId));
 
-	// If "All survey periods" is selected in filters, fallback to the active cycle for report export
-	const effectivePeriodId = surveyPeriodId || activePeriod?.id || undefined;
+	// No auto-fallback: when the user hasn't picked a period, the export
+	// deliberately omits surveyPeriodId so the backend reports on ALL data.
+	// (To scope to a specific cycle, the user picks it in the Survey period filter.)
+	const effectivePeriodId = surveyPeriodId || undefined;
 
 	// Report export (PDF / Excel) — uses the effective period + store filters
 	const { download, downloading } = useReportDownload();
 	// reportType: "FRESH_CORNER" | "ULTRA_SENSITIVE" | undefined (= both in one file)
 	const handleExport = (format, reportType) =>
 		download(format, {
-			surveyPeriodId: effectivePeriodId,
+			surveyPeriodId: effectivePeriodId, // undefined → backend = all data
 			storeId: storeId || undefined,
 			reportType: reportType || undefined,
 		});
@@ -129,12 +127,7 @@ export const ObservationsPage = () => {
 				{(isManager || isAdmin) && (
 					<ReportExportMenu
 						surveyPeriodId={effectivePeriodId}
-						periodLabel={
-							selectedPeriod?.name ||
-							(activePeriod
-								? `${activePeriod.name} (Active Cycle)`
-								: "All survey periods")
-						}
+						periodLabel={selectedPeriod?.name || "All survey periods"}
 						scopeLabel={selectedStore ? selectedStore.name : "All competitors"}
 						onDownload={handleExport}
 						downloading={downloading}
@@ -212,15 +205,16 @@ export const ObservationsPage = () => {
 				onReviewStatusChange={(v) => setFilter("reviewStatus", v)}
 			/>
 
-			{/* Export hint: exports fall back to the active cycle when no period is selected */}
-			{isManager && !surveyPeriodId && activePeriod && (
+			{/* Export hint: when no period is picked, the export covers all survey data */}
+			{isManager && !surveyPeriodId && (
 				<p className="-mt-1 text-[11px] text-slate-500">
-					No survey period selected — exports will use the{" "}
-					<span className="font-bold">{activePeriod.name}</span> cycle. Pick a
-					different cycle above, and choose the report (Fresh Corner,
-					Ultra-Sensitive or both) in the export menu. Columns are grouped by
-					competitor; choose a store to export just that store’s competitor, or
-					leave it on “All stores” for the full comparison.
+					No survey period selected — exports will include{" "}
+					<span className="font-bold">all survey data gathered so far</span>.
+					Pick a cycle above to scope the export to that period, and choose the
+					report (Fresh Corner, Ultra-Sensitive or both) in the export menu.
+					Columns are grouped by competitor; choose a store to export just that
+					store's competitor, or leave it on "All stores" for the full
+					comparison.
 				</p>
 			)}
 

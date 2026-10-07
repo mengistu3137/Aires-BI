@@ -110,6 +110,8 @@ const loadCurrentQueensPrices = async (productIds) => {
 };
 // In Backend/src/modules/report/report.service.js
 
+// In Backend/src/modules/report/report.service.js
+
 const resolveDateRange = async ({ surveyPeriodId, rangeType, startDate, endDate }) => {
   const now = new Date();
 
@@ -173,36 +175,30 @@ const resolveDateRange = async ({ surveyPeriodId, rangeType, startDate, endDate 
     };
   }
 
-  // 5. Automatic Fallback: Latest active open period, or latest closed period
-  const latestPeriod =
-    (await prisma.surveyPeriod.findFirst({
-      where: { status: "OPEN" },
-      orderBy: { startDate: "desc" },
-    })) ||
-    (await prisma.surveyPeriod.findFirst({
-      orderBy: { startDate: "desc" },
-    }));
+  // 5. No period and no range supplied → report on ALL survey data ever gathered.
+  //    We intentionally do NOT fall back to the latest active period, because
+  //    the default scope is "all survey periods gathered so far".
+  //    Returning periodRecord: null + isDateBoundOnly: false tells loadRawData
+  //    to apply NO date/period filter, so every observation is included.
+  const allTime = await prisma.priceObservation.aggregate({
+    _min: { capturedAt: true },
+    _max: { capturedAt: true },
+  });
 
-  if (latestPeriod) {
-    return {
-      startDate: latestPeriod.startDate,
-      endDate: latestPeriod.endDate,
-      periodName: `${latestPeriod.name}${latestPeriod.status ? ` (${latestPeriod.status})` : ""}`,
-      periodId: latestPeriod.id,
-      periodRecord: latestPeriod,
-      isDateBoundOnly: false,
-    };
-  }
+  const firstCaptured = allTime._min.capturedAt;
+  const lastCaptured = allTime._max.capturedAt;
 
   return {
-    startDate: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000),
-    endDate: now,
-    periodName: "All Survey Data",
+    startDate: firstCaptured || new Date(0),
+    endDate: lastCaptured || now,
+    periodName: firstCaptured
+      ? `All Survey Data (${firstCaptured.toISOString().slice(0, 10)} – ${lastCaptured.toISOString().slice(0, 10)})`
+      : "All Survey Data",
     periodId: "all-data",
-    isDateBoundOnly: true,
+    periodRecord: null,
+    isDateBoundOnly: false,
   };
 };
-
 const loadRawData = async ({
   surveyPeriodId,
   rangeType,
