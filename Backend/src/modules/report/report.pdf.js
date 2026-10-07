@@ -204,13 +204,6 @@ const drawPriceComparisonChart = (doc, model, x0, y0, totalW) => {
 // Page 2+: Master Pricing Matrix — one table per survey cycle
 // ──────────────────────────────────────────────────────────────────
 
-/**
- * Draws the cycle header band:
- *
- *   ┌──────────────────────────────────────────────┐
- *   │ Survey Cycle: Oct 01 (OPEN)   · 01 Oct 2026  │
- *   └──────────────────────────────────────────────┘
- */
 const drawCycleHeader = (doc, cycle, left, W, y) => {
   const h = 22;
   doc.save().rect(left, y, W, h).fill(C.cycleBg).restore();
@@ -223,8 +216,8 @@ const drawCycleHeader = (doc, cycle, left, W, y) => {
     .stroke()
     .restore();
 
-  const label = `Survey Cycle: ${cycle.period.name}${cycle.period.status ? ` (${cycle.period.status})` : ""
-    }`;
+  // No "(OPEN)" / "(CLOSED)" suffix — cycle name only.
+  const label = `Survey Cycle: ${cycle.period.name}`;
   doc
     .font("Helvetica-Bold")
     .fontSize(9.5)
@@ -245,9 +238,6 @@ const drawCycleHeader = (doc, cycle, left, W, y) => {
   return y + h + 4;
 };
 
-/**
- * Draws the table headers and rows for one cycle block. Returns the new y.
- */
 const drawCycleTable = (doc, cycle, section, left, W, startY) => {
   const columns = cycle.columns;
   const noW = 24;
@@ -270,7 +260,6 @@ const drawCycleTable = (doc, cycle, section, left, W, startY) => {
 
   let y = startY;
 
-  // Table header
   const headerH = 26;
   doc.save().rect(left, y, W, headerH).fill(C.navy).restore();
   doc.font("Helvetica-Bold").fontSize(8).fillColor(C.white);
@@ -293,10 +282,7 @@ const drawCycleTable = (doc, cycle, section, left, W, startY) => {
     if (y + catHeaderH > bottomLimit(doc) - 70) {
       doc.addPage();
       y = doc.page.margins.top;
-      // Re-draw the cycle banner at the top of the continuation page so
-      // the reader always knows which cycle this page belongs to.
       y = drawCycleHeader(doc, cycle, left, W, y);
-      // Re-draw table header
       doc.save().rect(left, y, W, headerH).fill(C.navy).restore();
       doc.font("Helvetica-Bold").fontSize(8).fillColor(C.white);
       curX = left;
@@ -362,7 +348,6 @@ const drawCycleTable = (doc, cycle, section, left, W, startY) => {
         });
       curX += noW;
 
-      // Category cell intentionally blank — the band above already labels it.
       doc
         .font("Helvetica")
         .fontSize(7.5)
@@ -390,20 +375,32 @@ const drawCycleTable = (doc, cycle, section, left, W, startY) => {
         });
       curX += unitW;
 
+      // ─────────────────────────────────────────────────────────
+      // Price cells:
+      //   - valid price → "145.00 ETB"
+      //   - OUT_OF_STOCK → "OUT OF STOCK" (red)
+      //   - NOT_FOUND (explicit) → "Not found" (muted)
+      //   - undefined / null (never observed) → "Not found" (muted)
+      // ─────────────────────────────────────────────────────────
       columns.forEach((col) => {
         const cell = prod.cells?.[col.key];
-        let valStr = "—";
-        let color = C.textDark;
+        let valStr = "Not found";
+        let color = C.muted;
 
         if (cell) {
           if (cell.availability === "AVAILABLE" && cell.price !== null) {
             valStr = `${formatPrice(cell.price)} ETB`;
+            color = C.textDark;
             if (col.kind === "QUEENS") color = C.headerBlue;
           } else if (cell.availability === "OUT_OF_STOCK") {
             valStr = "OUT OF STOCK";
             color = "#B91C1C";
+          } else if (cell.availability === "NOT_FOUND") {
+            valStr = "Not found";
+            color = C.muted;
           }
         }
+        // cell === undefined → stays "Not found" (muted)
 
         doc
           .font("Helvetica")
@@ -428,7 +425,6 @@ const drawMatrixTable = (doc, section, startY) => {
   const left = doc.page.margins.left;
   let y = startY;
 
-  // Section header
   doc
     .font("Helvetica-Bold")
     .fontSize(12)
@@ -436,9 +432,6 @@ const drawMatrixTable = (doc, section, startY) => {
     .text(`Master Competitor Pricing & Baseline Matrix — ${section.label}`, left, y);
   y += 18;
 
-  // If the section has only one cycle, still show the cycle banner for
-  // consistency. If there are no cycles (shouldn't happen), fall back to
-  // drawing one table using section.categories.
   const cycles = section.cycles && section.cycles.length > 0
     ? section.cycles
     : [
@@ -460,7 +453,6 @@ const drawMatrixTable = (doc, section, startY) => {
   for (let i = 0; i < cycles.length; i += 1) {
     const cycle = cycles[i];
 
-    // Ensure room for header + a few rows before starting a new cycle.
     if (y + 80 > bottomLimit(doc) - 70) {
       doc.addPage();
       y = doc.page.margins.top;
@@ -472,9 +464,6 @@ const drawMatrixTable = (doc, section, startY) => {
     y = drawCycleTable(doc, cycle, section, left, W, y);
   }
 
-  // ───────────────────────────────────────────────────────────
-  // Field Summary Sourcing & Insights (once, at the end of the section)
-  // ───────────────────────────────────────────────────────────
   if (y + 110 > bottomLimit(doc)) {
     doc.addPage();
     y = doc.page.margins.top;
@@ -569,11 +558,8 @@ export const buildObservationReportPdf = (model) =>
       doc.on("end", () => resolve(Buffer.concat(chunks)));
       doc.on("error", reject);
 
-      // Page 1: Dashboard with Narrative & Chart
       drawExecutiveCoverPage(doc, model);
 
-      // Page 2+: One matrix table block per section (which itself contains
-      // one sub-table per survey cycle).
       const sections = model.sections || [];
       sections.forEach((section) => {
         doc.addPage();
