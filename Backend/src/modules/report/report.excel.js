@@ -9,10 +9,6 @@ import {
   columnHeaderLabel,
 } from "./report.utils.js";
 
-// ------------------------------------------------------------------
-// Styling constants (ARGB, same palette as the PDF report)
-// ------------------------------------------------------------------
-
 const C = {
   primary: "FF1F3A5F",
   text: "FF1F2937",
@@ -28,6 +24,7 @@ const C = {
   subtitle: "FFD6E2F0",
   queens: "FFE8F0FA",
   lowest: "FFE8F5E9",
+  cycleBand: "FFDCE6F4",
 };
 
 const FONT = "Calibri";
@@ -54,18 +51,12 @@ const font = (opts = {}) => ({
   ...opts,
 });
 
-// Excel sheet names: max 31 chars, no : \ / ? * [ ]
 const safeSheetName = (name) =>
   String(name)
     .replace(/[:\\/?*[\]]/g, " ")
     .slice(0, 31);
 
-// ------------------------------------------------------------------
-// Generic helpers
-// ------------------------------------------------------------------
-
 const colLetter = (index) => {
-  // 1 -> A, 27 -> AA
   let n = index;
   let s = "";
   while (n > 0) {
@@ -78,7 +69,7 @@ const colLetter = (index) => {
 
 const setPageSetup = (sheet, { landscape = true } = {}) => {
   sheet.pageSetup = {
-    paperSize: 9, // A4
+    paperSize: 9,
     orientation: landscape ? "landscape" : "portrait",
     fitToPage: true,
     fitToWidth: 1,
@@ -97,7 +88,6 @@ const setPageSetup = (sheet, { landscape = true } = {}) => {
   };
 };
 
-/** Full-width title bar (row `rowNumber`, merged across `colCount` columns). */
 const addTitleBar = (sheet, rowNumber, colCount, title, subtitle, tag) => {
   const lastCol = colLetter(colCount);
 
@@ -122,14 +112,9 @@ const addTitleBar = (sheet, rowNumber, colCount, title, subtitle, tag) => {
   }
 
   if (tag && colCount >= 4) {
-    // Subtitle keeps the left part of the row, the tag goes in the last two columns
     sheet.unMergeCells(`A${rowNumber + 1}:${lastCol}${rowNumber + 1}`);
-    sheet.mergeCells(
-      `A${rowNumber + 1}:${colLetter(colCount - 2)}${rowNumber + 1}`,
-    );
-    sheet.mergeCells(
-      `${colLetter(colCount - 1)}${rowNumber + 1}:${lastCol}${rowNumber + 1}`,
-    );
+    sheet.mergeCells(`A${rowNumber + 1}:${colLetter(colCount - 2)}${rowNumber + 1}`);
+    sheet.mergeCells(`${colLetter(colCount - 1)}${rowNumber + 1}:${lastCol}${rowNumber + 1}`);
     const left = sheet.getCell(`A${rowNumber + 1}`);
     left.value = subtitle;
     left.font = font({ size: 10, color: { argb: C.subtitle } });
@@ -142,23 +127,6 @@ const addTitleBar = (sheet, rowNumber, colCount, title, subtitle, tag) => {
     right.alignment = { vertical: "middle", horizontal: "right", indent: 1 };
     right.fill = fill(C.primary);
   }
-};
-
-const addSectionHeading = (sheet, rowNumber, text) => {
-  const cell = sheet.getCell(`A${rowNumber}`);
-  cell.value = text;
-  cell.font = font({ size: 12, bold: true, color: { argb: C.primary } });
-  cell.alignment = { vertical: "middle" };
-  sheet.getRow(rowNumber).height = 20;
-};
-
-const addNote = (sheet, rowNumber, colCount, text, height = 30) => {
-  sheet.mergeCells(`A${rowNumber}:${colLetter(colCount)}${rowNumber}`);
-  const cell = sheet.getCell(`A${rowNumber}`);
-  cell.value = text;
-  cell.font = font({ size: 9, color: { argb: C.muted } });
-  cell.alignment = { vertical: "top", wrapText: true };
-  sheet.getRow(rowNumber).height = height;
 };
 
 const styleHeaderRow = (row, colCount, aligns = []) => {
@@ -176,24 +144,25 @@ const styleHeaderRow = (row, colCount, aligns = []) => {
   }
 };
 
-const styleBandRow = (sheet, rowNumber, colCount, text) => {
+const styleBandRow = (sheet, rowNumber, colCount, text, opts = {}) => {
   sheet.mergeCells(`A${rowNumber}:${colLetter(colCount)}${rowNumber}`);
   const cell = sheet.getCell(`A${rowNumber}`);
   cell.value = text;
-  cell.font = font({ size: 11, bold: true, color: { argb: C.primary } });
+  cell.font = font({
+    size: opts.size || 11,
+    bold: true,
+    color: { argb: opts.color || C.primary },
+  });
   cell.alignment = { vertical: "middle", horizontal: "left", indent: 1 };
-  sheet.getRow(rowNumber).height = 20;
+  sheet.getRow(rowNumber).height = opts.height || 20;
   for (let c = 1; c <= colCount; c += 1) {
     const rc = sheet.getRow(rowNumber).getCell(c);
-    rc.fill = fill(C.band);
+    rc.fill = fill(opts.bg || C.band);
     rc.border = thinBorder;
   }
 };
 
-const styleDataCell = (
-  cell,
-  { align = "left", zebra = false, wrap = true } = {},
-) => {
+const styleDataCell = (cell, { align = "left", zebra = false, wrap = true } = {}) => {
   cell.font = font();
   cell.border = thinBorder;
   cell.alignment = { vertical: "middle", horizontal: align, wrapText: wrap };
@@ -206,18 +175,13 @@ const availabilityColor = (availability) => {
   return C.amber;
 };
 
-// ------------------------------------------------------------------
-// Sheet per report type: price comparison matrix (products x competitors)
-// ------------------------------------------------------------------
-
-/** Writes one matrix cell. Returns true when the cell got its own fill. */
 const writeMatrixCell = (cell, record, column, isLowest) => {
   cell.border = thinBorder;
   cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
   cell.font = font();
 
   if (record === undefined) {
-    cell.value = null; // no data -> blank
+    cell.value = null;
     return false;
   }
   if (record === null) {
@@ -261,20 +225,23 @@ const writeMatrixCell = (cell, record, column, isLowest) => {
   return false;
 };
 
-const buildMatrixSheet = (workbook, model, section) => {
-  const { columns, categories } = section;
-  const { period } = model;
-  const FIXED = 4; // No., Item Code, Article Name, Unit
+/**
+ * Builds one matrix sheet for a given (section, cycle) pair.
+ * cycleBlock = { period, label, columns, categories, summary }
+ */
+const buildMatrixSheet = (workbook, model, section, cycleBlock) => {
+  const { columns, categories } = cycleBlock;
+  const period = model.period;
+  const FIXED = 4;
   const colCount = FIXED + columns.length;
   const barCols = Math.max(colCount, 5);
 
-  const sheet = workbook.addWorksheet(
-    safeSheetName(`${section.label} Prices`),
-    {
-      views: [{ showGridLines: false }],
-      properties: { tabColor: { argb: C.green } },
-    },
-  );
+  const cycleLabel = cycleBlock.label;
+  const sheetName = safeSheetName(`${section.label} - ${cycleLabel}`);
+  const sheet = workbook.addWorksheet(sheetName, {
+    views: [{ showGridLines: false }],
+    properties: { tabColor: { argb: C.green } },
+  });
 
   sheet.columns = [
     { width: 6 },
@@ -288,21 +255,22 @@ const buildMatrixSheet = (workbook, model, section) => {
     sheet,
     1,
     barCols,
-    `${section.label} - Price Comparison by Category`,
-    `${period.name}  |  ${formatDate(period.startDate)} - ${formatDate(period.endDate)}  |  Prices in ${CURRENCY}`,
-    null,
+    `${section.label} — Survey Cycle: ${cycleLabel}`,
+    `${formatDate(cycleBlock.period.startDate)} – ${formatDate(cycleBlock.period.endDate)}${cycleBlock.period.status ? `  |  ${cycleBlock.period.status}` : ""
+    }  |  Prices in ${CURRENCY}`,
+    cycleLabel,
   );
 
   const hasQueens = columns.some((c) => c.kind === "QUEENS");
-  addNote(
-    sheet,
-    3,
-    barCols,
+  sheet.mergeCells(`A3:${colLetter(barCols)}3`);
+  const noteCell = sheet.getCell("A3");
+  noteCell.value =
     `Prices in ${CURRENCY}. Green = lowest competitor price in the row. ` +
-      (hasQueens ? "Queens Price = current price from the price list. " : "") +
-      `"Missing" = assigned but not recorded. Blank = no data.`,
-    18,
-  );
+    (hasQueens ? "Queens Price = current price from the price list. " : "") +
+    `"Missing" = assigned but not recorded. Blank = no data.`;
+  noteCell.font = font({ size: 9, color: { argb: C.muted } });
+  noteCell.alignment = { vertical: "top", wrapText: true };
+  sheet.getRow(3).height = 18;
 
   const HEADER_ROW = 5;
   const headerRow = sheet.getRow(HEADER_ROW);
@@ -338,8 +306,7 @@ const buildMatrixSheet = (workbook, model, section) => {
         .filter((c) => c.kind === "COMPETITOR")
         .map((c) => product.cells[c.key])
         .filter(
-          (rec) =>
-            rec && rec.availability === "AVAILABLE" && rec.price !== null,
+          (rec) => rec && rec.availability === "AVAILABLE" && rec.price !== null,
         )
         .map((rec) => rec.price);
       const lowest = prices.length > 1 ? Math.min(...prices) : null;
@@ -395,10 +362,11 @@ const buildMatrixSheet = (workbook, model, section) => {
   return sheet;
 };
 
-// ------------------------------------------------------------------
-// Last sheet: flat observation details (filterable)
-// ------------------------------------------------------------------
-
+/**
+ * Details sheet — one row per (cycle, section, category, product, column).
+ * Adds a "Survey cycle" column so data stays traceable after the sheet
+ * structure changed.
+ */
 const buildDetailsSheet = (workbook, model) => {
   const sheet = workbook.addWorksheet("Observation Details", {
     views: [{ showGridLines: true }],
@@ -407,6 +375,7 @@ const buildDetailsSheet = (workbook, model) => {
 
   const columns = [
     { header: "Report", key: "report", width: 16, align: "left" },
+    { header: "Survey cycle", key: "cycle", width: 22, align: "left" },
     { header: "Competitor", key: "competitor", width: 20, align: "left" },
     { header: "Store", key: "store", width: 28, align: "left" },
     { header: "City", key: "city", width: 16, align: "left" },
@@ -421,12 +390,7 @@ const buildDetailsSheet = (workbook, model) => {
     { header: "Review status", key: "review", width: 15, align: "left" },
     { header: "Captured at", key: "capturedAt", width: 20, align: "left" },
     { header: "Auditor", key: "auditor", width: 20, align: "left" },
-    {
-      header: "Other observations",
-      key: "alternatives",
-      width: 12,
-      align: "right",
-    },
+    { header: "Other observations", key: "alternatives", width: 12, align: "right" },
     { header: "Notes", key: "notes", width: 36, align: "left" },
   ];
   const priceCol = columns.findIndex((c) => c.key === "price") + 1;
@@ -444,8 +408,9 @@ const buildDetailsSheet = (workbook, model) => {
     columns.map((c) => c.align),
   );
 
-  const emptyData = (section, column, product, category) => ({
+  const emptyData = (section, cycleBlock, column, product, category) => ({
     report: section.label,
+    cycle: cycleBlock.label,
     competitor: column.label,
     store: "",
     city: "",
@@ -466,76 +431,79 @@ const buildDetailsSheet = (workbook, model) => {
 
   let rowIndex = 2;
   for (const section of model.sections) {
-    for (const category of section.categories) {
-      for (const product of category.products) {
-        for (const column of section.columns) {
-          const record = product.cells[column.key];
-          if (record === undefined) continue;
+    const cycles = section.cycles || [];
+    for (const cycleBlock of cycles) {
+      for (const category of cycleBlock.categories) {
+        for (const product of category.products) {
+          for (const column of cycleBlock.columns) {
+            const record = product.cells[column.key];
+            if (record === undefined) continue;
 
-          const base = emptyData(section, column, product, category);
-          let data;
-          let availabilityKey = null;
+            const base = emptyData(section, cycleBlock, column, product, category);
+            let data;
+            let availabilityKey = null;
 
-          if (record === null) {
-            data = { ...base, availability: "Not recorded" };
-          } else if (column.kind === "QUEENS") {
-            data = {
-              ...base,
-              store: "Queens price list",
-              availability: AVAILABILITY_LABELS.AVAILABLE,
-              price: record.price,
-              capturedAt: formatDateTime(record.effectiveFrom),
-              notes:
-                `Current price, effective from ${formatDate(record.effectiveFrom)}` +
-                (record.source ? ` (${record.source})` : ""),
-            };
-            availabilityKey = "AVAILABLE";
-          } else {
-            data = {
-              ...base,
-              store: record.storeName,
-              city: record.city ?? "",
-              area: record.area ?? "",
-              availability:
-                AVAILABILITY_LABELS[record.availability] || record.availability,
-              price: record.availability === "AVAILABLE" ? record.price : null,
-              packageSize: record.packageSize ?? "",
-              unit: record.observedUnit || product.unit,
-              review: REVIEW_LABELS[record.reviewStatus] || record.reviewStatus,
-              capturedAt: formatDateTime(record.capturedAt),
-              auditor: record.auditorName,
-              alternatives: record.alternativesCount,
-              notes: record.notes || "",
-            };
-            availabilityKey = record.availability;
-          }
+            if (record === null) {
+              data = { ...base, availability: "Not recorded" };
+            } else if (column.kind === "QUEENS") {
+              data = {
+                ...base,
+                store: "Queens price list",
+                availability: AVAILABILITY_LABELS.AVAILABLE,
+                price: record.price,
+                capturedAt: formatDateTime(record.effectiveFrom),
+                notes:
+                  `Current price, effective from ${formatDate(record.effectiveFrom)}` +
+                  (record.source ? ` (${record.source})` : ""),
+              };
+              availabilityKey = "AVAILABLE";
+            } else {
+              data = {
+                ...base,
+                store: record.storeName,
+                city: record.city ?? "",
+                area: record.area ?? "",
+                availability:
+                  AVAILABILITY_LABELS[record.availability] || record.availability,
+                price: record.availability === "AVAILABLE" ? record.price : null,
+                packageSize: record.packageSize ?? "",
+                unit: record.observedUnit || product.unit,
+                review: REVIEW_LABELS[record.reviewStatus] || record.reviewStatus,
+                capturedAt: formatDateTime(record.capturedAt),
+                auditor: record.auditorName,
+                alternatives: record.alternativesCount,
+                notes: record.notes || "",
+              };
+              availabilityKey = record.availability;
+            }
 
-          const row = sheet.getRow(rowIndex);
-          const zebra = rowIndex % 2 === 1;
+            const row = sheet.getRow(rowIndex);
+            const zebra = rowIndex % 2 === 1;
 
-          columns.forEach((c, i) => {
-            const cell = row.getCell(i + 1);
-            cell.value = data[c.key];
-            styleDataCell(cell, {
-              align: c.align,
-              zebra,
-              wrap: c.key === "notes",
+            columns.forEach((c, i) => {
+              const cell = row.getCell(i + 1);
+              cell.value = data[c.key];
+              styleDataCell(cell, {
+                align: c.align,
+                zebra,
+                wrap: c.key === "notes",
+              });
             });
-          });
 
-          row.getCell(priceCol).numFmt = PRICE_FORMAT;
+            row.getCell(priceCol).numFmt = PRICE_FORMAT;
 
-          const availCell = row.getCell(availCol);
-          if (availabilityKey === null) {
-            availCell.font = font({ italic: true, color: { argb: C.muted } });
-          } else {
-            availCell.font = font({
-              bold: true,
-              color: { argb: availabilityColor(availabilityKey) },
-            });
+            const availCell = row.getCell(availCol);
+            if (availabilityKey === null) {
+              availCell.font = font({ italic: true, color: { argb: C.muted } });
+            } else {
+              availCell.font = font({
+                bold: true,
+                color: { argb: availabilityColor(availabilityKey) },
+              });
+            }
+
+            rowIndex += 1;
           }
-
-          rowIndex += 1;
         }
       }
     }
@@ -553,15 +521,6 @@ const buildDetailsSheet = (workbook, model) => {
   return sheet;
 };
 
-// ------------------------------------------------------------------
-// Public API
-// ------------------------------------------------------------------
-
-/**
- * Builds the Excel report from the shared report model.
- * Sheets: one price-comparison sheet per report type, then Observation Details.
- * Returns a Node Buffer containing the .xlsx file.
- */
 export const buildObservationReportExcel = async (model) => {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = model.generatedBy || "Price Audit System";
@@ -571,8 +530,29 @@ export const buildObservationReportExcel = async (model) => {
   workbook.title = `Competitor Price Audit Report - ${model.period.name}`;
   workbook.subject = safeSheetName(model.period.name);
 
+  // One matrix sheet per (section, cycle) pair.
   for (const section of model.sections) {
-    buildMatrixSheet(workbook, model, section);
+    const cycles = section.cycles || [];
+    if (cycles.length === 0) {
+      // Fallback: no cycles resolved — render one sheet from the flat section.
+      buildMatrixSheet(workbook, model, section, {
+        label: "Report Range",
+        period: {
+          id: "flat",
+          name: "Report Range",
+          status: null,
+          startDate: model.period.startDate,
+          endDate: model.period.endDate,
+        },
+        columns: section.columns,
+        categories: section.categories,
+        summary: section.summary,
+      });
+      continue;
+    }
+    for (const cycleBlock of cycles) {
+      buildMatrixSheet(workbook, model, section, cycleBlock);
+    }
   }
 
   buildDetailsSheet(workbook, model);

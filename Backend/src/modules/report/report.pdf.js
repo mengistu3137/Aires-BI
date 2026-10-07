@@ -17,11 +17,12 @@ const C = {
   zebra: "#F8FAFC",
   white: "#FFFFFF",
   amber: "#D97706",
-  // Chart Series Colors matching executive manual report
-  chartQueens: "#1B4332", // Dark Green
-  chartComp1: "#2D6A4F", // Medium Green
-  chartComp2: "#D97706", // Amber / Orange
-  chartComp3: "#0284C7", // Sky Blue
+  cycleBg: "#E8F0FA",
+  cycleBorder: "#1F4E79",
+  chartQueens: "#1B4332",
+  chartComp1: "#2D6A4F",
+  chartComp2: "#D97706",
+  chartComp3: "#0284C7",
 };
 
 const bottomLimit = (doc) => doc.page.height - doc.page.margins.bottom;
@@ -37,7 +38,6 @@ const drawExecutiveCoverPage = (doc, model) => {
   const left = doc.page.margins.left;
   let y = doc.page.margins.top;
 
-  // 1. Centered Header Block
   doc
     .font("Helvetica-Bold")
     .fontSize(16)
@@ -62,7 +62,6 @@ const drawExecutiveCoverPage = (doc, model) => {
     );
   y += 28;
 
-  // 2. Executive Operational Overview
   doc
     .font("Helvetica-Bold")
     .fontSize(11)
@@ -86,7 +85,6 @@ const drawExecutiveCoverPage = (doc, model) => {
     .text(overviewText, left, y, { width: W, lineGap: 3 });
   y += doc.heightOfString(overviewText, { width: W, lineGap: 3 }) + 22;
 
-  // 3. Price Benchmark Comparison Graph
   drawPriceComparisonChart(doc, model, left, y, W);
 };
 
@@ -101,17 +99,15 @@ const drawPriceComparisonChart = (doc, model, x0, y0, totalW) => {
   const chartY = y0 + 26;
   const chartH = 220;
   const chartW = totalW - 40;
-  const chartX = x0 + 35; // margin for Y-axis numbers
+  const chartX = x0 + 35;
 
-  // Extract up to 6 products from the first section
   const section = model.sections?.[0];
   const sampleProducts = (section?.categories?.[0]?.products || []).slice(0, 6);
   if (sampleProducts.length === 0) return;
 
-  const columns = section.columns.slice(0, 4); // Queens + up to 3 competitors
+  const columns = section.columns.slice(0, 4);
   const seriesColors = [C.chartQueens, C.chartComp1, C.chartComp2, C.chartComp3];
 
-  // Draw Legend at the top-right
   let legendX = chartX + chartW - columns.length * 90;
   const legendY = chartY - 14;
   columns.forEach((col, idx) => {
@@ -125,7 +121,6 @@ const drawPriceComparisonChart = (doc, model, x0, y0, totalW) => {
     legendX += 90;
   });
 
-  // Calculate Max Value for scale
   let maxPrice = 350;
   sampleProducts.forEach((p) => {
     columns.forEach((col) => {
@@ -136,7 +131,6 @@ const drawPriceComparisonChart = (doc, model, x0, y0, totalW) => {
     });
   });
 
-  // Y-Axis Ticks & Gridlines
   const steps = 7;
   const stepVal = maxPrice / steps;
   doc.lineWidth(0.5).strokeColor(C.gridLine);
@@ -144,11 +138,7 @@ const drawPriceComparisonChart = (doc, model, x0, y0, totalW) => {
   for (let s = 0; s <= steps; s++) {
     const val = Math.round(s * stepVal);
     const lineY = chartY + chartH - (s / steps) * chartH;
-
-    // Gridline
     doc.moveTo(chartX, lineY).lineTo(chartX + chartW, lineY).stroke();
-
-    // Y-Axis Label
     doc
       .font("Helvetica")
       .fontSize(7)
@@ -156,7 +146,6 @@ const drawPriceComparisonChart = (doc, model, x0, y0, totalW) => {
       .text(String(val), x0, lineY - 4, { width: 30, align: "right" });
   }
 
-  // Y-Axis Title
   doc.save();
   doc.rotate(-90, { origin: [x0 - 15, chartY + chartH / 2] });
   doc
@@ -166,14 +155,12 @@ const drawPriceComparisonChart = (doc, model, x0, y0, totalW) => {
     .text("Price in ETB", x0 - 45, chartY + chartH / 2, { lineBreak: false });
   doc.restore();
 
-  // Draw Bars for each product
   const groupW = chartW / sampleProducts.length;
   const barW = Math.min(16, (groupW * 0.7) / columns.length);
   const groupPad = (groupW - barW * columns.length) / 2;
 
   sampleProducts.forEach((prod, pIdx) => {
     const groupX = chartX + pIdx * groupW + groupPad;
-
     columns.forEach((col, cIdx) => {
       const cell = prod.cells?.[col.key];
       const price =
@@ -183,7 +170,6 @@ const drawPriceComparisonChart = (doc, model, x0, y0, totalW) => {
       const barH = (price / maxPrice) * chartH;
       const barX = groupX + cIdx * barW;
       const barY = chartY + chartH - barH;
-
       if (barH > 0) {
         doc
           .save()
@@ -193,7 +179,6 @@ const drawPriceComparisonChart = (doc, model, x0, y0, totalW) => {
       }
     });
 
-    // Product Name Label below chart
     doc
       .font("Helvetica")
       .fontSize(7)
@@ -205,7 +190,6 @@ const drawPriceComparisonChart = (doc, model, x0, y0, totalW) => {
       });
   });
 
-  // Base X-Axis line
   doc
     .save()
     .lineWidth(1)
@@ -217,25 +201,55 @@ const drawPriceComparisonChart = (doc, model, x0, y0, totalW) => {
 };
 
 // ──────────────────────────────────────────────────────────────────
-// Page 2+: Master Pricing Matrix (uses per-category layout — category
-// name printed once per category, not repeated per product) &
-// Field Summary Sourcing Insights.
+// Page 2+: Master Pricing Matrix — one table per survey cycle
 // ──────────────────────────────────────────────────────────────────
 
-const drawMatrixTable = (doc, section, startY) => {
-  const W = contentWidth(doc);
-  const left = doc.page.margins.left;
-  let y = startY;
+/**
+ * Draws the cycle header band:
+ *
+ *   ┌──────────────────────────────────────────────┐
+ *   │ Survey Cycle: Oct 01 (OPEN)   · 01 Oct 2026  │
+ *   └──────────────────────────────────────────────┘
+ */
+const drawCycleHeader = (doc, cycle, left, W, y) => {
+  const h = 22;
+  doc.save().rect(left, y, W, h).fill(C.cycleBg).restore();
+  doc
+    .save()
+    .lineWidth(2)
+    .strokeColor(C.cycleBorder)
+    .moveTo(left, y)
+    .lineTo(left, y + h)
+    .stroke()
+    .restore();
 
-  // Header
+  const label = `Survey Cycle: ${cycle.period.name}${cycle.period.status ? ` (${cycle.period.status})` : ""
+    }`;
   doc
     .font("Helvetica-Bold")
-    .fontSize(12)
-    .fillColor(C.headerBlue)
-    .text("Master Competitor Pricing & Baseline Matrix", left, y);
-  y += 18;
+    .fontSize(9.5)
+    .fillColor(C.cycleBorder)
+    .text(label, left + 8, y + 6, { width: W - 16, lineBreak: false });
 
-  const columns = section.columns;
+  const rangeStr = `${formatDate(cycle.period.startDate)} – ${formatDate(cycle.period.endDate)}`;
+  doc
+    .font("Helvetica")
+    .fontSize(7.5)
+    .fillColor(C.muted)
+    .text(rangeStr, left + 8, y + 6, {
+      width: W - 16,
+      align: "right",
+      lineBreak: false,
+    });
+
+  return y + h + 4;
+};
+
+/**
+ * Draws the table headers and rows for one cycle block. Returns the new y.
+ */
+const drawCycleTable = (doc, cycle, section, left, W, startY) => {
+  const columns = cycle.columns;
   const noW = 24;
   const catW = 70;
   const nameW = 140;
@@ -254,7 +268,9 @@ const drawMatrixTable = (doc, section, startY) => {
     })),
   ];
 
-  // Draw Table Header
+  let y = startY;
+
+  // Table header
   const headerH = 26;
   doc.save().rect(left, y, W, headerH).fill(C.navy).restore();
   doc.font("Helvetica-Bold").fontSize(8).fillColor(C.white);
@@ -269,19 +285,31 @@ const drawMatrixTable = (doc, section, startY) => {
   });
   y += headerH;
 
-  // Table Data Rows — iterate per category so the category name
-  // appears once per category (matching the report config), not
-  // repeated on every product row.
   let counter = 1;
   let zebra = false;
 
-  for (const cat of section.categories) {
-    // Category header band (spans full table width)
+  for (const cat of cycle.categories) {
     const catHeaderH = 16;
     if (y + catHeaderH > bottomLimit(doc) - 70) {
       doc.addPage();
       y = doc.page.margins.top;
+      // Re-draw the cycle banner at the top of the continuation page so
+      // the reader always knows which cycle this page belongs to.
+      y = drawCycleHeader(doc, cycle, left, W, y);
+      // Re-draw table header
+      doc.save().rect(left, y, W, headerH).fill(C.navy).restore();
+      doc.font("Helvetica-Bold").fontSize(8).fillColor(C.white);
+      curX = left;
+      tableCols.forEach((col) => {
+        doc.text(col.label, curX + 3, y + 8, {
+          width: col.width - 6,
+          align: col.align,
+        });
+        curX += col.width;
+      });
+      y += headerH;
     }
+
     doc.save().rect(left, y, W, catHeaderH).fill(C.zebra).restore();
     doc
       .font("Helvetica-Bold")
@@ -295,6 +323,18 @@ const drawMatrixTable = (doc, section, startY) => {
       if (y + rowH > bottomLimit(doc) - 70) {
         doc.addPage();
         y = doc.page.margins.top;
+        y = drawCycleHeader(doc, cycle, left, W, y);
+        doc.save().rect(left, y, W, headerH).fill(C.navy).restore();
+        doc.font("Helvetica-Bold").fontSize(8).fillColor(C.white);
+        curX = left;
+        tableCols.forEach((col) => {
+          doc.text(col.label, curX + 3, y + 8, {
+            width: col.width - 6,
+            align: col.align,
+          });
+          curX += col.width;
+        });
+        y += headerH;
       }
 
       if (zebra) {
@@ -302,7 +342,6 @@ const drawMatrixTable = (doc, section, startY) => {
       }
       zebra = !zebra;
 
-      // Grid line
       doc
         .save()
         .lineWidth(0.5)
@@ -313,7 +352,6 @@ const drawMatrixTable = (doc, section, startY) => {
         .restore();
 
       curX = left;
-      // No.
       doc
         .font("Helvetica")
         .fontSize(7.5)
@@ -323,15 +361,15 @@ const drawMatrixTable = (doc, section, startY) => {
           align: "center",
         });
       curX += noW;
-      // Category — left blank since category header band above already
-      // identifies the category (avoids "dairy dairy dairy ..." repetition).
+
+      // Category cell intentionally blank — the band above already labels it.
       doc
         .font("Helvetica")
         .fontSize(7.5)
         .fillColor(C.muted)
         .text("", curX + 2, y + 5, { width: catW - 4, align: "left" });
       curX += catW;
-      // Name
+
       doc
         .font("Helvetica-Bold")
         .fontSize(7.5)
@@ -341,7 +379,7 @@ const drawMatrixTable = (doc, section, startY) => {
           align: "left",
         });
       curX += nameW;
-      // Unit
+
       doc
         .font("Helvetica")
         .fontSize(7.5)
@@ -352,7 +390,6 @@ const drawMatrixTable = (doc, section, startY) => {
         });
       curX += unitW;
 
-      // Price Columns
       columns.forEach((col) => {
         const cell = prod.cells?.[col.key];
         let valStr = "—";
@@ -383,8 +420,60 @@ const drawMatrixTable = (doc, section, startY) => {
     }
   }
 
+  return y;
+};
+
+const drawMatrixTable = (doc, section, startY) => {
+  const W = contentWidth(doc);
+  const left = doc.page.margins.left;
+  let y = startY;
+
+  // Section header
+  doc
+    .font("Helvetica-Bold")
+    .fontSize(12)
+    .fillColor(C.headerBlue)
+    .text(`Master Competitor Pricing & Baseline Matrix — ${section.label}`, left, y);
+  y += 18;
+
+  // If the section has only one cycle, still show the cycle banner for
+  // consistency. If there are no cycles (shouldn't happen), fall back to
+  // drawing one table using section.categories.
+  const cycles = section.cycles && section.cycles.length > 0
+    ? section.cycles
+    : [
+      {
+        period: {
+          id: "flat",
+          name: "Report Range",
+          status: null,
+          startDate: null,
+          endDate: null,
+        },
+        label: "Report Range",
+        columns: section.columns,
+        categories: section.categories,
+        summary: section.summary,
+      },
+    ];
+
+  for (let i = 0; i < cycles.length; i += 1) {
+    const cycle = cycles[i];
+
+    // Ensure room for header + a few rows before starting a new cycle.
+    if (y + 80 > bottomLimit(doc) - 70) {
+      doc.addPage();
+      y = doc.page.margins.top;
+    } else if (i > 0) {
+      y += 14;
+    }
+
+    y = drawCycleHeader(doc, cycle, left, W, y);
+    y = drawCycleTable(doc, cycle, section, left, W, y);
+  }
+
   // ───────────────────────────────────────────────────────────
-  // Field Summary Sourcing & Insights Section
+  // Field Summary Sourcing & Insights (once, at the end of the section)
   // ───────────────────────────────────────────────────────────
   if (y + 110 > bottomLimit(doc)) {
     doc.addPage();
@@ -465,7 +554,7 @@ export const buildObservationReportPdf = (model) =>
     try {
       const doc = new PDFDocument({
         size: "A4",
-        layout: "portrait", // Portrait layout matches the executive report specification
+        layout: "portrait",
         margins: { top: 36, bottom: 40, left: 36, right: 36 },
         bufferPages: true,
         info: {
@@ -483,9 +572,8 @@ export const buildObservationReportPdf = (model) =>
       // Page 1: Dashboard with Narrative & Chart
       drawExecutiveCoverPage(doc, model);
 
-      // Page 2+: Master Price Matrix & Sourcing Notes
-      // Loop over all sections (both report types) so the config-driven
-      // layout is honored.
+      // Page 2+: One matrix table block per section (which itself contains
+      // one sub-table per survey cycle).
       const sections = model.sections || [];
       sections.forEach((section) => {
         doc.addPage();
