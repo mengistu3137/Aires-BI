@@ -60,6 +60,15 @@ const blankCounters = () => ({
   notFound: 0,
 });
 
+const mergeCounters = (target, source) => {
+  target.items += source.items;
+  target.recorded += source.recorded;
+  target.missing += source.missing;
+  target.available += source.available;
+  target.outOfStock += source.outOfStock;
+  target.notFound += source.notFound;
+};
+
 const tally = (counters, record) => {
   counters.items += 1;
   if (!record) {
@@ -108,9 +117,10 @@ const loadCurrentQueensPrices = async (productIds) => {
   }
   return result;
 };
-// In Backend/src/modules/report/report.service.js
 
-// In Backend/src/modules/report/report.service.js
+// ============================================================
+// Date-range resolution (unchanged from your last version)
+// ============================================================
 
 const resolveDateRange = async ({ surveyPeriodId, rangeType, startDate, endDate }) => {
   const now = new Date();
@@ -175,11 +185,7 @@ const resolveDateRange = async ({ surveyPeriodId, rangeType, startDate, endDate 
     };
   }
 
-  // 5. No period and no range supplied → report on ALL survey data ever gathered.
-  //    We intentionally do NOT fall back to the latest active period, because
-  //    the default scope is "all survey periods gathered so far".
-  //    Returning periodRecord: null + isDateBoundOnly: false tells loadRawData
-  //    to apply NO date/period filter, so every observation is included.
+  // 5. No period and no range supplied → ALL survey data gathered so far.
   const allTime = await prisma.priceObservation.aggregate({
     _min: { capturedAt: true },
     _max: { capturedAt: true },
@@ -199,6 +205,11 @@ const resolveDateRange = async ({ surveyPeriodId, rangeType, startDate, endDate 
     isDateBoundOnly: false,
   };
 };
+
+// ============================================================
+// Raw data loading
+// ============================================================
+
 const loadRawData = async ({
   surveyPeriodId,
   rangeType,
@@ -226,7 +237,7 @@ const loadRawData = async ({
     status: rangeInfo.periodRecord?.status || "OPEN",
   };
 
-  // Build the observation filter
+  // Observation filter
   const observationWhere = {
     audit: {
       status: { notIn: EXCLUDED_AUDIT_STATUSES },
@@ -236,17 +247,15 @@ const loadRawData = async ({
   };
 
   if (rangeInfo.periodRecord) {
-    // Exact survey period binding (OPEN or CLOSED) — no date cutoff
     observationWhere.audit.surveyPeriodId = rangeInfo.periodRecord.id;
   } else if (rangeInfo.isDateBoundOnly) {
-    // Pure date range filtering
     observationWhere.capturedAt = {
       gte: rangeInfo.startDate,
       lte: rangeInfo.endDate,
     };
   }
 
-  // Build the assignment items filter
+  // Assignment items filter
   const assignmentWhere = {
     assignment: {
       status: { not: "CANCELLED" },
@@ -279,7 +288,13 @@ const loadRawData = async ({
         notes: true,
         product: { select: PRODUCT_SELECT },
         auditor: { select: { id: true, name: true } },
-        audit: { select: { id: true, store: { select: STORE_SELECT } } },
+        audit: {
+          select: {
+            id: true,
+            surveyPeriodId: true,
+            store: { select: STORE_SELECT },
+          },
+        },
       },
     }),
     prisma.assignmentItem.findMany({
@@ -288,11 +303,33 @@ const loadRawData = async ({
         productId: true,
         product: { select: PRODUCT_SELECT },
         assignment: {
-          select: { storeId: true, store: { select: STORE_SELECT } },
+          select: {
+            storeId: true,
+            surveyPeriodId: true,
+            store: { select: STORE_SELECT },
+          },
         },
       },
     }),
   ]);
+
+  // Determine which survey cycles to include in the report.
+  // We collect every surveyPeriodId that appears in the filtered data.
+  const cycleIds = new Set();
+  for (const obs of observations) {
+    if (obs.audit?.surveyPeriodId) cycleIds.add(obs.audit.surveyPeriodId);
+  }
+  for (const item of assignmentItems) {
+    if (item.assignment?.surveyPeriodId) cycleIds.add(item.assignment.surveyPeriodId);
+  }
+
+  let cycles = [];
+  if (cycleIds.size > 0) {
+    cycles = await prisma.surveyPeriod.findMany({
+      where: { id: { in: [...cycleIds] } },
+      orderBy: [{ startDate: "desc" }, { id: "desc" }],
+    });
+  }
 
   let queensPrices = new Map();
   if (needsQueens) {
@@ -305,11 +342,18 @@ const loadRawData = async ({
     queensPrices = await loadCurrentQueensPrices(productIds);
   }
 
-  return { period, store, observations, assignmentItems, queensPrices };
+  return { period, store, observations, assignmentItems, queensPrices, cycles };
 };
 
+// ============================================================
+// Section builder (per report type) — now cycle-aware
+// ============================================================
 
-const buildSection = (config, { observations, assignmentItems, queensPrices, store }) => {
+/**
+ * Builds the section content for a single survey cycle.
+ * Returns null when the cycle has no matching products.
+ */
+const buildCycle = (config, cycle, { observations, assignmentItems, queensPrices, store }) => {
   let columns = config.columns;
 
   if (store) {
@@ -345,6 +389,7 @@ const buildSection = (config, { observations, assignmentItems, queensPrices, sto
   };
 
   for (const item of assignmentItems) {
+    if (item.assignment?.surveyPeriodId !== cycle.id) continue;
     const column = matchColumn(competitorColumns, item.assignment.store?.competitor?.name);
     if (!column || !config.acceptsCategory(categoryOf(item.product))) continue;
 
@@ -354,6 +399,7 @@ const buildSection = (config, { observations, assignmentItems, queensPrices, sto
   }
 
   for (const obs of observations) {
+    if (obs.audit?.surveyPeriodId !== cycle.id) continue;
     const obsStore = obs.audit.store;
     const column = matchColumn(competitorColumns, obsStore?.competitor?.name);
     if (!column || !config.acceptsCategory(categoryOf(obs.product))) continue;
@@ -504,9 +550,13 @@ const buildSection = (config, { observations, assignmentItems, queensPrices, sto
   };
 
   return {
-    type: config.key,
-    label: config.label,
-    description: config.description,
+    cycle: {
+      id: cycle.id,
+      name: cycle.name,
+      status: cycle.status,
+      startDate: cycle.startDate,
+      endDate: cycle.endDate,
+    },
     columns: columns.map((c) => ({
       key: c.key,
       label: c.label,
@@ -518,12 +568,198 @@ const buildSection = (config, { observations, assignmentItems, queensPrices, sto
   };
 };
 
+/**
+ * Aggregates per-cycle summaries into one section-level summary so
+ * consumers that only read `section.summary` (AI narrative, headers)
+ * continue to see the whole-section picture.
+ */
+const aggregateSummaries = (cycles) => {
+  if (cycles.length === 0) return null;
+  if (cycles.length === 1) return cycles[0].summary;
+
+  const totals = blankCounters();
+  const review = { APPROVED: 0, PENDING: 0, NEEDS_REVIEW: 0 };
+  const byCategoryMap = new Map();
+  const byCompetitorMap = new Map();
+
+  // Store/product/competitor counts are uniqueness-based, not sum-based.
+  // Use the max across cycles so a competitor that had stores in any cycle
+  // is counted once, but if all cycles have the same 3 competitors, we
+  // still report 3.
+  let competitors = 0;
+  let stores = 0;
+  let products = 0;
+  let duplicatesResolved = 0;
+  let queensProducts = 0;
+  let queensPriced = 0;
+  let hasQueens = false;
+
+  let lowest = null;
+  let highest = null;
+
+  for (const c of cycles) {
+    const s = c.summary;
+    mergeCounters(totals, {
+      items: s.totals.items,
+      recorded: s.totals.recorded,
+      missing: s.totals.missing,
+      available: s.totals.available,
+      outOfStock: s.totals.outOfStock,
+      notFound: s.totals.notFound,
+    });
+    review.APPROVED += s.review.APPROVED || 0;
+    review.PENDING += s.review.PENDING || 0;
+    review.NEEDS_REVIEW += s.review.NEEDS_REVIEW || 0;
+    duplicatesResolved += s.totals.duplicatesResolved || 0;
+
+    competitors = Math.max(competitors, s.totals.competitors);
+    stores = Math.max(stores, s.totals.stores);
+    products += s.totals.products;
+
+    if (s.queens) {
+      hasQueens = true;
+      queensProducts += s.queens.products;
+      queensPriced += s.queens.priced;
+    }
+
+    for (const cat of s.byCategory) {
+      const cur = byCategoryMap.get(cat.category) || {
+        category: cat.category,
+        products: 0,
+        items: 0,
+        recorded: 0,
+        missing: 0,
+        available: 0,
+        outOfStock: 0,
+        notFound: 0,
+      };
+      cur.products += cat.products;
+      cur.items += cat.items;
+      cur.recorded += cat.recorded;
+      cur.missing += cat.missing;
+      cur.available += cat.available;
+      cur.outOfStock += cat.outOfStock;
+      cur.notFound += cat.notFound;
+      byCategoryMap.set(cat.category, cur);
+    }
+
+    for (const comp of s.byCompetitor) {
+      const cur = byCompetitorMap.get(comp.competitorKey) || {
+        competitorKey: comp.competitorKey,
+        competitor: comp.competitor,
+        stores: 0,
+        items: 0,
+        recorded: 0,
+        missing: 0,
+        available: 0,
+        outOfStock: 0,
+        notFound: 0,
+      };
+      cur.stores = Math.max(cur.stores, comp.stores);
+      cur.items += comp.items;
+      cur.recorded += comp.recorded;
+      cur.missing += comp.missing;
+      cur.available += comp.available;
+      cur.outOfStock += comp.outOfStock;
+      cur.notFound += comp.notFound;
+      byCompetitorMap.set(comp.competitorKey, cur);
+    }
+
+    if (s.priceRange) {
+      if (!lowest || s.priceRange.lowest.price < lowest.price) lowest = s.priceRange.lowest;
+      if (!highest || s.priceRange.highest.price > highest.price) highest = s.priceRange.highest;
+    }
+  }
+
+  return {
+    totals: {
+      competitors,
+      stores,
+      products,
+      ...withCoverage(totals),
+      availabilityRatePct: pct(totals.available, totals.recorded),
+      duplicatesResolved,
+    },
+    review,
+    queens: hasQueens ? { products: queensProducts, priced: queensPriced } : null,
+    byCategory: [...byCategoryMap.values()].map((c) => ({
+      category: c.category,
+      products: c.products,
+      ...withCoverage(c),
+    })),
+    byCompetitor: [...byCompetitorMap.values()].map((c) => ({
+      competitorKey: c.competitorKey,
+      competitor: c.competitor,
+      stores: c.stores,
+      ...withCoverage(c),
+    })),
+    priceRange: lowest && highest ? { lowest, highest } : null,
+    cyclesCount: cycles.length,
+  };
+};
+
+const buildSection = (config, { observations, assignmentItems, queensPrices, store, cycles }) => {
+  // Build one sub-section per survey cycle (skipping cycles with no data).
+  const cycleBlocks = cycles
+    .map((cycle) =>
+      buildCycle(config, cycle, { observations, assignmentItems, queensPrices, store }),
+    )
+    .filter(Boolean);
+
+  if (cycleBlocks.length === 0) return null;
+
+  // Merge all cycles' categories into one flat list for backward-compat
+  // consumers (AI narrative, DOCX, etc.).
+  const flatCategories = [];
+  for (const block of cycleBlocks) {
+    for (const cat of block.categories) {
+      const existing = flatCategories.find((c) => c.name === cat.name);
+      if (existing) {
+        // Merge products; keep the newest observation if a product appears
+        // in multiple cycles.
+        for (const prod of cat.products) {
+          if (!existing.products.find((p) => p.id === prod.id)) {
+            existing.products.push(prod);
+          }
+        }
+      } else {
+        flatCategories.push({ name: cat.name, products: [...cat.products] });
+      }
+    }
+  }
+  flatCategories.sort((a, b) => byText(a.name, b.name));
+  for (const cat of flatCategories) {
+    cat.products.sort((a, b) => byText(a.name, b.name));
+  }
+
+  const columnShape = cycleBlocks[0].columns;
+
+  return {
+    type: config.key,
+    label: config.label,
+    description: config.description,
+    columns: columnShape,
+    // One entry per survey cycle, newest first.
+    cycles: cycleBlocks.map((b) => ({
+      period: b.cycle,
+      label: b.cycle.name,
+      columns: b.columns,
+      categories: b.categories,
+      summary: b.summary,
+    })),
+    // Flattened view across all cycles — used by AI narrative & DOCX.
+    categories: flatCategories,
+    summary: aggregateSummaries(cycleBlocks),
+  };
+};
+
 export const buildReportModel = ({
   period,
   store,
   observations,
   assignmentItems,
   queensPrices,
+  cycles,
   reportTypes,
   user,
 }) => {
@@ -534,6 +770,7 @@ export const buildReportModel = ({
         assignmentItems,
         queensPrices,
         store,
+        cycles,
       }),
     )
     .filter(Boolean);
@@ -634,6 +871,10 @@ export const getAiReportSummary = async (params) => {
     label: section.label,
     competitors: section.columns.filter((c) => c.kind === "COMPETITOR").map((c) => c.label),
     totals: section.summary?.totals,
+    cycles: section.cycles.map((c) => ({
+      cycleLabel: c.label,
+      totals: c.summary?.totals,
+    })),
     sampleHighlights: section.categories.flatMap((cat) =>
       cat.products.slice(0, 10).map((prod) => ({
         category: cat.name,
@@ -771,6 +1012,14 @@ export const getObservationReportSummary = async (params) => {
       description: section.description,
       columns: section.columns,
       summary: section.summary,
+      cycles: section.cycles.map((c) => ({
+        periodId: c.period.id,
+        label: c.label,
+        status: c.period.status,
+        startDate: c.period.startDate,
+        endDate: c.period.endDate,
+        summary: c.summary,
+      })),
     })),
   };
 };
