@@ -1,3 +1,4 @@
+// Backend/src/modules/report/report.service.js
 import prisma from "../../config/db.js";
 import ApiError from "../../utils/api-error.js";
 import { buildObservationReportPdf } from "./report.pdf.js";
@@ -119,7 +120,7 @@ const loadCurrentQueensPrices = async (productIds) => {
 };
 
 // ============================================================
-// Date-range resolution (unchanged from your last version)
+// Date-range resolution
 // ============================================================
 
 const resolveDateRange = async ({ surveyPeriodId, rangeType, startDate, endDate }) => {
@@ -178,7 +179,7 @@ const resolveDateRange = async ({ surveyPeriodId, rangeType, startDate, endDate 
     return {
       startDate: period.startDate,
       endDate: period.endDate,
-      periodName: `${period.name}${period.status ? ` (${period.status})` : ""}`,
+      periodName: period.name, // no "(OPEN)" / "(CLOSED)" suffix
       periodId: period.id,
       periodRecord: period,
       isDateBoundOnly: false,
@@ -272,6 +273,19 @@ const loadRawData = async ({
     };
   }
 
+  // ─────────────────────────────────────────────────────────────
+  // Queen's master list — the canonical row set for the report.
+  // Seed assigns ids 40000000-...-0001, 0002, 0003, ... in exactly
+  // the order shown on the official Queen's product list, so
+  // ORDER BY id ASC reproduces that sequence.
+  // Only active products are included.
+  // ─────────────────────────────────────────────────────────────
+  const masterProducts = await prisma.product.findMany({
+    where: { active: true },
+    orderBy: { id: "asc" },
+    select: PRODUCT_SELECT,
+  });
+
   const [observations, assignmentItems] = await Promise.all([
     prisma.priceObservation.findMany({
       where: observationWhere,
@@ -314,7 +328,6 @@ const loadRawData = async ({
   ]);
 
   // Determine which survey cycles to include in the report.
-  // We collect every surveyPeriodId that appears in the filtered data.
   const cycleIds = new Set();
   for (const obs of observations) {
     if (obs.audit?.surveyPeriodId) cycleIds.add(obs.audit.surveyPeriodId);
@@ -333,52 +346,65 @@ const loadRawData = async ({
 
   let queensPrices = new Map();
   if (needsQueens) {
-    const productIds = [
-      ...new Set([
-        ...observations.map((o) => o.productId),
-        ...assignmentItems.map((i) => i.productId),
-      ]),
-    ];
+    // Load Queen's prices for the FULL master list, since the report
+    // now renders the entire list even when a product had no data.
+    const productIds = masterProducts.map((p) => p.id);
     queensPrices = await loadCurrentQueensPrices(productIds);
   }
 
-  return { period, store, observations, assignmentItems, queensPrices, cycles };
+  return {
+    period,
+    store,
+    observations,
+    assignmentItems,
+    queensPrices,
+    cycles,
+    masterProducts,
+  };
 };
 
 // ============================================================
-// Section builder (per report type) — now cycle-aware
+// Section builder (per report type) — cycle-aware, list-driven
 // ============================================================
 
 /**
  * Builds the section content for a single survey cycle.
- * Returns null when the cycle has no matching products.
+ *
+ * Rows are the Queen's MASTER list (filtered by config.acceptsCategory),
+ * so every product on the list appears — in list order — even if it has
+ * no observations this cycle. Missing cells render as `undefined`, which
+ * the PDF/Excel renderers display as "Not found".
  */
-const buildCycle = (config, cycle, { observations, assignmentItems, queensPrices, store }) => {
+const buildCycle = (
+  config,
+  cycle,
+  { observations, assignmentItems, queensPrices, store, masterProducts },
+) => {
   let columns = config.columns;
 
   if (store) {
     const storeColumn = matchColumn(columns, store.competitor?.name);
     if (!storeColumn) return null;
-    columns = columns.filter((c) => c.kind === "QUEENS" || c.key === storeColumn.key);
+    columns = columns.filter(
+      (c) => c.kind === "QUEENS" || c.key === storeColumn.key,
+    );
   }
 
   const competitorColumns = columns.filter((c) => c.kind === "COMPETITOR");
   const queensColumn = columns.find((c) => c.kind === "QUEENS") || null;
 
-  const productsMap = new Map();
+  // ─────────────────────────────────────────────────────────────
+  // Row set = Queen's master list ∩ this section's categories.
+  // masterProducts is already in canonical (seed) order.
+  // ─────────────────────────────────────────────────────────────
+  const products = masterProducts.filter((p) =>
+    config.acceptsCategory(categoryOf(p)),
+  );
+  if (products.length === 0) return null;
+
+  // Map of (column, product) → best observation/assignment record.
   const pairs = new Map();
   const columnStores = new Map(competitorColumns.map((c) => [c.key, new Set()]));
-
-  const registerProduct = (p) => {
-    if (!p || productsMap.has(p.id)) return;
-    productsMap.set(p.id, {
-      id: p.id,
-      name: p.name,
-      code: p.sku || p.barcode || p.id,
-      unit: p.unit ?? "",
-      category: categoryOf(p),
-    });
-  };
 
   const getPair = (columnKey, productId) => {
     const key = `${columnKey}|${productId}`;
@@ -390,11 +416,13 @@ const buildCycle = (config, cycle, { observations, assignmentItems, queensPrices
 
   for (const item of assignmentItems) {
     if (item.assignment?.surveyPeriodId !== cycle.id) continue;
-    const column = matchColumn(competitorColumns, item.assignment.store?.competitor?.name);
+    const column = matchColumn(
+      competitorColumns,
+      item.assignment.store?.competitor?.name,
+    );
     if (!column || !config.acceptsCategory(categoryOf(item.product))) continue;
 
     columnStores.get(column.key).add(item.assignment.storeId);
-    registerProduct(item.product);
     getPair(column.key, item.productId);
   }
 
@@ -405,12 +433,10 @@ const buildCycle = (config, cycle, { observations, assignmentItems, queensPrices
     if (!column || !config.acceptsCategory(categoryOf(obs.product))) continue;
 
     columnStores.get(column.key).add(obsStore.id);
-    registerProduct(obs.product);
     getPair(column.key, obs.productId).observations.push(obs);
   }
 
-  if (pairs.size === 0) return null;
-
+  // Resolve best observation per pair.
   let duplicatesResolved = 0;
   for (const pair of pairs.values()) {
     const sorted = [...pair.observations].sort(compareObservations);
@@ -443,47 +469,52 @@ const buildCycle = (config, cycle, { observations, assignmentItems, queensPrices
       : null;
   }
 
+  // Group products by category, keeping list order inside each group.
   const categoriesMap = new Map();
-  for (const product of productsMap.values()) {
-    if (!categoriesMap.has(product.category)) {
-      categoriesMap.set(product.category, []);
-    }
-    categoriesMap.get(product.category).push(product);
+  for (const p of products) {
+    const cat = categoryOf(p);
+    if (!categoriesMap.has(cat)) categoriesMap.set(cat, []);
+    categoriesMap.get(cat).push({
+      id: p.id,
+      name: p.name,
+      code: p.sku || p.barcode || p.id,
+      unit: p.unit ?? "",
+      category: cat,
+    });
   }
 
   let queensPriced = 0;
   const categories = [...categoriesMap.keys()].sort(byText).map((name) => ({
     name,
-    products: categoriesMap
-      .get(name)
-      .sort((a, b) => byText(a.name, b.name))
-      .map((product) => {
-        const cells = {};
-        for (const column of columns) {
-          if (column.kind === "QUEENS") {
-            const q = queensPrices.get(product.id);
-            if (q) {
-              queensPriced += 1;
-              cells[column.key] = {
-                kind: "QUEENS",
-                availability: "AVAILABLE",
-                price: Number(q.price),
-                effectiveFrom: q.effectiveFrom,
-                effectiveTo: q.effectiveTo ?? null,
-                source: q.source ?? null,
-              };
-            } else {
-              cells[column.key] = undefined;
-            }
+    products: categoriesMap.get(name).map((product) => {
+      const cells = {};
+      for (const column of columns) {
+        if (column.kind === "QUEENS") {
+          const q = queensPrices.get(product.id);
+          if (q) {
+            queensPriced += 1;
+            cells[column.key] = {
+              kind: "QUEENS",
+              availability: "AVAILABLE",
+              price: Number(q.price),
+              effectiveFrom: q.effectiveFrom,
+              effectiveTo: q.effectiveTo ?? null,
+              source: q.source ?? null,
+            };
           } else {
-            const pair = pairs.get(`${column.key}|${product.id}`);
-            cells[column.key] = pair ? pair.record : undefined;
+            cells[column.key] = undefined;
           }
+        } else {
+          const pair = pairs.get(`${column.key}|${product.id}`);
+          cells[column.key] = pair ? pair.record : undefined;
         }
-        return { ...product, cells };
-      }),
+      }
+      return { ...product, cells };
+    }),
   }));
 
+  // Counters still only track rows that have data — so coverage
+  // percentages are not diluted by "Not found" cells.
   const totalCounters = blankCounters();
   const categoryCounters = new Map(categories.map((c) => [c.name, blankCounters()]));
   const columnCounters = new Map(competitorColumns.map((c) => [c.key, blankCounters()]));
@@ -492,11 +523,13 @@ const buildCycle = (config, cycle, { observations, assignmentItems, queensPrices
   let highest = null;
 
   for (const pair of pairs.values()) {
-    const product = productsMap.get(pair.productId);
+    const product = products.find((p) => p.id === pair.productId);
+    if (!product) continue;
     const column = competitorColumns.find((c) => c.key === pair.columnKey);
+    if (!column) continue;
 
     tally(totalCounters, pair.record);
-    tally(categoryCounters.get(product.category), pair.record);
+    tally(categoryCounters.get(categoryOf(product)), pair.record);
     tally(columnCounters.get(pair.columnKey), pair.record);
 
     if (pair.record) {
@@ -506,7 +539,7 @@ const buildCycle = (config, cycle, { observations, assignmentItems, queensPrices
       if (pair.record.availability === "AVAILABLE" && pair.record.price !== null) {
         const entry = {
           product: product.name,
-          productCode: product.code,
+          productCode: product.sku || product.barcode || product.id,
           competitor: column.label,
           store: pair.record.storeName,
           price: pair.record.price,
@@ -526,14 +559,16 @@ const buildCycle = (config, cycle, { observations, assignmentItems, queensPrices
     totals: {
       competitors: competitorColumns.length,
       stores: allStoreIds.size,
-      products: productsMap.size,
+      // products = size of the Queen's list for this section
+      // (not just products with data this cycle).
+      products: products.length,
       ...withCoverage(totalCounters),
       availabilityRatePct: pct(totalCounters.available, totalCounters.recorded),
       duplicatesResolved,
     },
     review,
     queens: queensColumn
-      ? { products: productsMap.size, priced: queensPriced }
+      ? { products: products.length, priced: queensPriced }
       : null,
     byCategory: categories.map((c) => ({
       category: c.name,
@@ -569,9 +604,7 @@ const buildCycle = (config, cycle, { observations, assignmentItems, queensPrices
 };
 
 /**
- * Aggregates per-cycle summaries into one section-level summary so
- * consumers that only read `section.summary` (AI narrative, headers)
- * continue to see the whole-section picture.
+ * Aggregates per-cycle summaries into one section-level summary.
  */
 const aggregateSummaries = (cycles) => {
   if (cycles.length === 0) return null;
@@ -582,10 +615,6 @@ const aggregateSummaries = (cycles) => {
   const byCategoryMap = new Map();
   const byCompetitorMap = new Map();
 
-  // Store/product/competitor counts are uniqueness-based, not sum-based.
-  // Use the max across cycles so a competitor that had stores in any cycle
-  // is counted once, but if all cycles have the same 3 competitors, we
-  // still report 3.
   let competitors = 0;
   let stores = 0;
   let products = 0;
@@ -614,11 +643,11 @@ const aggregateSummaries = (cycles) => {
 
     competitors = Math.max(competitors, s.totals.competitors);
     stores = Math.max(stores, s.totals.stores);
-    products += s.totals.products;
+    products = Math.max(products, s.totals.products);
 
     if (s.queens) {
       hasQueens = true;
-      queensProducts += s.queens.products;
+      queensProducts = Math.max(queensProducts, s.queens.products);
       queensPriced += s.queens.priced;
     }
 
@@ -633,7 +662,7 @@ const aggregateSummaries = (cycles) => {
         outOfStock: 0,
         notFound: 0,
       };
-      cur.products += cat.products;
+      cur.products = Math.max(cur.products, cat.products);
       cur.items += cat.items;
       cur.recorded += cat.recorded;
       cur.missing += cat.missing;
@@ -698,11 +727,26 @@ const aggregateSummaries = (cycles) => {
   };
 };
 
-const buildSection = (config, { observations, assignmentItems, queensPrices, store, cycles }) => {
-  // Build one sub-section per survey cycle (skipping cycles with no data).
+const buildSection = (
+  config,
+  {
+    observations,
+    assignmentItems,
+    queensPrices,
+    store,
+    cycles,
+    masterProducts,
+  },
+) => {
   const cycleBlocks = cycles
     .map((cycle) =>
-      buildCycle(config, cycle, { observations, assignmentItems, queensPrices, store }),
+      buildCycle(config, cycle, {
+        observations,
+        assignmentItems,
+        queensPrices,
+        store,
+        masterProducts,
+      }),
     )
     .filter(Boolean);
 
@@ -715,8 +759,6 @@ const buildSection = (config, { observations, assignmentItems, queensPrices, sto
     for (const cat of block.categories) {
       const existing = flatCategories.find((c) => c.name === cat.name);
       if (existing) {
-        // Merge products; keep the newest observation if a product appears
-        // in multiple cycles.
         for (const prod of cat.products) {
           if (!existing.products.find((p) => p.id === prod.id)) {
             existing.products.push(prod);
@@ -739,7 +781,6 @@ const buildSection = (config, { observations, assignmentItems, queensPrices, sto
     label: config.label,
     description: config.description,
     columns: columnShape,
-    // One entry per survey cycle, newest first.
     cycles: cycleBlocks.map((b) => ({
       period: b.cycle,
       label: b.cycle.name,
@@ -747,7 +788,6 @@ const buildSection = (config, { observations, assignmentItems, queensPrices, sto
       categories: b.categories,
       summary: b.summary,
     })),
-    // Flattened view across all cycles — used by AI narrative & DOCX.
     categories: flatCategories,
     summary: aggregateSummaries(cycleBlocks),
   };
@@ -760,6 +800,7 @@ export const buildReportModel = ({
   assignmentItems,
   queensPrices,
   cycles,
+  masterProducts,
   reportTypes,
   user,
 }) => {
@@ -771,6 +812,7 @@ export const buildReportModel = ({
         queensPrices,
         store,
         cycles,
+        masterProducts,
       }),
     )
     .filter(Boolean);
