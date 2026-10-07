@@ -175,17 +175,27 @@ const availabilityColor = (availability) => {
   return C.amber;
 };
 
+// ─────────────────────────────────────────────────────────────────
+// Matrix cell writer
+//   - record === undefined (never observed) → "Not found" (italic, muted)
+//   - record === null (assigned, not recorded) → "Not found" (italic, muted)
+//   - QUEENS with price → bold, highlighted
+//   - AVAILABLE with price → price (right-aligned, lowest highlighted)
+//   - OUT_OF_STOCK → red label
+//   - NOT_FOUND (explicit) → "Not found" (italic, muted)
+// ─────────────────────────────────────────────────────────────────
 const writeMatrixCell = (cell, record, column, isLowest) => {
   cell.border = thinBorder;
   cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
   cell.font = font();
 
   if (record === undefined) {
-    cell.value = null;
+    cell.value = "Not found";
+    cell.font = font({ italic: true, color: { argb: C.muted } });
     return false;
   }
   if (record === null) {
-    cell.value = "Missing";
+    cell.value = "Not found";
     cell.font = font({ italic: true, color: { argb: C.muted } });
     return false;
   }
@@ -220,15 +230,12 @@ const writeMatrixCell = (cell, record, column, isLowest) => {
     cell.font = font({ color: { argb: C.red } });
     return false;
   }
-  cell.value = AVAILABILITY_LABELS.NOT_FOUND;
-  cell.font = font({ color: { argb: C.amber } });
+  // Explicit NOT_FOUND (or anything else) → "Not found"
+  cell.value = "Not found";
+  cell.font = font({ italic: true, color: { argb: C.muted } });
   return false;
 };
 
-/**
- * Builds one matrix sheet for a given (section, cycle) pair.
- * cycleBlock = { period, label, columns, categories, summary }
- */
 const buildMatrixSheet = (workbook, model, section, cycleBlock) => {
   const { columns, categories } = cycleBlock;
   const period = model.period;
@@ -251,13 +258,13 @@ const buildMatrixSheet = (workbook, model, section, cycleBlock) => {
     ...columns.map(() => ({ width: 20 })),
   ];
 
+  // Subtitle no longer appends status.
   addTitleBar(
     sheet,
     1,
     barCols,
     `${section.label} — Survey Cycle: ${cycleLabel}`,
-    `${formatDate(cycleBlock.period.startDate)} – ${formatDate(cycleBlock.period.endDate)}${cycleBlock.period.status ? `  |  ${cycleBlock.period.status}` : ""
-    }  |  Prices in ${CURRENCY}`,
+    `${formatDate(cycleBlock.period.startDate)} – ${formatDate(cycleBlock.period.endDate)}  |  Prices in ${CURRENCY}`,
     cycleLabel,
   );
 
@@ -267,7 +274,7 @@ const buildMatrixSheet = (workbook, model, section, cycleBlock) => {
   noteCell.value =
     `Prices in ${CURRENCY}. Green = lowest competitor price in the row. ` +
     (hasQueens ? "Queens Price = current price from the price list. " : "") +
-    `"Missing" = assigned but not recorded. Blank = no data.`;
+    `"Not found" = no observation recorded for this competitor in this cycle.`;
   noteCell.font = font({ size: 9, color: { argb: C.muted } });
   noteCell.alignment = { vertical: "top", wrapText: true };
   sheet.getRow(3).height = 18;
@@ -362,11 +369,6 @@ const buildMatrixSheet = (workbook, model, section, cycleBlock) => {
   return sheet;
 };
 
-/**
- * Details sheet — one row per (cycle, section, category, product, column).
- * Adds a "Survey cycle" column so data stays traceable after the sheet
- * structure changed.
- */
 const buildDetailsSheet = (workbook, model) => {
   const sheet = workbook.addWorksheet("Observation Details", {
     views: [{ showGridLines: true }],
@@ -437,14 +439,15 @@ const buildDetailsSheet = (workbook, model) => {
         for (const product of category.products) {
           for (const column of cycleBlock.columns) {
             const record = product.cells[column.key];
-            if (record === undefined) continue;
 
             const base = emptyData(section, cycleBlock, column, product, category);
             let data;
             let availabilityKey = null;
 
-            if (record === null) {
-              data = { ...base, availability: "Not recorded" };
+            if (record === undefined || record === null) {
+              // Never observed / assigned-but-not-recorded → explicit "Not found"
+              data = { ...base, availability: "Not found" };
+              availabilityKey = "NOT_FOUND";
             } else if (column.kind === "QUEENS") {
               data = {
                 ...base,
@@ -530,11 +533,9 @@ export const buildObservationReportExcel = async (model) => {
   workbook.title = `Competitor Price Audit Report - ${model.period.name}`;
   workbook.subject = safeSheetName(model.period.name);
 
-  // One matrix sheet per (section, cycle) pair.
   for (const section of model.sections) {
     const cycles = section.cycles || [];
     if (cycles.length === 0) {
-      // Fallback: no cycles resolved — render one sheet from the flat section.
       buildMatrixSheet(workbook, model, section, {
         label: "Report Range",
         period: {
