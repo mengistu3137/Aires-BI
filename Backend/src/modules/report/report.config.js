@@ -131,3 +131,21 @@ export const matchColumn = (columns, competitorName) => {
     ) || null
   );
 };
+// report.config.js
+
+// A canonical display order for categories, per report type.
+// Categories not listed here are sorted alphabetically and appended at the end.
+export const CATEGORY_ORDER = {
+  FRESH_CORNER: [
+    "Vegetables",
+    "Fruits",
+    "Fresh",
+    "Dairy",
+    "Dairy products",
+    "Meat",
+    "Meat products",
+    "Poultry",
+    "POULTRY PRODUCT",
+  ],
+  ULTRA_SENSITIVE: ["Ultra-Sensitive"],
+};

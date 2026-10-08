@@ -7,6 +7,7 @@ import { groq, getActiveGroqModel } from "../../config/groq.js";
 import { buildObservationReportDocx } from "./report.docx.js";
 import { slugify } from "./report.utils.js";
 import {
+  CATEGORY_ORDER,
   REPORT_TYPES,
   REPORT_TYPE_KEYS,
   matchColumn,
@@ -573,7 +574,28 @@ const buildCycle = (
   }
 
   let queensPriced = 0;
-  const categories = [...categoriesMap.keys()].sort(byText).map((name) => ({
+
+  // ─────────────────────────────────────────────────────────────
+  // Category order: use CATEGORY_ORDER[config.key] as the primary
+  // sort, falling back to alphabetical for anything not listed.
+  // This makes the Fresh Corner PDF match the Queen's master list
+  // layout (Vegetables → Fruits → Dairy → Meat → Poultry) instead
+  // of sorting alphabetically (Dairy → Fresh → Meat → Poultry).
+  // ─────────────────────────────────────────────────────────────
+  const categoryOrder = CATEGORY_ORDER[config.key] || [];
+  const rankOf = (name) => {
+    const idx = categoryOrder.indexOf(name);
+    return idx === -1 ? categoryOrder.length + 1 : idx;
+  };
+
+  const sortedCategoryNames = [...categoriesMap.keys()].sort((a, b) => {
+    const ra = rankOf(a);
+    const rb = rankOf(b);
+    if (ra !== rb) return ra - rb;
+    return byText(a, b);
+  });
+
+  const categories = sortedCategoryNames.map((name) => ({
     name,
     products: categoriesMap.get(name).map((product) => {
       const cells = {};
