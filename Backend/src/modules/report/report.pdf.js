@@ -1,4 +1,7 @@
 // Backend/src/modules/report/report.pdf.js
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 import PDFDocument from "pdfkit";
 import {
   CURRENCY,
@@ -6,6 +9,13 @@ import {
   formatPrice,
   columnHeaderLabel,
 } from "./report.utils.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// ──────────────────────────────────────────────────────────────────
+// Palette
+// ──────────────────────────────────────────────────────────────────
 
 const C = {
   navy: "#1F3A5F",
@@ -23,11 +33,177 @@ const C = {
   chartComp1: "#2D6A4F",
   chartComp2: "#D97706",
   chartComp3: "#0284C7",
+  // ── Aires brand tokens ──────────────────────────────────────────
+  airesGreen: "#017C4D",
+  airesOrange: "#FE7914",
+  airesRed: "#A41821",
 };
+
+// ──────────────────────────────────────────────────────────────────
+// Aires logo — loaded once, cached in memory.
+// Falls back to null when the PNG isn't present so the header degrades
+// to a styled text wordmark instead of crashing.
+// ──────────────────────────────────────────────────────────────────
+
+const AIRES_LOGO_PATH = path.join(__dirname, "assets", "aires-logo.png");
+let _airesLogoBuffer = null;
+let _airesLogoChecked = false;
+
+const loadAiresLogo = () => {
+  if (_airesLogoChecked) return _airesLogoBuffer;
+  _airesLogoChecked = true;
+  try {
+    _airesLogoBuffer = fs.readFileSync(AIRES_LOGO_PATH);
+  } catch {
+    _airesLogoBuffer = null;
+    console.warn(
+      `[report.pdf] Aires logo not found at ${AIRES_LOGO_PATH}. ` +
+      `Falling back to text wordmark. Run: ` +
+      `mkdir -p Backend/src/modules/report/assets && ` +
+      `cp Frontend/public/icons/icon-192.png Backend/src/modules/report/assets/aires-logo.png`,
+    );
+  }
+  return _airesLogoBuffer;
+};
+
+// ──────────────────────────────────────────────────────────────────
+// Layout helpers
+// ──────────────────────────────────────────────────────────────────
 
 const bottomLimit = (doc) => doc.page.height - doc.page.margins.bottom;
 const contentWidth = (doc) =>
   doc.page.width - doc.page.margins.left - doc.page.margins.right;
+
+// ──────────────────────────────────────────────────────────────────
+// Aires brand strip — three-stop gradient bar
+//   green ─────► orange ─────► red
+// Drawn as ~96 thin vertical rectangles so it renders smoothly without
+// needing an image asset.
+// ──────────────────────────────────────────────────────────────────
+
+const hexToRgb = (hex) => {
+  const h = hex.replace("#", "");
+  return {
+    r: parseInt(h.slice(0, 2), 16),
+    g: parseInt(h.slice(2, 4), 16),
+    b: parseInt(h.slice(4, 6), 16),
+  };
+};
+
+const lerp = (a, b, t) => Math.round(a + (b - a) * t);
+
+const mixColor = (from, to, t) => {
+  const a = hexToRgb(from);
+  const b = hexToRgb(to);
+  return {
+    r: lerp(a.r, b.r, t),
+    g: lerp(a.g, b.g, t),
+    b: lerp(a.b, b.b, t),
+  };
+};
+
+const rgbHex = ({ r, g, b }) =>
+  "#" + [r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("");
+
+/**
+ * Draws a 3-stop horizontal gradient bar.
+ *   Stop 0 → C.airesGreen   (left)
+ *   Stop 1 → C.airesOrange  (middle)
+ *   Stop 2 → C.airesRed     (right)
+ */
+const drawAiresGradientBar = (doc, x, y, width, height) => {
+  const SEGMENTS = 96;
+  const segW = width / SEGMENTS;
+  for (let i = 0; i < SEGMENTS; i += 1) {
+    const t = i / (SEGMENTS - 1);
+    let color;
+    // Left → Right: RED ▸ ORANGE ▸ GREEN
+    if (t <= 0.5) {
+      color = rgbHex(mixColor(C.airesRed, C.airesOrange, t / 0.5));
+    } else {
+      color = rgbHex(mixColor(C.airesOrange, C.airesGreen, (t - 0.5) / 0.5));
+    }
+    doc
+      .save()
+      .rect(x + i * segW, y, segW + 0.5, height)
+      .fill(color)
+      .restore();
+  }
+};
+
+// ──────────────────────────────────────────────────────────────────
+// Cover header (page 1 only)
+// ──────────────────────────────────────────────────────────────────
+
+const drawCoverHeader = (doc, model) => {
+  const W = contentWidth(doc);
+  const left = doc.page.margins.left;
+  let y = doc.page.margins.top;
+
+  const logoBuffer = loadAiresLogo();
+  const logoH = 40;
+
+  // ── Left: Aires logo (PNG) or text wordmark fallback ──────────
+  if (logoBuffer) {
+    try {
+      doc.image(logoBuffer, left, y, { height: logoH });
+    } catch {
+      // If pdfkit can't decode the image, fall back to text.
+      doc
+        .font("Helvetica-Bold")
+        .fontSize(15)
+        .fillColor(C.airesGreen)
+        .text("AIRES", left, y + 10, { lineBreak: false });
+    }
+  } else {
+    // Text wordmark — Green "AIRES" + Orange dot + Red "COMMUNICATION"
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(15)
+      .fillColor(C.airesGreen)
+      .text("AIRES", left, y + 10, { lineBreak: false });
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(15)
+      .fillColor(C.airesOrange)
+      .text(".", left + 52, y + 10, { lineBreak: false });
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(9)
+      .fillColor(C.airesRed)
+      .text("COMMUNICATION", left + 58, y + 14, { lineBreak: false });
+  }
+
+  // ── Center: company name ──────────────────────────────────────
+  doc
+    .font("Helvetica-Bold")
+    .fontSize(11)
+    .fillColor(C.navy)
+    .text("Aires Communication PLC", left, y + 6, {
+      width: W,
+      align: "center",
+      lineBreak: false,
+    });
+
+  // ── Right: badge text ────────────────────────────────────────
+  doc
+    .font("Helvetica")
+    .fontSize(8)
+    .fillColor(C.muted)
+    .text("Pricing Intelligence Unit", left, y + 22, {
+      width: W,
+      align: "right",
+      lineBreak: false,
+    });
+
+  y += logoH + 8;
+
+  // ── Gradient bar under the header ────────────────────────────
+  drawAiresGradientBar(doc, left, y, W, 3);
+  y += 14;
+
+  return y;
+};
 
 // ──────────────────────────────────────────────────────────────────
 // Page 1: Executive Overview & Visual Price Benchmark Comparison
@@ -36,7 +212,7 @@ const contentWidth = (doc) =>
 const drawExecutiveCoverPage = (doc, model) => {
   const W = contentWidth(doc);
   const left = doc.page.margins.left;
-  let y = doc.page.margins.top;
+  let y = drawCoverHeader(doc, model);
 
   doc
     .font("Helvetica-Bold")
@@ -87,6 +263,10 @@ const drawExecutiveCoverPage = (doc, model) => {
 
   drawPriceComparisonChart(doc, model, left, y, W);
 };
+
+// ──────────────────────────────────────────────────────────────────
+// Price chart
+// ──────────────────────────────────────────────────────────────────
 
 const drawPriceComparisonChart = (doc, model, x0, y0, totalW) => {
   const chartTitle = `Price Benchmark Comparison Dashboard - ${formatDate(model.period.startDate)}`;
@@ -201,7 +381,7 @@ const drawPriceComparisonChart = (doc, model, x0, y0, totalW) => {
 };
 
 // ──────────────────────────────────────────────────────────────────
-// Page 2+: Master Pricing Matrix — one table per survey cycle
+// Master Pricing Matrix — one table per survey cycle
 // ──────────────────────────────────────────────────────────────────
 
 const drawCycleHeader = (doc, cycle, left, W, y) => {
@@ -216,7 +396,6 @@ const drawCycleHeader = (doc, cycle, left, W, y) => {
     .stroke()
     .restore();
 
-  // No "(OPEN)" / "(CLOSED)" suffix — cycle name only.
   const label = `Survey Cycle: ${cycle.period.name}`;
   doc
     .font("Helvetica-Bold")
@@ -375,13 +554,6 @@ const drawCycleTable = (doc, cycle, section, left, W, startY) => {
         });
       curX += unitW;
 
-      // ─────────────────────────────────────────────────────────
-      // Price cells:
-      //   - valid price → "145.00 ETB"
-      //   - OUT_OF_STOCK → "OUT OF STOCK" (red)
-      //   - NOT_FOUND (explicit) → "Not found" (muted)
-      //   - undefined / null (never observed) → "Not found" (muted)
-      // ─────────────────────────────────────────────────────────
       columns.forEach((col) => {
         const cell = prod.cells?.[col.key];
         let valStr = "Not found";
@@ -400,7 +572,6 @@ const drawCycleTable = (doc, cycle, section, left, W, startY) => {
             color = C.muted;
           }
         }
-        // cell === undefined → stays "Not found" (muted)
 
         doc
           .font("Helvetica")
@@ -498,28 +669,33 @@ const drawMatrixTable = (doc, section, startY) => {
 };
 
 // ──────────────────────────────────────────────────────────────────
-// Footers
+// Top strips (pages 2+) & Footers (all pages)
 // ──────────────────────────────────────────────────────────────────
 
-const drawFooters = (doc) => {
+const drawTopStripsAndFooters = (doc) => {
   const range = doc.bufferedPageRange();
+  const totalPages = range.count;
+
   for (let i = range.start; i < range.start + range.count; i += 1) {
     doc.switchToPage(i);
     const { left, bottom } = doc.page.margins;
     const width = contentWidth(doc);
-    const y = doc.page.height - bottom + 16;
 
     const originalBottom = doc.page.margins.bottom;
     doc.page.margins.bottom = 0;
 
-    doc
-      .save()
-      .lineWidth(0.5)
-      .strokeColor(C.border)
-      .moveTo(left, y - 6)
-      .lineTo(left + width, y - 6)
-      .stroke()
-      .restore();
+    const isFirstPage = i === range.start;
+
+    // ── Top gradient strip on pages 2+ ──────────────────────────
+    if (!isFirstPage) {
+      const stripY = doc.page.margins.top - 14;
+      drawAiresGradientBar(doc, left, stripY, width, 2);
+    }
+
+    // ── Footer: thin gradient bar + text ────────────────────────
+    const y = doc.page.height - bottom + 16;
+
+    drawAiresGradientBar(doc, left, y - 8, width, 1.5);
 
     doc.font("Helvetica").fontSize(7.5).fillColor(C.muted);
     doc.text(
@@ -528,7 +704,7 @@ const drawFooters = (doc) => {
       y,
       { width: width * 0.7, align: "left", lineBreak: false },
     );
-    doc.text(`Page ${i - range.start + 1} of ${range.count}`, left, y, {
+    doc.text(`Page ${i - range.start + 1} of ${totalPages}`, left, y, {
       width,
       align: "right",
       lineBreak: false,
@@ -537,6 +713,10 @@ const drawFooters = (doc) => {
     doc.page.margins.bottom = originalBottom;
   }
 };
+
+// ──────────────────────────────────────────────────────────────────
+// Entry point
+// ──────────────────────────────────────────────────────────────────
 
 export const buildObservationReportPdf = (model) =>
   new Promise((resolve, reject) => {
@@ -558,15 +738,17 @@ export const buildObservationReportPdf = (model) =>
       doc.on("end", () => resolve(Buffer.concat(chunks)));
       doc.on("error", reject);
 
+      // Page 1: cover header + dashboard
       drawExecutiveCoverPage(doc, model);
 
+      // Page 2+: one matrix block per section
       const sections = model.sections || [];
       sections.forEach((section) => {
         doc.addPage();
         drawMatrixTable(doc, section, doc.page.margins.top);
       });
 
-      drawFooters(doc);
+      drawTopStripsAndFooters(doc);
       doc.end();
     } catch (error) {
       reject(error);
