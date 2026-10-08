@@ -12,12 +12,27 @@ const sendFile = (res, { buffer, filename, contentType }) => {
   res.status(200).end(buffer);
 };
 
+/**
+ * Safely normalizes a query value that may be a string, an array, or
+ * undefined into a clean array of strings (or undefined).
+ * - "a"        → ["a"]
+ * - "a,b,c"    → ["a","b","c"]
+ * - ["a","b"]  → ["a","b"]
+ * - "" / null  → undefined
+ */
+const toIdArray = (value) => {
+  if (value === undefined || value === null) return undefined;
+  const raw = Array.isArray(value) ? value : String(value).split(",");
+  const cleaned = raw.map((v) => String(v ?? "").trim()).filter(Boolean);
+  return cleaned.length > 0 ? cleaned : undefined;
+};
+
 const paramsFrom = (req) => ({
-  surveyPeriodId: req.query.surveyPeriodId || undefined,
+  surveyPeriodId: toIdArray(req.query.surveyPeriodId),
   rangeType: req.query.rangeType || undefined,
   startDate: req.query.startDate || undefined,
   endDate: req.query.endDate || undefined,
-  storeId: req.query.storeId || undefined,
+  storeId: toIdArray(req.query.storeId),
   reportType: req.query.reportType || undefined,
   forceRefresh:
     req.query.forceRefresh === "true" || req.query.forceRefresh === true,
