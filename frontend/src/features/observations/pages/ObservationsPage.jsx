@@ -22,7 +22,6 @@ export const ObservationsPage = () => {
 
 	const [search, setSearch] = useState("");
 
-	// URL-backed filters
 	const availability = searchParams.get("availability") || "";
 	const reviewStatus = searchParams.get("reviewStatus") || "";
 	const storeId = searchParams.get("storeId") || "";
@@ -54,36 +53,29 @@ export const ObservationsPage = () => {
 	const observations = data?.observations || [];
 	const meta = data?.meta || { page: 1, totalPages: 1, total: 0 };
 
-	// Stores — used to populate the store filter dropdown.
-	// We use the shared stores hook (same cache key as elsewhere in the app).
 	const { stores = [], isLoading: storesLoading } = useStores();
-
-	// Survey periods (same cache as SurveyPeriodSelector) — used for readable labels
 	const { data: periods = [] } = useSurveyPeriods();
 
-	// URL params are always strings while record ids may be numeric —
-	// compare defensively so lookups don't silently fail
 	const selectedPeriod = periods.find(
 		(p) => String(p.id) === String(surveyPeriodId),
 	);
 	const selectedStore = stores.find((s) => String(s.id) === String(storeId));
 
-	// No auto-fallback: when the user hasn't picked a period, the export
-	// deliberately omits surveyPeriodId so the backend reports on ALL data.
-	// (To scope to a specific cycle, the user picks it in the Survey period filter.)
+	// No auto-fallback — when the user hasn't picked anything, the export
+	// menu defaults to "all stores" and "all survey periods".
 	const effectivePeriodId = surveyPeriodId || undefined;
 
-	// Report export (PDF / Excel) — uses the effective period + store filters
 	const { download, downloading } = useReportDownload();
-	// reportType: "FRESH_CORNER" | "ULTRA_SENSITIVE" | undefined (= both in one file)
-	const handleExport = (format, reportType) =>
+
+	const handleExport = (format, reportType, scope = {}) => {
+		const { surveyPeriodIds, storeIds } = scope;
 		download(format, {
-			surveyPeriodId: effectivePeriodId, // undefined → backend = all data
-			storeId: storeId || undefined,
+			surveyPeriodId: surveyPeriodIds,
+			storeId: storeIds,
 			reportType: reportType || undefined,
 		});
+	};
 
-	// Client-side search across the loaded page
 	const visibleObservations = useMemo(() => {
 		if (!search.trim()) return observations;
 		const term = search.toLowerCase();
@@ -112,7 +104,6 @@ export const ObservationsPage = () => {
 
 	return (
 		<div className="space-y-4">
-			{/* Header */}
 			<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 				<div>
 					<h1 className="text-lg font-black text-slate-800">Observations</h1>
@@ -123,12 +114,13 @@ export const ObservationsPage = () => {
 					</p>
 				</div>
 
-				{/* Export (managers/admins only — matches backend restrictTo) */}
 				{(isManager || isAdmin) && (
 					<ReportExportMenu
 						surveyPeriodId={effectivePeriodId}
 						periodLabel={selectedPeriod?.name || "All survey periods"}
 						scopeLabel={selectedStore ? selectedStore.name : "All competitors"}
+						availableStores={stores}
+						availablePeriods={periods}
 						onDownload={handleExport}
 						downloading={downloading}
 						disabled={!isOnline}
@@ -136,7 +128,6 @@ export const ObservationsPage = () => {
 				)}
 			</div>
 
-			{/* Offline banner */}
 			{!isOnline && (
 				<div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
 					<span className="font-bold">Offline:</span> showing the last loaded
@@ -144,9 +135,7 @@ export const ObservationsPage = () => {
 				</div>
 			)}
 
-			{/* Context filters: Store + Survey period */}
 			<div className="grid grid-cols-1 gap-3 rounded-2xl border border-slate-200 bg-white p-3.5 shadow-xs sm:grid-cols-2">
-				{/* Store filter */}
 				<div>
 					<label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-slate-400">
 						Store
@@ -185,7 +174,6 @@ export const ObservationsPage = () => {
 					</div>
 				</div>
 
-				{/* Survey period filter */}
 				<SurveyPeriodSelector
 					value={surveyPeriodId}
 					onChange={(value) => setFilter("surveyPeriodId", value)}
@@ -195,7 +183,6 @@ export const ObservationsPage = () => {
 				/>
 			</div>
 
-			{/* Availability + review filters */}
 			<ObservationFilters
 				search={search}
 				onSearchChange={setSearch}
@@ -205,20 +192,14 @@ export const ObservationsPage = () => {
 				onReviewStatusChange={(v) => setFilter("reviewStatus", v)}
 			/>
 
-			{/* Export hint: when no period is picked, the export covers all survey data */}
 			{isManager && !surveyPeriodId && (
 				<p className="-mt-1 text-[11px] text-slate-500">
 					No survey period selected — exports will include{" "}
 					<span className="font-bold">all survey data gathered so far</span>.
-					Pick a cycle above to scope the export to that period, and choose the
-					report (Fresh Corner, Ultra-Sensitive or both) in the export menu.
-					Columns are grouped by competitor; choose a store to export just that
-					store's competitor, or leave it on "All stores" for the full
-					comparison.
+					Open the export menu to multi-select specific cycles and stores.
 				</p>
 			)}
 
-			{/* Active filter chips */}
 			{hasActiveFilters && (
 				<div className="flex flex-wrap items-center gap-1.5">
 					<span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
@@ -264,19 +245,16 @@ export const ObservationsPage = () => {
 				</div>
 			)}
 
-			{/* Summary */}
 			{!isLoading && !isError && observations.length > 0 && (
 				<ObservationsSummaryBar observations={observations} meta={meta} />
 			)}
 
-			{/* Loading */}
 			{isLoading && (
 				<div className="flex items-center justify-center py-12">
 					<div className="h-8 w-8 animate-spin rounded-full border-4 border-[#A41821] border-t-transparent" />
 				</div>
 			)}
 
-			{/* Error */}
 			{isError && (
 				<div
 					className={`rounded-2xl border p-4 ${
@@ -295,7 +273,6 @@ export const ObservationsPage = () => {
 				</div>
 			)}
 
-			{/* Content */}
 			{!isLoading && !isError && (
 				<>
 					{visibleObservations.length === 0 ? (
@@ -332,7 +309,6 @@ export const ObservationsPage = () => {
 						</>
 					)}
 
-					{/* Pagination */}
 					{meta.totalPages > 1 && (
 						<div className="flex items-center justify-between pt-2">
 							<button

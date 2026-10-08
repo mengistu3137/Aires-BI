@@ -1,8 +1,19 @@
 import { apiClient } from "../client.js";
 
 /**
- * Fetch Groq AI pricing summary (Daily 20 Fresh, Weekly 100 FMCG, or Combined)
+ * Serialize a value that may be a string, an array, or undefined into a
+ * comma-separated string (or undefined).
  */
+const joinIds = (value) => {
+  if (value === undefined || value === null) return undefined;
+  if (Array.isArray(value)) {
+    const cleaned = value.map((v) => String(v ?? "").trim()).filter(Boolean);
+    return cleaned.length > 0 ? cleaned.join(",") : undefined;
+  }
+  const s = String(value).trim();
+  return s ? s : undefined;
+};
+
 export const getAiReportSummaryRequest = async ({
   surveyPeriodId,
   rangeType,
@@ -13,7 +24,7 @@ export const getAiReportSummaryRequest = async ({
 }) => {
   const response = await apiClient.get("/reports/ai-summary", {
     params: {
-      surveyPeriodId: surveyPeriodId || undefined,
+      surveyPeriodId: joinIds(surveyPeriodId),
       rangeType: rangeType || undefined,
       startDate: startDate || undefined,
       endDate: endDate || undefined,
@@ -24,9 +35,6 @@ export const getAiReportSummaryRequest = async ({
   return response.data?.data;
 };
 
-/**
- * Download editable Word Document (.docx)
- */
 export const downloadAiDocxReportRequest = async ({
   surveyPeriodId,
   rangeType,
@@ -36,7 +44,7 @@ export const downloadAiDocxReportRequest = async ({
 }) => {
   const response = await apiClient.get("/reports/ai-docx", {
     params: {
-      surveyPeriodId: surveyPeriodId || undefined,
+      surveyPeriodId: joinIds(surveyPeriodId),
       rangeType: rangeType || undefined,
       startDate: startDate || undefined,
       endDate: endDate || undefined,
@@ -67,9 +75,6 @@ const parseFilename = (contentDisposition) => {
   return plain ? plain[1] : null;
 };
 
-/**
- * Downloads a report file as a Blob.
- */
 export const downloadReportRequest = async (
   format,
   { surveyPeriodId, rangeType, startDate, endDate, storeId, reportType },
@@ -78,11 +83,11 @@ export const downloadReportRequest = async (
 
   const res = await apiClient.get(`/reports/${endpoint}`, {
     params: {
-      surveyPeriodId: surveyPeriodId || undefined,
+      surveyPeriodId: joinIds(surveyPeriodId),
       rangeType: rangeType || undefined,
       startDate: startDate || undefined,
       endDate: endDate || undefined,
-      storeId: storeId || undefined,
+      storeId: joinIds(storeId),
       reportType: reportType || undefined,
     },
     responseType: "blob",

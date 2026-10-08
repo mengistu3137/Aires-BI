@@ -123,33 +123,62 @@ const loadCurrentQueensPrices = async (productIds) => {
 // Date-range resolution
 // ============================================================
 
-const resolveDateRange = async ({ surveyPeriodId, rangeType, startDate, endDate }) => {
+/**
+ * Resolves the survey period(s) / date range(s) selected by the user
+ * into a normalized list of "range descriptors".
+ *
+ * Always returns an array. Each item is one of:
+ *   { type: "PERIOD",  periodRecord, startDate, endDate, periodName, periodId }
+ *   { type: "DATE",    startDate, endDate, periodName, periodId }
+ *   { type: "ALL",     startDate, endDate, periodName, periodId }
+ */
+const resolveDateRanges = async ({
+  surveyPeriodId,
+  rangeType,
+  startDate,
+  endDate,
+}) => {
   const now = new Date();
+
+  // Normalize to array of ids (both shapes accepted)
+  const rawIds = Array.isArray(surveyPeriodId)
+    ? surveyPeriodId
+    : surveyPeriodId
+      ? [surveyPeriodId]
+      : [];
+
+  const periodIds = rawIds
+    .map((v) => String(v ?? "").trim())
+    .filter((v) => v && v !== "ALL" && v !== "all");
 
   // 1. Explicit Week Range
   if (rangeType === "WEEK") {
     const start = new Date(now);
     start.setDate(now.getDate() - 7);
-    return {
-      startDate: start,
-      endDate: now,
-      periodName: `Past 7 Days (${start.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${now.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })})`,
-      periodId: "range-week",
-      isDateBoundOnly: true,
-    };
+    return [
+      {
+        type: "DATE",
+        startDate: start,
+        endDate: now,
+        periodName: `Past 7 Days (${start.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${now.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })})`,
+        periodId: "range-week",
+      },
+    ];
   }
 
   // 2. Explicit Month Range
   if (rangeType === "MONTH") {
     const start = new Date(now);
     start.setDate(now.getDate() - 30);
-    return {
-      startDate: start,
-      endDate: now,
-      periodName: `Past 30 Days (${start.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${now.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })})`,
-      periodId: "range-month",
-      isDateBoundOnly: true,
-    };
+    return [
+      {
+        type: "DATE",
+        startDate: start,
+        endDate: now,
+        periodName: `Past 30 Days (${start.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${now.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })})`,
+        periodId: "range-month",
+      },
+    ];
   }
 
   // 3. Custom Date Range
@@ -160,33 +189,43 @@ const resolveDateRange = async ({ surveyPeriodId, rangeType, startDate, endDate 
       if (String(endDate).length <= 10) {
         end.setHours(23, 59, 59, 999);
       }
-      return {
-        startDate: start,
-        endDate: end,
-        periodName: `Custom Range (${start.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${end.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })})`,
-        periodId: "range-custom",
-        isDateBoundOnly: true,
-      };
+      return [
+        {
+          type: "DATE",
+          startDate: start,
+          endDate: end,
+          periodName: `Custom Range (${start.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${end.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })})`,
+          periodId: "range-custom",
+        },
+      ];
     }
   }
 
-  // 4. Any Specific Survey Period (OPEN, CLOSED, or DRAFT)
-  if (surveyPeriodId && surveyPeriodId !== "ALL" && surveyPeriodId !== "all") {
-    const period = await prisma.surveyPeriod.findUnique({
-      where: { id: surveyPeriodId },
+  // 4. One or more specific survey periods
+  if (periodIds.length > 0) {
+    const periods = await prisma.surveyPeriod.findMany({
+      where: { id: { in: periodIds } },
+      orderBy: [{ startDate: "desc" }, { id: "desc" }],
     });
-    if (!period) throw new ApiError(404, `Survey period '${surveyPeriodId}' not found`);
-    return {
+
+    if (periods.length === 0) {
+      throw new ApiError(
+        404,
+        `No survey periods found for ids: ${periodIds.join(", ")}`,
+      );
+    }
+
+    return periods.map((period) => ({
+      type: "PERIOD",
+      periodRecord: period,
       startDate: period.startDate,
       endDate: period.endDate,
-      periodName: period.name, // no "(OPEN)" / "(CLOSED)" suffix
+      periodName: period.name,
       periodId: period.id,
-      periodRecord: period,
-      isDateBoundOnly: false,
-    };
+    }));
   }
 
-  // 5. No period and no range supplied → ALL survey data gathered so far.
+  // 5. No period and no range supplied → ALL survey data ever gathered.
   const allTime = await prisma.priceObservation.aggregate({
     _min: { capturedAt: true },
     _max: { capturedAt: true },
@@ -195,16 +234,17 @@ const resolveDateRange = async ({ surveyPeriodId, rangeType, startDate, endDate 
   const firstCaptured = allTime._min.capturedAt;
   const lastCaptured = allTime._max.capturedAt;
 
-  return {
-    startDate: firstCaptured || new Date(0),
-    endDate: lastCaptured || now,
-    periodName: firstCaptured
-      ? `All Survey Data (${firstCaptured.toISOString().slice(0, 10)} – ${lastCaptured.toISOString().slice(0, 10)})`
-      : "All Survey Data",
-    periodId: "all-data",
-    periodRecord: null,
-    isDateBoundOnly: false,
-  };
+  return [
+    {
+      type: "ALL",
+      startDate: firstCaptured || new Date(0),
+      endDate: lastCaptured || now,
+      periodName: firstCaptured
+        ? `All Survey Data (${firstCaptured.toISOString().slice(0, 10)} – ${lastCaptured.toISOString().slice(0, 10)})`
+        : "All Survey Data",
+      periodId: "all-data",
+    },
+  ];
 };
 
 // ============================================================
@@ -219,67 +259,132 @@ const loadRawData = async ({
   storeId,
   needsQueens,
 }) => {
-  const rangeInfo = await resolveDateRange({ surveyPeriodId, rangeType, startDate, endDate });
+  const ranges = await resolveDateRanges({
+    surveyPeriodId,
+    rangeType,
+    startDate,
+    endDate,
+  });
 
-  const store = storeId
-    ? await prisma.store.findUnique({
-      where: { id: storeId },
+  const periodIds = ranges
+    .filter((r) => r.type === "PERIOD")
+    .map((r) => r.periodId);
+  const dateRanges = ranges.filter((r) => r.type === "DATE");
+  const isAllData = ranges.length === 1 && ranges[0].type === "ALL";
+
+  // Normalize storeIds to array
+  const rawStoreIds = Array.isArray(storeId)
+    ? storeId
+    : storeId
+      ? [storeId]
+      : [];
+  const storeIds = rawStoreIds
+    .map((v) => String(v ?? "").trim())
+    .filter(Boolean);
+
+  const stores = storeIds.length
+    ? await prisma.store.findMany({
+      where: { id: { in: storeIds } },
       select: STORE_SELECT,
     })
-    : null;
+    : [];
 
-  if (storeId && !store) throw new ApiError(404, "Store not found");
+  if (storeIds.length > 0 && stores.length !== storeIds.length) {
+    const found = new Set(stores.map((s) => s.id));
+    const missing = storeIds.filter((id) => !found.has(id));
+    if (missing.length > 0) {
+      throw new ApiError(
+        404,
+        `Store(s) not found: ${missing.join(", ")}`,
+      );
+    }
+  }
 
-  const period = rangeInfo.periodRecord || {
-    id: rangeInfo.periodId,
-    name: rangeInfo.periodName,
-    startDate: rangeInfo.startDate,
-    endDate: rangeInfo.endDate,
-    status: rangeInfo.periodRecord?.status || "OPEN",
+  // Human-readable label for the report header
+  const period = {
+    id:
+      ranges.length === 1 ? ranges[0].periodId : "multi-range",
+    name:
+      ranges.length === 1
+        ? ranges[0].periodName
+        : `${ranges.length} survey cycles selected`,
+    startDate: ranges.reduce(
+      (min, r) =>
+        !min || r.startDate < min ? r.startDate : min,
+      null,
+    ),
+    endDate: ranges.reduce(
+      (max, r) =>
+        !max || r.endDate > max ? r.endDate : max,
+      null,
+    ),
+    status: ranges.length === 1 && ranges[0].periodRecord
+      ? ranges[0].periodRecord.status
+      : "MIXED",
   };
 
-  // Observation filter
+  // Build the observation filter
   const observationWhere = {
     audit: {
       status: { notIn: EXCLUDED_AUDIT_STATUSES },
-      ...(storeId ? { storeId } : {}),
+      ...(storeIds.length ? { storeId: { in: storeIds } } : {}),
     },
     reviewStatus: { notIn: EXCLUDED_REVIEW_STATUSES },
   };
 
-  if (rangeInfo.periodRecord) {
-    observationWhere.audit.surveyPeriodId = rangeInfo.periodRecord.id;
-  } else if (rangeInfo.isDateBoundOnly) {
-    observationWhere.capturedAt = {
-      gte: rangeInfo.startDate,
-      lte: rangeInfo.endDate,
-    };
+  if (periodIds.length > 0 && dateRanges.length === 0) {
+    // Only periods selected
+    observationWhere.audit.surveyPeriodId = { in: periodIds };
+  } else if (dateRanges.length > 0 && periodIds.length === 0) {
+    // Only date-range(s) selected — OR them together
+    observationWhere.OR = dateRanges.map((r) => ({
+      capturedAt: { gte: r.startDate, lte: r.endDate },
+    }));
+  } else if (periodIds.length > 0 && dateRanges.length > 0) {
+    // Both — periods OR date ranges
+    observationWhere.OR = [
+      { audit: { surveyPeriodId: { in: periodIds } } },
+      ...dateRanges.map((r) => ({
+        capturedAt: { gte: r.startDate, lte: r.endDate },
+      })),
+    ];
   }
+  // else: isAllData → no filter
 
-  // Assignment items filter
+  // Build the assignment items filter
   const assignmentWhere = {
     assignment: {
       status: { not: "CANCELLED" },
-      ...(storeId ? { storeId } : {}),
+      ...(storeIds.length ? { storeId: { in: storeIds } } : {}),
     },
   };
 
-  if (rangeInfo.periodRecord) {
-    assignmentWhere.assignment.surveyPeriodId = rangeInfo.periodRecord.id;
-  } else if (rangeInfo.isDateBoundOnly) {
-    assignmentWhere.assignment.surveyPeriod = {
-      startDate: { lte: rangeInfo.endDate },
-      endDate: { gte: rangeInfo.startDate },
-    };
+  if (periodIds.length > 0 && dateRanges.length === 0) {
+    assignmentWhere.assignment.surveyPeriodId = { in: periodIds };
+  } else if (dateRanges.length > 0 && periodIds.length === 0) {
+    assignmentWhere.OR = dateRanges.map((r) => ({
+      assignment: {
+        surveyPeriod: {
+          startDate: { lte: r.endDate },
+          endDate: { gte: r.startDate },
+        },
+      },
+    }));
+  } else if (periodIds.length > 0 && dateRanges.length > 0) {
+    assignmentWhere.OR = [
+      { assignment: { surveyPeriodId: { in: periodIds } } },
+      ...dateRanges.map((r) => ({
+        assignment: {
+          surveyPeriod: {
+            startDate: { lte: r.endDate },
+            endDate: { gte: r.startDate },
+          },
+        },
+      })),
+    ];
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // Queen's master list — the canonical row set for the report.
-  // Seed assigns ids 40000000-...-0001, 0002, 0003, ... in exactly
-  // the order shown on the official Queen's product list, so
-  // ORDER BY id ASC reproduces that sequence.
-  // Only active products are included.
-  // ─────────────────────────────────────────────────────────────
+  // Queen's master list — canonical row set
   const masterProducts = await prisma.product.findMany({
     where: { active: true },
     orderBy: { id: "asc" },
@@ -327,7 +432,7 @@ const loadRawData = async ({
     }),
   ]);
 
-  // Determine which survey cycles to include in the report.
+  // Which survey cycles to include as cycle blocks
   const cycleIds = new Set();
   for (const obs of observations) {
     if (obs.audit?.surveyPeriodId) cycleIds.add(obs.audit.surveyPeriodId);
@@ -346,15 +451,14 @@ const loadRawData = async ({
 
   let queensPrices = new Map();
   if (needsQueens) {
-    // Load Queen's prices for the FULL master list, since the report
-    // now renders the entire list even when a product had no data.
     const productIds = masterProducts.map((p) => p.id);
     queensPrices = await loadCurrentQueensPrices(productIds);
   }
 
   return {
     period,
-    store,
+    store: stores.length === 1 ? stores[0] : null,
+    stores,
     observations,
     assignmentItems,
     queensPrices,
@@ -367,14 +471,6 @@ const loadRawData = async ({
 // Section builder (per report type) — cycle-aware, list-driven
 // ============================================================
 
-/**
- * Builds the section content for a single survey cycle.
- *
- * Rows are the Queen's MASTER list (filtered by config.acceptsCategory),
- * so every product on the list appears — in list order — even if it has
- * no observations this cycle. Missing cells render as `undefined`, which
- * the PDF/Excel renderers display as "Not found".
- */
 const buildCycle = (
   config,
   cycle,
@@ -393,16 +489,11 @@ const buildCycle = (
   const competitorColumns = columns.filter((c) => c.kind === "COMPETITOR");
   const queensColumn = columns.find((c) => c.kind === "QUEENS") || null;
 
-  // ─────────────────────────────────────────────────────────────
-  // Row set = Queen's master list ∩ this section's categories.
-  // masterProducts is already in canonical (seed) order.
-  // ─────────────────────────────────────────────────────────────
   const products = masterProducts.filter((p) =>
     config.acceptsCategory(categoryOf(p)),
   );
   if (products.length === 0) return null;
 
-  // Map of (column, product) → best observation/assignment record.
   const pairs = new Map();
   const columnStores = new Map(competitorColumns.map((c) => [c.key, new Set()]));
 
@@ -436,7 +527,6 @@ const buildCycle = (
     getPair(column.key, obs.productId).observations.push(obs);
   }
 
-  // Resolve best observation per pair.
   let duplicatesResolved = 0;
   for (const pair of pairs.values()) {
     const sorted = [...pair.observations].sort(compareObservations);
@@ -469,7 +559,6 @@ const buildCycle = (
       : null;
   }
 
-  // Group products by category, keeping list order inside each group.
   const categoriesMap = new Map();
   for (const p of products) {
     const cat = categoryOf(p);
@@ -513,8 +602,6 @@ const buildCycle = (
     }),
   }));
 
-  // Counters still only track rows that have data — so coverage
-  // percentages are not diluted by "Not found" cells.
   const totalCounters = blankCounters();
   const categoryCounters = new Map(categories.map((c) => [c.name, blankCounters()]));
   const columnCounters = new Map(competitorColumns.map((c) => [c.key, blankCounters()]));
@@ -559,8 +646,6 @@ const buildCycle = (
     totals: {
       competitors: competitorColumns.length,
       stores: allStoreIds.size,
-      // products = size of the Queen's list for this section
-      // (not just products with data this cycle).
       products: products.length,
       ...withCoverage(totalCounters),
       availabilityRatePct: pct(totalCounters.available, totalCounters.recorded),
@@ -603,9 +688,6 @@ const buildCycle = (
   };
 };
 
-/**
- * Aggregates per-cycle summaries into one section-level summary.
- */
 const aggregateSummaries = (cycles) => {
   if (cycles.length === 0) return null;
   if (cycles.length === 1) return cycles[0].summary;
@@ -752,8 +834,6 @@ const buildSection = (
 
   if (cycleBlocks.length === 0) return null;
 
-  // Merge all cycles' categories into one flat list for backward-compat
-  // consumers (AI narrative, DOCX, etc.).
   const flatCategories = [];
   for (const block of cycleBlocks) {
     for (const cat of block.categories) {
@@ -796,6 +876,7 @@ const buildSection = (
 export const buildReportModel = ({
   period,
   store,
+  stores,
   observations,
   assignmentItems,
   queensPrices,
@@ -824,14 +905,16 @@ export const buildReportModel = ({
         : "";
     throw new ApiError(
       404,
-      store
-        ? `No price observations or assignments found for this store in the selected range${label}`
-        : `No price observations or assignments found for the selected range${label}`,
+      stores && stores.length > 1
+        ? `No price observations or assignments found for the selected stores and range${label}`
+        : store
+          ? `No price observations or assignments found for this store in the selected range${label}`
+          : `No price observations or assignments found for the selected range${label}`,
     );
   }
 
   return {
-    scope: store ? "STORE" : "ALL_STORES",
+    scope: stores && stores.length > 1 ? "MULTI_STORE" : store ? "STORE" : "ALL_STORES",
     reportType: reportTypes.length === 1 ? reportTypes[0] : "ALL",
     generatedAt: new Date(),
     generatedBy: user?.name || user?.email || "",
@@ -852,6 +935,14 @@ export const buildReportModel = ({
         competitorName: store.competitor?.name ?? "",
       }
       : null,
+    stores: (stores || []).map((s) => ({
+      id: s.id,
+      name: s.name,
+      city: s.city ?? null,
+      area: s.area ?? null,
+      competitorId: s.competitor?.id ?? null,
+      competitorName: s.competitor?.name ?? "",
+    })),
     sections,
   };
 };
@@ -865,9 +956,6 @@ const loadReportModel = async ({
   reportType,
   user,
 }) => {
-  const cleanPeriodId = surveyPeriodId ? String(surveyPeriodId).trim() : undefined;
-  const cleanStoreId = storeId ? String(storeId).trim() : undefined;
-
   const requested = normalizeReportType(reportType);
   if (requested === null) {
     throw new ApiError(
@@ -878,11 +966,11 @@ const loadReportModel = async ({
   const reportTypes = requested ? [requested] : REPORT_TYPE_KEYS;
 
   const raw = await loadRawData({
-    surveyPeriodId: cleanPeriodId,
+    surveyPeriodId,
     rangeType,
     startDate,
     endDate,
-    storeId: cleanStoreId,
+    storeId,
     needsQueens: reportTypes.includes("FRESH_CORNER") || reportTypes.length > 1,
   });
 
@@ -894,7 +982,11 @@ const buildFilename = (model, extension) => {
   if (model.reportType !== "ALL") {
     parts.push(REPORT_TYPES[model.reportType].slug);
   }
-  if (model.store) parts.push(slugify(model.store.name));
+  if (model.store) {
+    parts.push(slugify(model.store.name));
+  } else if (model.stores && model.stores.length > 1) {
+    parts.push(`${model.stores.length}-stores`);
+  }
   parts.push(new Date().toISOString().slice(0, 10));
   return `${parts.join("_")}.${extension}`;
 };
@@ -1048,6 +1140,7 @@ export const getObservationReportSummary = async (params) => {
     generatedAt: model.generatedAt,
     period: model.period,
     store: model.store,
+    stores: model.stores,
     sections: model.sections.map((section) => ({
       type: section.type,
       label: section.label,
