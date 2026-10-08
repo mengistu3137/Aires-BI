@@ -1022,24 +1022,108 @@ export const getAiReportSummary = async (params) => {
     0,
   );
 
-  const sectionsPayload = model.sections.map((section) => ({
-    sectionType: section.type,
-    label: section.label,
-    competitors: section.columns.filter((c) => c.kind === "COMPETITOR").map((c) => c.label),
-    totals: section.summary?.totals,
-    cycles: section.cycles.map((c) => ({
-      cycleLabel: c.label,
-      totals: c.summary?.totals,
-    })),
-    sampleHighlights: section.categories.flatMap((cat) =>
-      cat.products.slice(0, 10).map((prod) => ({
-        category: cat.name,
-        name: prod.name,
-        unit: prod.unit,
-        prices: prod.cells,
+  // ─────────────────────────────────────────────────────────────
+  // Build a COMPACT payload for the LLM. We deliberately do NOT
+  // send the full product list — with 100+ products × up to 4
+  // competitors + Queens, the raw JSON blows past Groq's 8k TPM
+  // limit. Instead we send:
+  //   • per-section summary totals
+  //   • per-cycle totals
+  //   • top 5 price gaps (where Queens is most above / below the
+  //     cheapest competitor)
+  //   • a handful of "not found" highlights
+  // ─────────────────────────────────────────────────────────────
+  const sectionsPayload = model.sections.map((section) => {
+    const competitors = section.columns
+      .filter((c) => c.kind === "COMPETITOR")
+      .map((c) => c.label);
+
+    const queensColumn = section.columns.find((c) => c.kind === "QUEENS");
+
+    // Gather products with a Queens price AND at least one competitor
+    // price, then rank by price gap.
+    const ranked = [];
+    for (const cat of section.categories) {
+      for (const prod of cat.products) {
+        const queensCell = queensColumn ? prod.cells?.[queensColumn.key] : null;
+        if (!queensCell || queensCell.price === null || queensCell.price === undefined) {
+          continue;
+        }
+        const competitorPrices = section.columns
+          .filter((c) => c.kind === "COMPETITOR")
+          .map((c) => prod.cells?.[c.key])
+          .filter(
+            (rec) => rec && rec.availability === "AVAILABLE" && rec.price !== null,
+          )
+          .map((rec) => Number(rec.price));
+
+        if (competitorPrices.length === 0) continue;
+
+        const cheapest = Math.min(...competitorPrices);
+        const queens = Number(queensCell.price);
+        const gap = queens - cheapest;
+        const gapPct = cheapest > 0 ? (gap / cheapest) * 100 : 0;
+
+        ranked.push({
+          category: cat.name,
+          name: prod.name,
+          unit: prod.unit || "",
+          queensPrice: queens,
+          cheapestCompetitor: cheapest,
+          cheapestCompetitorName: section.columns.find((c) => {
+            const rec = prod.cells?.[c.key];
+            return (
+              c.kind === "COMPETITOR" &&
+              rec &&
+              rec.availability === "AVAILABLE" &&
+              Number(rec.price) === cheapest
+            );
+          })?.label || "",
+          gapETB: Math.round(gap * 100) / 100,
+          gapPct: Math.round(gapPct * 10) / 10,
+        });
+      }
+    }
+
+    const overpriced = [...ranked].sort((a, b) => b.gapPct - a.gapPct).slice(0, 5);
+    const underpriced = [...ranked].sort((a, b) => a.gapPct - b.gapPct).slice(0, 5);
+
+    // Not-found highlights: products where every competitor column is
+    // "Not found" this cycle. Useful for the AI to spot assortment gaps.
+    const notFoundHighlights = [];
+    for (const cat of section.categories) {
+      for (const prod of cat.products) {
+        const anyAvailable = section.columns
+          .filter((c) => c.kind === "COMPETITOR")
+          .some((c) => {
+            const rec = prod.cells?.[c.key];
+            return rec && rec.availability === "AVAILABLE";
+          });
+        if (!anyAvailable) {
+          notFoundHighlights.push({
+            category: cat.name,
+            name: prod.name,
+          });
+          if (notFoundHighlights.length >= 8) break;
+        }
+      }
+      if (notFoundHighlights.length >= 8) break;
+    }
+
+    return {
+      sectionType: section.type,
+      label: section.label,
+      competitors,
+      totals: section.summary?.totals,
+      cycles: section.cycles.map((c) => ({
+        cycleLabel: c.label,
+        totals: c.summary?.totals,
       })),
-    ),
-  }));
+      overpricedHighlights: overpriced,
+      underpricedHighlights: underpriced,
+      notFoundHighlights,
+    };
+  });
 
   const contextJson = JSON.stringify(
     {
@@ -1109,13 +1193,44 @@ Tone: Highly authoritative, executive-grade retail intelligence. Use ETB figures
 
   const activeModel = await getActiveGroqModel("reasoning");
 
+  // Guard: keep the final prompt under ~6000 tokens so it never
+  // trips Groq's 8000 TPM limit. If it's still too big, cut the
+  // notFound highlights first, then the underpriced/overpriced tail.
+  const roughTokenCount = Math.ceil(prompt.length / 4);
+  let finalPrompt = prompt;
+  if (roughTokenCount > 6000) {
+    // Fallback: send only totals + competitor lists, no product rows
+    const minimalPayload = JSON.stringify(
+      {
+        timeframe: model.period.name,
+        reportScope: reportType,
+        sections: model.sections.map((section) => ({
+          sectionType: section.type,
+          label: section.label,
+          competitors: section.columns
+            .filter((c) => c.kind === "COMPETITOR")
+            .map((c) => c.label),
+          totals: section.summary?.totals,
+          cycles: section.cycles.map((c) => ({
+            cycleLabel: c.label,
+            totals: c.summary?.totals,
+          })),
+        })),
+      },
+      null,
+      2,
+    );
+    finalPrompt = prompt.replace(contextJson, minimalPayload);
+  }
+
   const completion = await groq.chat.completions.create({
     model: activeModel,
     messages: [
       { role: "system", content: "You write high-level corporate retail pricing briefs." },
-      { role: "user", content: prompt },
+      { role: "user", content: finalPrompt },
     ],
     temperature: 0.2,
+    max_tokens: 2000,
   });
 
   const narrative = completion.choices[0].message.content;
