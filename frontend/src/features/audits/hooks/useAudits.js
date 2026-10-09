@@ -11,7 +11,7 @@ export const useAudits = (filters = {}) => {
     staleTime: 2 * 60 * 1000, // 2 minutes
     select: (data) => ({
       audits: data.data || [],
-      meta: data.meta || { page: 1, limit: 20, total: 0, totalPages: 1 },
+      meta: data.meta || { page: 1, limit: 10, total: 0, totalPages: 1 },
     }),
   });
 };
