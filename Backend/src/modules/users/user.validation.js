@@ -12,7 +12,7 @@ export const createUserSchema = z
       .or(z.literal(""))
       .refine(
         (val) => !val || val === "+251" || val.replace(/\D/g, "").length >= 9,
-        "Phone number must be at least 9 digits"
+        "Phone number must be at least 9 digits",
       ),
     email: z
       .string()
@@ -30,7 +30,7 @@ export const createUserSchema = z
         data.phone &&
         data.phone.trim() !== "" &&
         data.phone !== "+251" &&
-        data.phone.replace(/\D/g, "").length >= 9
+        data.phone.replace(/\D/g, "").length >= 9,
       );
       const hasEmail = Boolean(data.email && data.email.trim() !== "");
       return hasPhone || hasEmail;
@@ -38,7 +38,7 @@ export const createUserSchema = z
     {
       message: "Please provide either a phone number or an email address",
       path: ["phone"],
-    }
+    },
   );
 
 export const updateUserSchema = z.object({
@@ -62,8 +62,17 @@ export const updateUserSchema = z.object({
   active: z.boolean().optional(),
 });
 
-export const userQuerySchema = z.object({
-  role: z.enum(ROLES).optional(),
-  active: z.string().optional(),
-  search: z.string().optional(),
-});
+/**
+ * Query filters for GET /users. Includes page/limit so the validate
+ * middleware keeps them; both are coerced to numbers because query
+ * strings always arrive as strings.
+ */
+export const userQuerySchema = z
+  .object({
+    role: z.enum(ROLES).optional(),
+    active: z.string().optional(),
+    search: z.string().optional(),
+    page: z.coerce.number().int().min(1).optional().default(1),
+    limit: z.coerce.number().int().min(1).max(100).optional().default(20),
+  })
+  .optional();

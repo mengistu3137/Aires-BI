@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
 import {
 	usePriceAnalyses,
-	usePriceAnalysisReadiness, // ← added
+	usePriceAnalysisReadiness,
 } from "../hooks/usePriceAnalyses.js";
 import { useRecalculateSurveyPeriod } from "../hooks/usePriceAnalysisMutations.js";
 import { useAuth } from "@/hooks/useAuth.js";
@@ -17,6 +17,8 @@ import { RecalculateConfirmModal } from "../components/RecalculateConfirmModal.j
 import { ExecutiveAiReportModal } from "../components/ExecutiveAiReportModal.jsx";
 import { exportPriceAnalysisExcelRequest } from "@/services/api/price-analysis.api.js";
 import { RapidPriceAdjustmentDrawer } from "../components/RapidPriceAdjustmentDrawer.jsx";
+
+const PAGE_SIZE = 20;
 
 export const PriceAnalysisPage = () => {
 	const navigate = useNavigate();
@@ -33,7 +35,7 @@ export const PriceAnalysisPage = () => {
 	const surveyPeriodId = searchParams.get("surveyPeriodId") || "";
 	const action = searchParams.get("action") || "";
 	const asOfDate = searchParams.get("asOfDate") || "";
-	const page = Number(searchParams.get("page") || 1);
+	const page = Math.max(1, Number(searchParams.get("page") || 1));
 
 	const setFilter = (key, value) => {
 		const next = new URLSearchParams(searchParams);
@@ -42,14 +44,23 @@ export const PriceAnalysisPage = () => {
 		} else {
 			next.set(key, value);
 		}
-		if (key !== "page") next.set("page", "1");
+		// Reset to page 1 whenever anything except page changes
+		if (key !== "page") next.delete("page");
+		else if (Number(value) <= 1) next.delete("page");
 		setSearchParams(next, { replace: true });
+	};
+
+	const setPage = (next) => {
+		const nextParams = new URLSearchParams(searchParams);
+		if (next <= 1) nextParams.delete("page");
+		else nextParams.set("page", String(next));
+		setSearchParams(nextParams, { replace: true });
 	};
 
 	const filters = useMemo(
 		() => ({
 			page,
-			limit: 100,
+			limit: PAGE_SIZE,
 			surveyPeriodId: surveyPeriodId || undefined,
 			action: action || undefined,
 			asOfDate: asOfDate || undefined,
@@ -57,18 +68,22 @@ export const PriceAnalysisPage = () => {
 		[page, surveyPeriodId, action, asOfDate],
 	);
 
-	const { data, isLoading, isError, error, refetch } =
+	const { data, isLoading, isError, error, refetch, isFetching } =
 		usePriceAnalyses(filters);
 
 	// ── Readiness metrics ─────────────────────────────────────────
-	// Tells the manager exactly what will be computed BEFORE they click
-	// "Recalculate". Enabled only when a survey period is selected.
 	const { data: readiness, isLoading: isReadinessLoading } =
 		usePriceAnalysisReadiness(surveyPeriodId);
 
 	const analyses = data?.analyses || [];
-	const meta = data?.meta || { page: 1, totalPages: 1, total: 0 };
+	const meta = data?.meta || {
+		page: 1,
+		limit: PAGE_SIZE,
+		total: 0,
+		totalPages: 1,
+	};
 
+	// Client-side search only filters the current page
 	const visibleAnalyses = useMemo(() => {
 		if (!search.trim()) return analyses;
 		const term = search.toLowerCase();
@@ -82,11 +97,13 @@ export const PriceAnalysisPage = () => {
 		});
 	}, [analyses, search]);
 
-	const flaggedAnalyses = useMemo(() => {
-		return analyses.filter(
-			(a) => a.action === "PRICE_DOWN" || a.action === "PRICE_UP",
-		);
-	}, [analyses]);
+	const flaggedAnalyses = useMemo(
+		() =>
+			analyses.filter(
+				(a) => a.action === "PRICE_DOWN" || a.action === "PRICE_UP",
+			),
+		[analyses],
+	);
 
 	const recalcMutation = useRecalculateSurveyPeriod();
 
@@ -101,7 +118,7 @@ export const PriceAnalysisPage = () => {
 
 			const next = new URLSearchParams(searchParams);
 			next.delete("action");
-			next.set("page", "1");
+			next.delete("page");
 			setSearchParams(next, { replace: true });
 
 			setRecalcSummary({
@@ -157,14 +174,13 @@ export const PriceAnalysisPage = () => {
 				</div>
 
 				<div className="flex flex-wrap items-center gap-2">
-					{/* Always show Executive AI Brief for Managers, supporting all ranges & periods */}
 					{isManager && (
 						<button
 							type="button"
 							onClick={() => setShowAiReportModal(true)}
 							className="inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-[#A41821]/20 bg-red-50/80 px-3.5 py-2.5 text-xs font-bold text-[#A41821] hover:bg-red-100/70 transition shadow-2xs active:scale-95"
 						>
-							<span>⚡ Executive AI Brief</span>
+							<span>Executive AI Brief</span>
 						</button>
 					)}
 
@@ -174,7 +190,7 @@ export const PriceAnalysisPage = () => {
 							onClick={() => setShowRapidDrawer(true)}
 							className="inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-red-200 bg-red-50/80 px-3.5 py-2.5 text-xs font-bold text-[#A41821] hover:bg-red-100/70 transition shadow-2xs active:scale-95"
 						>
-							<span>⚡ Rapid Adjust ({flaggedAnalyses.length})</span>
+							<span>Rapid Adjust ({flaggedAnalyses.length})</span>
 						</button>
 					)}
 
@@ -221,7 +237,6 @@ export const PriceAnalysisPage = () => {
 					onChange={(val) => setFilter("surveyPeriodId", val)}
 				/>
 
-				{/* Daily Date Scope Filter */}
 				<div>
 					<label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500">
 						Analysis Date Filter (Optional)
@@ -246,7 +261,6 @@ export const PriceAnalysisPage = () => {
 					</div>
 				</div>
 
-				{/* Search */}
 				<div>
 					<label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500">
 						Search
@@ -276,10 +290,7 @@ export const PriceAnalysisPage = () => {
 				</div>
 			</div>
 
-			{/* ──────────────────────────────────────────────────────────── */}
-			{/* Readiness Banner — tells the manager what will be computed    */}
-			{/* BEFORE they click "Recalculate". Prevents blind recalcs.      */}
-			{/* ──────────────────────────────────────────────────────────── */}
+			{/* Readiness Banner */}
 			{surveyPeriodId && isReadinessLoading && (
 				<div className="h-28 animate-pulse rounded-2xl border border-slate-200 bg-slate-50" />
 			)}
@@ -288,7 +299,6 @@ export const PriceAnalysisPage = () => {
 				<div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
 					<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 						<div className="flex items-center gap-3">
-							{/* Readiness circular percentage badge */}
 							<div
 								className={`flex h-12 w-12 flex-none items-center justify-center rounded-xl font-mono text-sm font-black ${
 									readiness.readinessPercent >= 90
@@ -318,7 +328,6 @@ export const PriceAnalysisPage = () => {
 							</div>
 						</div>
 
-						{/* Breakdown chips */}
 						<div className="flex flex-wrap items-center gap-2">
 							<span className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50/70 px-2.5 py-1 text-[11px] font-bold text-[#017C4D]">
 								<span className="h-1.5 w-1.5 rounded-full bg-[#017C4D]" />
@@ -334,7 +343,6 @@ export const PriceAnalysisPage = () => {
 										)
 									}
 									className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-[11px] font-bold text-[#FE7914] hover:bg-amber-100 transition shadow-2xs"
-									title="Click to review and approve pending observations"
 								>
 									<span className="h-1.5 w-1.5 rounded-full bg-[#FE7914] animate-pulse" />
 									{readiness.pendingReviewProductsCount} Pending Review →
@@ -351,7 +359,6 @@ export const PriceAnalysisPage = () => {
 						</div>
 					</div>
 
-					{/* Stream mini-progress bars */}
 					<div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 pt-3 border-t border-slate-100">
 						<div className="flex items-center justify-between text-[11px]">
 							<span className="font-bold text-slate-600">
@@ -364,7 +371,7 @@ export const PriceAnalysisPage = () => {
 						</div>
 						<div className="flex items-center justify-between text-[11px]">
 							<span className="font-bold text-slate-600">
-								🛒 FMCG Core (95% Target):
+								FMCG Core (95% Target):
 							</span>
 							<span className="font-mono font-bold text-slate-800">
 								{readiness.fmcgStream.approved} / {readiness.fmcgStream.total} (
@@ -445,7 +452,95 @@ export const PriceAnalysisPage = () => {
 				</>
 			)}
 
-			{/* Recalculate Modal with Category Streams & Date */}
+			{/* Pagination footer */}
+			{!isLoading && !isError && meta.totalPages > 1 && (
+				<div className="flex flex-col items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-xs sm:flex-row">
+					<p className="text-[11px] font-semibold text-slate-500">
+						Page{" "}
+						<span className="font-mono font-bold text-slate-700">
+							{meta.page}
+						</span>{" "}
+						of{" "}
+						<span className="font-mono font-bold text-slate-700">
+							{meta.totalPages}
+						</span>{" "}
+						·{" "}
+						<span className="font-mono font-bold text-slate-700">
+							{meta.total}
+						</span>{" "}
+						total analyses
+					</p>
+
+					<div className="flex items-center gap-1.5">
+						<button
+							type="button"
+							onClick={() => setPage(1)}
+							disabled={meta.page <= 1 || isFetching}
+							className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+							aria-label="First page"
+						>
+							«
+						</button>
+						<button
+							type="button"
+							onClick={() => setPage(meta.page - 1)}
+							disabled={meta.page <= 1 || isFetching}
+							className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+						>
+							Previous
+						</button>
+
+						{(() => {
+							const total = meta.totalPages;
+							const current = meta.page;
+							const span = 2;
+							const start = Math.max(1, current - span);
+							const end = Math.min(total, current + span);
+							const nums = [];
+							for (let i = start; i <= end; i += 1) nums.push(i);
+
+							return nums.map((num) => {
+								const active = num === current;
+								return (
+									<button
+										key={num}
+										type="button"
+										onClick={() => setPage(num)}
+										disabled={isFetching}
+										className={`min-w-[32px] rounded-lg border px-2 py-1.5 text-xs font-bold transition ${
+											active
+												? "border-[#A41821] bg-[#A41821] text-white shadow-xs"
+												: "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+										} disabled:cursor-not-allowed disabled:opacity-40`}
+									>
+										{num}
+									</button>
+								);
+							});
+						})()}
+
+						<button
+							type="button"
+							onClick={() => setPage(meta.page + 1)}
+							disabled={meta.page >= meta.totalPages || isFetching}
+							className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+						>
+							Next
+						</button>
+						<button
+							type="button"
+							onClick={() => setPage(meta.totalPages)}
+							disabled={meta.page >= meta.totalPages || isFetching}
+							className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+							aria-label="Last page"
+						>
+							»
+						</button>
+					</div>
+				</div>
+			)}
+
+			{/* Recalculate Modal */}
 			<RecalculateConfirmModal
 				isOpen={showRecalcModal}
 				onCancel={() => setShowRecalcModal(false)}
@@ -454,14 +549,14 @@ export const PriceAnalysisPage = () => {
 				surveyPeriodName={analyses[0]?.surveyPeriod?.name}
 			/>
 
-			{/* High-Speed Rapid Benchmark Price Adjustment Drawer */}
+			{/* Rapid Price Adjustment Drawer */}
 			<RapidPriceAdjustmentDrawer
 				isOpen={showRapidDrawer}
 				onClose={() => setShowRapidDrawer(false)}
 				analyses={flaggedAnalyses}
 			/>
 
-			{/* Groq Executive AI Report Modal */}
+			{/* AI Report Modal */}
 			<ExecutiveAiReportModal
 				isOpen={showAiReportModal}
 				onClose={() => setShowAiReportModal(false)}
