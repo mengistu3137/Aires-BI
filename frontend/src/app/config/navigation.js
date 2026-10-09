@@ -101,14 +101,14 @@ export const NAVIGATION = [
     iconSize: 18,
     roles: ["ADMIN", "MANAGER"],
   },
- /*  {
+ {
     id: "alerts",
     label: "Alerts",
     path: "/alerts",
     icon: Bell,
     iconSize: 18,
     roles: ["ADMIN", "MANAGER"],
-  }, */
+  }, 
   {
     id: "users",
     label: "Manage Users",

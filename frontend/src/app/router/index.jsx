@@ -62,226 +62,224 @@ const DefaultRedirect = () => {
 };
 
 export const router = createBrowserRouter([
-  {
-    path: "/login",
-    element: <LoginPage />,
-  },
-  {
-    path: "/",
-    element: (
-      <ProtectedRoute>
-        <MainLayout />
-      </ProtectedRoute>
-    ),
-    children: [
-      {
-        index: true,
-        element: <DefaultRedirect />,
-      },
+	{
+		path: "/login",
+		element: <LoginPage />,
+	},
+	{
+		path: "/",
+		element: (
+			<ProtectedRoute>
+				<MainLayout />
+			</ProtectedRoute>
+		),
+		children: [
+			{
+				index: true,
+				element: <DefaultRedirect />,
+			},
 
-      // ── Dashboards ──
-      {
-        path: "dashboard",
-        element: (
-          <ProtectedRoute allowedRoles={["ADMIN", "MANAGER", "FIELD_AUDITOR"]}>
-            <DashboardPage />
-          </ProtectedRoute>
-        ),
-      },
-      {
-        path: "bi-dashboard",
-        element: (
-          <ProtectedRoute allowedRoles={["ADMIN", "MANAGER"]}>
-            <Dashboard />
-          </ProtectedRoute>
-        ),
-      },
+			// ── Dashboards ──
+			{
+				path: "dashboard",
+				element: (
+					<ProtectedRoute allowedRoles={["ADMIN", "MANAGER", "FIELD_AUDITOR"]}>
+						<DashboardPage />
+					</ProtectedRoute>
+				),
+			},
+			{
+				path: "bi-dashboard",
+				element: (
+					<ProtectedRoute allowedRoles={["ADMIN", "MANAGER"]}>
+						<Dashboard />
+					</ProtectedRoute>
+				),
+			},
 
-      // ── Field Data Collection & Rapid Audits ──
-      {
-        path: "survey",
-        element: (
-          <ProtectedRoute allowedRoles={["ADMIN", "MANAGER", "FIELD_AUDITOR"]}>
-            <SurveyorHomePage />
-          </ProtectedRoute>
-        ),
-      },
-      {
-        path: "survey/audit/:assignmentId",
-        element: (
-          <ProtectedRoute allowedRoles={["ADMIN", "MANAGER", "FIELD_AUDITOR"]}>
-            <Survey />
-          </ProtectedRoute>
-        ),
-      },
-      {
-        path: "progress",
-        element: (
-          <ProtectedRoute allowedRoles={["ADMIN", "MANAGER"]}>
-            <SurveyProgress />
-          </ProtectedRoute>
-        ),
-      },
+			// ── Field Data Collection & Rapid Audits ──
+			{
+				path: "survey",
+				element: (
+					<ProtectedRoute allowedRoles={["ADMIN", "MANAGER", "FIELD_AUDITOR"]}>
+						<SurveyorHomePage />
+					</ProtectedRoute>
+				),
+			},
+			{
+				path: "survey/audit/:assignmentId",
+				element: (
+					<ProtectedRoute allowedRoles={["ADMIN", "MANAGER", "FIELD_AUDITOR"]}>
+						<Survey />
+					</ProtectedRoute>
+				),
+			},
+			{
+				path: "progress",
+				element: (
+					<ProtectedRoute allowedRoles={["ADMIN", "MANAGER"]}>
+						<SurveyProgress />
+					</ProtectedRoute>
+				),
+			},
 
-      // ── Master Data ──
-      {
-        path: "products",
-        element: (
-          <ProtectedRoute allowedRoles={["ADMIN", "MANAGER"]}>
-            <ProductsPage />
-          </ProtectedRoute>
-        ),
-      },
-      {
-        path: "stores",
-        element: (
-          <ProtectedRoute allowedRoles={["ADMIN", "MANAGER"]}>
-            <StoresPage />
-          </ProtectedRoute>
-        ),
-      },
+			// ── Master Data ──
+			{
+				path: "products",
+				element: (
+					<ProtectedRoute allowedRoles={["ADMIN", "MANAGER"]}>
+						<ProductsPage />
+					</ProtectedRoute>
+				),
+			},
+			{
+				path: "stores",
+				element: (
+					<ProtectedRoute allowedRoles={["ADMIN", "MANAGER"]}>
+						<StoresPage />
+					</ProtectedRoute>
+				),
+			},
 
-      // ── Audits & Observations ──
-      {
-        path: "audits",
-        element: (
-          <ProtectedRoute allowedRoles={["ADMIN", "MANAGER", "FIELD_AUDITOR"]}>
-            <AuditListPage />
-          </ProtectedRoute>
-        ),
-      },
-      {
-        path: "audits/history",
-        element: (
-          <ProtectedRoute allowedRoles={["ADMIN", "MANAGER", "FIELD_AUDITOR"]}>
-            <AuditHistoryPage />
-          </ProtectedRoute>
-        ),
-      },
-      {
-        path: "audits/:auditId",
-        element: (
-          <ProtectedRoute allowedRoles={["ADMIN", "MANAGER", "FIELD_AUDITOR"]}>
-            <AuditDetailPage />
-          </ProtectedRoute>
-        ),
-      },
-      {
-        path: "audits/:auditId/observations",
-        element: (
-          <ProtectedRoute allowedRoles={["ADMIN", "MANAGER", "FIELD_AUDITOR"]}>
-            <AuditObservationsPage />
-          </ProtectedRoute>
-        ),
-      },
-      {
-        path: "observations",
-        element: (
-          <ProtectedRoute allowedRoles={["ADMIN", "MANAGER", "FIELD_AUDITOR"]}>
-            <ObservationsPage />
-          </ProtectedRoute>
-        ),
-      },
-      {
-        path: "observations/:observationId",
-        element: (
-          <ProtectedRoute allowedRoles={["ADMIN", "MANAGER", "FIELD_AUDITOR"]}>
-            <ObservationDetailPage />
-          </ProtectedRoute>
-        ),
-      },
+			// ── Audits & Observations ──
+			{
+				path: "audits",
+				element: (
+					<ProtectedRoute allowedRoles={["ADMIN", "MANAGER", "FIELD_AUDITOR"]}>
+						<AuditListPage />
+					</ProtectedRoute>
+				),
+			},
+			{
+				path: "audits/history",
+				element: (
+					<ProtectedRoute allowedRoles={["ADMIN", "MANAGER", "FIELD_AUDITOR"]}>
+						<AuditHistoryPage />
+					</ProtectedRoute>
+				),
+			},
+			{
+				path: "audits/:auditId",
+				element: (
+					<ProtectedRoute allowedRoles={["ADMIN", "MANAGER", "FIELD_AUDITOR"]}>
+						<AuditDetailPage />
+					</ProtectedRoute>
+				),
+			},
+			{
+				path: "audits/:auditId/observations",
+				element: (
+					<ProtectedRoute allowedRoles={["ADMIN", "MANAGER", "FIELD_AUDITOR"]}>
+						<AuditObservationsPage />
+					</ProtectedRoute>
+				),
+			},
+			{
+				path: "observations",
+				element: (
+					<ProtectedRoute allowedRoles={["ADMIN", "MANAGER", "FIELD_AUDITOR"]}>
+						<ObservationsPage />
+					</ProtectedRoute>
+				),
+			},
+			{
+				path: "observations/:observationId",
+				element: (
+					<ProtectedRoute allowedRoles={["ADMIN", "MANAGER", "FIELD_AUDITOR"]}>
+						<ObservationDetailPage />
+					</ProtectedRoute>
+				),
+			},
 
-      // ── Queens Prices ──
-      {
-        path: "queens-prices",
-        element: (
-          <ProtectedRoute allowedRoles={["ADMIN", "MANAGER"]}>
-            <QueensPricesPage />
-          </ProtectedRoute>
-        ),
-      },
-      {
-        path: "queens-prices/new",
-        element: (
-          <ProtectedRoute allowedRoles={["ADMIN", "MANAGER"]}>
-            <CreateQueensPricePage />
-          </ProtectedRoute>
-        ),
-      },
-      {
-        path: "queens-prices/:id",
-        element: (
-          <ProtectedRoute allowedRoles={["ADMIN", "MANAGER"]}>
-            <QueensPriceDetailsPage />
-          </ProtectedRoute>
-        ),
-      },
-      {
-        path: "queens-prices/:id/edit",
-        element: (
-          <ProtectedRoute allowedRoles={["ADMIN", "MANAGER"]}>
-            <EditQueensPricePage />
-          </ProtectedRoute>
-        ),
-      },
-      {
-        path: "products/:productId/queens-prices",
-        element: (
-          <ProtectedRoute allowedRoles={["ADMIN", "MANAGER"]}>
-            <ProductQueensPricesPage />
-          </ProtectedRoute>
-        ),
-      },
+			// ── Queens Prices ──
+			{
+				path: "queens-prices",
+				element: (
+					<ProtectedRoute allowedRoles={["ADMIN", "MANAGER"]}>
+						<QueensPricesPage />
+					</ProtectedRoute>
+				),
+			},
+			{
+				path: "queens-prices/new",
+				element: (
+					<ProtectedRoute allowedRoles={["ADMIN", "MANAGER"]}>
+						<CreateQueensPricePage />
+					</ProtectedRoute>
+				),
+			},
+			{
+				path: "queens-prices/:id",
+				element: (
+					<ProtectedRoute allowedRoles={["ADMIN", "MANAGER"]}>
+						<QueensPriceDetailsPage />
+					</ProtectedRoute>
+				),
+			},
+			{
+				path: "queens-prices/:id/edit",
+				element: (
+					<ProtectedRoute allowedRoles={["ADMIN", "MANAGER"]}>
+						<EditQueensPricePage />
+					</ProtectedRoute>
+				),
+			},
+			{
+				path: "products/:productId/queens-prices",
+				element: (
+					<ProtectedRoute allowedRoles={["ADMIN", "MANAGER"]}>
+						<ProductQueensPricesPage />
+					</ProtectedRoute>
+				),
+			},
 
-      // ── Price Analysis ──
-      {
-        path: "price-analysis",
-        element: (
-          <ProtectedRoute allowedRoles={["ADMIN", "MANAGER"]}>
-            <PriceAnalysisPage />
-          </ProtectedRoute>
-        ),
-      },
-      {
-        path: "price-analysis/:id",
-        element: (
-          <ProtectedRoute allowedRoles={["ADMIN", "MANAGER"]}>
-            <PriceAnalysisDetailPage />
-          </ProtectedRoute>
-        ),
-      },
-
-      /* // ── Alerts ──
-      {
-        path: "alerts",
-        element: (
-          <ProtectedRoute allowedRoles={["ADMIN", "MANAGER"]}>
-            <AlertsPage />
-          </ProtectedRoute>
-        ),
-      }, */
-     /*  {
-        path: "alerts/:id",
-        element: (
-          <ProtectedRoute allowedRoles={["ADMIN", "MANAGER"]}>
-            <AlertDetailPage />
-          </ProtectedRoute>
-        ),
-      },
- */
-      // ── Users / Staff Management ──
-      {
-        path: "users",
-        element: (
-          <ProtectedRoute allowedRoles={["ADMIN"]}>
-            <UsersPage />
-          </ProtectedRoute>
-        ),
-      },
-    ],
-  },
-  {
-    path: "*",
-    element: <Navigate to="/login" replace />,
-  },
+			// ── Price Analysis ──
+			{
+				path: "price-analysis",
+				element: (
+					<ProtectedRoute allowedRoles={["ADMIN", "MANAGER"]}>
+						<PriceAnalysisPage />
+					</ProtectedRoute>
+				),
+			},
+			{
+				path: "price-analysis/:id",
+				element: (
+					<ProtectedRoute allowedRoles={["ADMIN", "MANAGER"]}>
+						<PriceAnalysisDetailPage />
+					</ProtectedRoute>
+				),
+			},
+			// ── Alerts ──
+			{
+				path: "alerts",
+				element: (
+					<ProtectedRoute allowedRoles={["ADMIN", "MANAGER"]}>
+						<AlertsPage />
+					</ProtectedRoute>
+				),
+			},
+			{
+				path: "alerts/:id",
+				element: (
+					<ProtectedRoute allowedRoles={["ADMIN", "MANAGER"]}>
+						<AlertDetailPage />
+					</ProtectedRoute>
+				),
+			},
+			// ── Users / Staff Management ──
+			{
+				path: "users",
+				element: (
+					<ProtectedRoute allowedRoles={["ADMIN"]}>
+						<UsersPage />
+					</ProtectedRoute>
+				),
+			},
+		],
+	},
+	{
+		path: "*",
+		element: <Navigate to="/login" replace />,
+	},
 ]);
