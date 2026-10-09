@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth.js";
 import {
 	useAssignments,
@@ -20,6 +20,8 @@ const STATUS_FILTERS = [
 	{ value: "CANCELLED", label: "Cancelled" },
 ];
 
+const PAGE_SIZE = 10;
+
 const formatAssignedDate = (dateString) => {
 	if (!dateString) return "—";
 	const date = new Date(dateString);
@@ -34,15 +36,40 @@ const formatAssignedDate = (dateString) => {
 export const SurveyProgress = () => {
 	const navigate = useNavigate();
 	const { isAuditor } = useAuth();
-	const {
-		data: assignments = [],
-		isLoading,
-		isError,
-		error,
-		refetch,
-	} = useAssignments();
+	const [searchParams, setSearchParams] = useSearchParams();
+
+	// URL-backed pagination (survives refresh + shareable)
+	const page = Math.max(1, Number(searchParams.get("page") || 1));
+	const statusFromUrl = searchParams.get("status") || "";
+
+	const setPage = (next) => {
+		const nextParams = new URLSearchParams(searchParams);
+		if (next <= 1) nextParams.delete("page");
+		else nextParams.set("page", String(next));
+		setSearchParams(nextParams, { replace: true });
+	};
+
+	const setStatusFilter = (value) => {
+		const nextParams = new URLSearchParams(searchParams);
+		if (!value) nextParams.delete("status");
+		else nextParams.set("status", value);
+		// Reset to page 1 whenever the filter changes
+		nextParams.delete("page");
+		setSearchParams(nextParams, { replace: true });
+	};
+
+	// Server-side filters + pagination
+	const { data, isLoading, isError, error, refetch, isFetching } =
+		useAssignments({
+			page,
+			limit: PAGE_SIZE,
+			status: statusFromUrl || undefined,
+		});
+
+	const assignments = data?.assignments || [];
+	const meta = data?.meta || { page: 1, totalPages: 1, total: 0 };
+
 	const deleteAssignment = useDeleteAssignment();
-  console.log("the assignment",assignments)
 
 	const [viewMode, setViewMode] = useState("STORE_DISPATCH"); // 'STORE_DISPATCH' | 'INDIVIDUAL_TASKS'
 	const [isAssignmentModalOpen, setIsAssignmentModalOpen] = useState(false);
@@ -50,10 +77,12 @@ export const SurveyProgress = () => {
 	const [selectedStoreId, setSelectedStoreId] = useState(null);
 	const [editingAssignment, setEditingAssignment] = useState(null);
 	const [deleteCandidate, setDeleteCandidate] = useState(null);
-	const [statusFilter, setStatusFilter] = useState("");
 	const [searchTerm, setSearchTerm] = useState("");
 
-// Group assignments by Store + SurveyPeriod for Overall Store Dispatch Tracking
+	// Alias for readability further down
+	const statusFilter = statusFromUrl;
+
+	// Group assignments by Store + SurveyPeriod for Overall Store Dispatch Tracking
 	const storeDispatches = useMemo(() => {
 		const groups = new Map();
 
@@ -141,6 +170,7 @@ export const SurveyProgress = () => {
 			};
 		});
 	}, [assignments]);
+
 	// Filtering for Store Dispatches
 	const filteredStoreDispatches = useMemo(() => {
 		let list = storeDispatches;
@@ -423,6 +453,95 @@ export const SurveyProgress = () => {
 				</>
 			)}
 
+			{/* Pagination footer (managers/admins only) */}
+			{!isLoading && !isError && !isAuditor && meta.totalPages > 1 && (
+				<div className="flex flex-col items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-xs sm:flex-row">
+					<p className="text-[11px] font-semibold text-slate-500">
+						Page{" "}
+						<span className="font-mono font-bold text-slate-700">
+							{meta.page}
+						</span>{" "}
+						of{" "}
+						<span className="font-mono font-bold text-slate-700">
+							{meta.totalPages}
+						</span>{" "}
+						·{" "}
+						<span className="font-mono font-bold text-slate-700">
+							{meta.total}
+						</span>{" "}
+						total assignments
+					</p>
+
+					<div className="flex items-center gap-1.5">
+						<button
+							type="button"
+							onClick={() => setPage(1)}
+							disabled={meta.page <= 1 || isFetching}
+							className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+							aria-label="First page"
+						>
+							«
+						</button>
+						<button
+							type="button"
+							onClick={() => setPage(meta.page - 1)}
+							disabled={meta.page <= 1 || isFetching}
+							className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+						>
+							Previous
+						</button>
+
+						{/* Page number pills (window of ±2 around the current page) */}
+						{(() => {
+							const total = meta.totalPages;
+							const current = meta.page;
+							const span = 2;
+							const start = Math.max(1, current - span);
+							const end = Math.min(total, current + span);
+							const nums = [];
+							for (let i = start; i <= end; i += 1) nums.push(i);
+
+							return nums.map((num) => {
+								const active = num === current;
+								return (
+									<button
+										key={num}
+										type="button"
+										onClick={() => setPage(num)}
+										disabled={isFetching}
+										className={`min-w-[32px] rounded-lg border px-2 py-1.5 text-xs font-bold transition ${
+											active
+												? "border-[#A41821] bg-[#A41821] text-white shadow-xs"
+												: "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+										} disabled:cursor-not-allowed disabled:opacity-40`}
+									>
+										{num}
+									</button>
+								);
+							});
+						})()}
+
+						<button
+							type="button"
+							onClick={() => setPage(meta.page + 1)}
+							disabled={meta.page >= meta.totalPages || isFetching}
+							className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+						>
+							Next
+						</button>
+						<button
+							type="button"
+							onClick={() => setPage(meta.totalPages)}
+							disabled={meta.page >= meta.totalPages || isFetching}
+							className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+							aria-label="Last page"
+						>
+							»
+						</button>
+					</div>
+				</div>
+			)}
+
 			{/* Dispatch Modal */}
 			<SurveyAssignmentModal
 				isOpen={isAssignmentModalOpen}
@@ -457,7 +576,6 @@ export const SurveyProgress = () => {
 /* Overall Store Dispatch Card Component */
 const StoreDispatchCard = ({ dispatch, onManage, onViewAudits }) => {
 	const store = dispatch.store || {};
-	const cycle = dispatch.surveyPeriod || {};
 	const isDone = dispatch.overallStatus === "COMPLETED";
 
 	const statusAccent =
@@ -486,7 +604,7 @@ const StoreDispatchCard = ({ dispatch, onManage, onViewAudits }) => {
 					<StatusBadge status={dispatch.overallStatus} />
 				</div>
 
-				{/* OVERALL DISPATCH PROGRESS BAR (Tracked against 100 or 120 items) */}
+				{/* OVERALL DISPATCH PROGRESS BAR */}
 				<div className="space-y-1.5 rounded-xl bg-slate-50/80 p-3 border border-slate-100">
 					<div className="flex items-center justify-between text-xs font-bold text-slate-700">
 						<span>Overall Dispatch Progress:</span>

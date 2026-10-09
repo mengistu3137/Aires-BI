@@ -60,6 +60,8 @@ export const assignmentQuerySchema = z
     storeId: z.string().optional(),
     surveyPeriodId: z.string().optional(),
     status: z.enum(ASSIGNMENT_STATUSES).optional(),
+    page: z.coerce.number().int().min(1).optional().default(1),
+    limit: z.coerce.number().int().min(1).max(100).optional().default(10),
   })
   .optional();
 

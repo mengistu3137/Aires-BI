@@ -11,6 +11,7 @@ import {
 } from "@/services/api/assignment.api.js";
 import { useAuth } from "@/hooks/useAuth.js";
 import toast from "react-hot-toast";
+
 export const useCreateBatchAssignment = () => {
   const queryClient = useQueryClient();
   return useMutation({
@@ -20,7 +21,11 @@ export const useCreateBatchAssignment = () => {
       invalidate(queryClient);
     },
     onError: (err) => {
-      toast.error(err.response?.data?.message || err.message || "Failed to dispatch assignments");
+      toast.error(
+        err.response?.data?.message ||
+        err.message ||
+        "Failed to dispatch assignments",
+      );
     },
   });
 };
@@ -34,31 +39,75 @@ export const useUpdateStoreAllocations = () => {
       invalidate(queryClient);
     },
     onError: (err) => {
-      toast.error(err.response?.data?.message || err.message || "Failed to update allocations");
+      toast.error(
+        err.response?.data?.message ||
+        err.message ||
+        "Failed to update allocations",
+      );
     },
   });
 };
+
 /**
  * Fetch assignments. Role-aware:
- *   - FIELD_AUDITOR → GET /assignments/mine
- *   - ADMIN/MANAGER → GET /assignments with filters
+ *   - FIELD_AUDITOR → GET /assignments/mine   (not paginated)
+ *   - ADMIN/MANAGER → GET /assignments with filters + pagination
+ *
+ * Returns the full response object so the caller can read `meta`:
+ *   {
+ *     assignments: [...],
+ *     meta: { page, limit, total, totalPages }
+ *   }
+ *
+ * Auditors get a synthetic meta so callers can treat both shapes
+ * uniformly without branching.
  */
 export const useAssignments = (filters = {}) => {
   const { isAuditor } = useAuth();
 
-  const queryKey = isAuditor ? ["assignments", "mine"] : ["assignments", "all", filters];
+  // Pull pagination keys out of filters so a nullish limit/page never
+  // sends an empty query string. Backend clamps to [1, 100] anyway.
+  const page = Number(filters.page) > 0 ? Number(filters.page) : 1;
+  const limit = Number(filters.limit) > 0 ? Number(filters.limit) : 20;
+
+  const queryKey = isAuditor
+    ? ["assignments", "mine"]
+    : ["assignments", "all", { ...filters, page, limit }];
 
   return useQuery({
     queryKey,
     queryFn: async () => {
       if (isAuditor) {
         const res = await getMyAssignmentsRequest();
-        return res?.data?.assignments || [];
+        const assignments = res?.data?.assignments || [];
+        return {
+          assignments,
+          meta: {
+            page: 1,
+            limit: assignments.length || 1,
+            total: assignments.length,
+            totalPages: 1,
+          },
+        };
       }
-      const res = await getAllAssignmentsRequest(filters);
-      return res?.data?.assignments || [];
+
+      const res = await getAllAssignmentsRequest({ ...filters, page, limit });
+      // Controller returns: { status, results, data: { assignments }, meta }
+      return {
+        assignments: res?.data?.assignments || [],
+        meta:
+          res?.meta || {
+            page,
+            limit,
+            total: 0,
+            totalPages: 1,
+          },
+      };
     },
     staleTime: 60 * 1000,
+    // Keep the previous page visible while fetching the next one —
+    // prevents the grid from collapsing to a spinner on every page change.
+    placeholderData: (prev) => prev,
   });
 };
 
