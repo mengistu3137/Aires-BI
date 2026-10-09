@@ -10,63 +10,69 @@ import { subscribeToRealtimeEvent, getSocket } from "@/services/socket.js";
 import { useAuth } from "@/hooks/useAuth.js";
 import toast from "react-hot-toast";
 
-export const useUsers = () => {
+/**
+ * Fetch users with optional filters + pagination.
+ *
+ * Returns:
+ *   users    → array for the current page
+ *   meta     → { page, limit, total, totalPages }
+ *   ...mutation helpers
+ */
+export const useUsers = (filters = {}) => {
     const queryClient = useQueryClient();
     const { isManager, isAdmin } = useAuth();
 
-    // 1. Initial REST API Load: Database remains source of truth
+    const page = Number(filters.page) > 0 ? Number(filters.page) : 1;
+    const limit = Number(filters.limit) > 0 ? Number(filters.limit) : 20;
+
+    const queryKey = ["users", { ...filters, page, limit }];
+
+    // 1. REST API load
     const usersQuery = useQuery({
-        queryKey: ["users"],
+        queryKey,
         queryFn: async () => {
-            const response = await getUsersRequest();
-            return response?.data?.users || response?.data || [];
+            const response = await getUsersRequest({ ...filters, page, limit });
+            // Backend returns { status, results, data: { users }, meta }
+            const users = response?.data?.users || [];
+            const meta =
+                response?.meta || {
+                    page,
+                    limit,
+                    total: users.length,
+                    totalPages: 1,
+                };
+            return { users, meta };
         },
         staleTime: 60 * 1000,
+        placeholderData: (prev) => prev,
     });
 
-    // 2. Real-Time WebSocket Subscription for Live GPS & User Updates
+    // 2. Real-time WebSocket subscription — updates any cached users page
     useEffect(() => {
         if (!isAdmin && !isManager) return;
 
-        const unsubscribeGps = subscribeToRealtimeEvent("user:gps-permission-updated", (payload) => {
-            queryClient.setQueryData(["users"], (oldUsers) => {
-                const list = Array.isArray(oldUsers) ? oldUsers : oldUsers?.users;
-                if (!Array.isArray(list)) return oldUsers;
-
-                const updated = list.map((u) => {
-                    if (u.id === payload.userId) {
-                        return {
-                            ...u,
-                            locationPermission: payload.gpsPermissionStatus || payload.locationPermission,
-                            gpsPermissionStatus: payload.gpsPermissionStatus || payload.locationPermission,
-                            updatedAt: payload.updatedAt || u.updatedAt,
-                        };
-                    }
-                    return u;
-                });
-
-                return Array.isArray(oldUsers) ? updated : { ...oldUsers, users: updated };
-            });
-        });
+        const unsubscribeGps = subscribeToRealtimeEvent(
+            "user:gps-permission-updated",
+            (payload) => {
+                // Invalidate every cached users page so realtime updates
+                // refresh whichever page is currently shown.
+                queryClient.invalidateQueries({ queryKey: ["users"] });
+            },
+        );
 
         const socket = getSocket();
         const handleReconnect = () => {
             queryClient.invalidateQueries({ queryKey: ["users"] });
         };
 
-        if (socket) {
-            socket.on("connect", handleReconnect);
-        }
+        if (socket) socket.on("connect", handleReconnect);
 
         return () => {
             unsubscribeGps();
-            if (socket) {
-                socket.off("connect", handleReconnect);
-            }
+            if (socket) socket.off("connect", handleReconnect);
         };
     }, [isAdmin, isManager, queryClient]);
 
-    // Mutations
     const createUserMutation = useMutation({
         mutationFn: createUserRequest,
         onSuccess: () => {
@@ -99,16 +105,13 @@ export const useUsers = () => {
         },
     });
 
-    // Guaranteed array extraction regardless of envelope format
-    const rawData = usersQuery.data;
-    const usersList = Array.isArray(rawData)
-        ? rawData
-        : Array.isArray(rawData?.users)
-            ? rawData.users
-            : [];
+    const users = usersQuery.data?.users || [];
+    const meta = usersQuery.data?.meta || { page: 1, limit, total: 0, totalPages: 1 };
 
     return {
-        users: usersList,
+        users,
+        meta,
+        isFetching: usersQuery.isFetching,
         isLoading: usersQuery.isLoading,
         createUser: createUserMutation.mutateAsync,
         updateUser: updateUserMutation.mutateAsync,

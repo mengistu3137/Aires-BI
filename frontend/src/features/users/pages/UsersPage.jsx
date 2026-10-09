@@ -1,9 +1,11 @@
 import React, { useState } from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useSearchParams } from "react-router-dom";
 import { useUsers } from "../hooks/useUsers.js";
 import { useAuth } from "@/hooks/useAuth.js";
 import { normalizeEthiopianPhone } from "@/utils/phone.utils.js";
 import toast from "react-hot-toast";
+
+const PAGE_SIZE = 20;
 
 const LocationPermissionBadge = ({ role, permission }) => {
 	if (role !== "FIELD_AUDITOR") {
@@ -45,10 +47,9 @@ const LocationPermissionBadge = ({ role, permission }) => {
 	);
 };
 
-// 1. Update DEFAULT_CREATE_FORM:
 const DEFAULT_CREATE_FORM = {
 	name: "",
-	phone: "", // Start blank so phone is truly optional when email is provided
+	phone: "",
 	email: "",
 	password: "",
 	role: "FIELD_AUDITOR",
@@ -56,9 +57,29 @@ const DEFAULT_CREATE_FORM = {
 
 export const UsersPage = () => {
 	const { isAdmin, isAuditor } = useAuth();
-	const { users, isLoading, createUser, updateUser, deleteUser } = useUsers();
+	const [searchParams, setSearchParams] = useSearchParams();
 
-	// 1. Strict Admin-Only Authorization Guard
+	// URL-backed pagination
+	const page = Math.max(1, Number(searchParams.get("page") || 1));
+
+	const setPage = (next) => {
+		const nextParams = new URLSearchParams(searchParams);
+		if (next <= 1) nextParams.delete("page");
+		else nextParams.set("page", String(next));
+		setSearchParams(nextParams, { replace: true });
+	};
+
+	const {
+		users,
+		meta,
+		isLoading,
+		isFetching,
+		createUser,
+		updateUser,
+		deleteUser,
+	} = useUsers({ page, limit: PAGE_SIZE });
+
+	// Strict Admin-Only Authorization Guard
 	if (!isAdmin) {
 		return <Navigate to={isAuditor ? "/audits" : "/dashboard"} replace />;
 	}
@@ -67,7 +88,6 @@ export const UsersPage = () => {
 	const [editingUser, setEditingUser] = useState(null);
 	const [deleteCandidate, setDeleteCandidate] = useState(null);
 
-	// Password visibility states
 	const [showCreatePassword, setShowCreatePassword] = useState(false);
 	const [showEditPassword, setShowEditPassword] = useState(false);
 
@@ -88,7 +108,7 @@ export const UsersPage = () => {
 			name: u.name || "",
 			phone: normalizeEthiopianPhone(u.phone || ""),
 			email: u.email || "",
-			password: "", // Left blank unless admin chooses to reset
+			password: "",
 			role: u.role || "FIELD_AUDITOR",
 			active: u.active !== false,
 		});
@@ -120,79 +140,77 @@ export const UsersPage = () => {
 		}
 	};
 
-	// 2. Update handleCreateSubmit:
-const handleCreateSubmit = async (e) => {
-	e.preventDefault();
+	const handleCreateSubmit = async (e) => {
+		e.preventDefault();
 
-	const phone = createFormData.phone.trim();
-	const email = createFormData.email.trim();
+		const phone = createFormData.phone.trim();
+		const email = createFormData.email.trim();
 
-	if (!phone && !email) {
-		toast.error("Please provide either a phone number or an email address");
-		return;
-	}
-
-	// Validate phone format only if phone was entered
-	if (phone && phone.length !== 13) {
-		toast.error(
-			"Please enter a valid 9-digit Ethiopian mobile number (+2519... or 09...)",
-		);
-		return;
-	}
-
-	try {
-		await createUser({
-			...createFormData,
-			phone: phone || undefined,
-			email: email || undefined,
-		});
-		setIsCreateModalOpen(false);
-		setShowCreatePassword(false);
-		setCreateFormData(DEFAULT_CREATE_FORM);
-	} catch {
-		// Error handled by mutation hook toast
-	}
-};
-// 3. Update handleEditSubmit:
-const handleEditSubmit = async (e) => {
-	e.preventDefault();
-	if (!editingUser) return;
-
-	const phone = editFormData.phone?.trim() || "";
-	const email = editFormData.email?.trim() || "";
-
-	if (!phone && !email) {
-		toast.error("Please provide either a phone number or an email address");
-		return;
-	}
-
-	if (phone && phone !== "+251" && phone.length !== 13) {
-		toast.error(
-			"Please enter a valid 9-digit Ethiopian mobile number (+2519... or 09...)",
-		);
-		return;
-	}
-
-	try {
-		const updates = {
-			name: editFormData.name.trim(),
-			phone: phone && phone !== "+251" ? phone : null,
-			email: email || null,
-			role: editFormData.role,
-			active: editFormData.active,
-		};
-
-		if (editFormData.password && editFormData.password.trim().length > 0) {
-			updates.password = editFormData.password.trim();
+		if (!phone && !email) {
+			toast.error("Please provide either a phone number or an email address");
+			return;
 		}
 
-		await updateUser({ id: editingUser.id, updates });
-		setEditingUser(null);
-		setShowEditPassword(false);
-	} catch {
-		// Handled by mutation toast
-	}
-};
+		if (phone && phone.length !== 13) {
+			toast.error(
+				"Please enter a valid 9-digit Ethiopian mobile number (+2519... or 09...)",
+			);
+			return;
+		}
+
+		try {
+			await createUser({
+				...createFormData,
+				phone: phone || undefined,
+				email: email || undefined,
+			});
+			setIsCreateModalOpen(false);
+			setShowCreatePassword(false);
+			setCreateFormData(DEFAULT_CREATE_FORM);
+		} catch {
+			// Error handled by mutation hook toast
+		}
+	};
+
+	const handleEditSubmit = async (e) => {
+		e.preventDefault();
+		if (!editingUser) return;
+
+		const phone = editFormData.phone?.trim() || "";
+		const email = editFormData.email?.trim() || "";
+
+		if (!phone && !email) {
+			toast.error("Please provide either a phone number or an email address");
+			return;
+		}
+
+		if (phone && phone !== "+251" && phone.length !== 13) {
+			toast.error(
+				"Please enter a valid 9-digit Ethiopian mobile number (+2519... or 09...)",
+			);
+			return;
+		}
+
+		try {
+			const updates = {
+				name: editFormData.name.trim(),
+				phone: phone && phone !== "+251" ? phone : null,
+				email: email || null,
+				role: editFormData.role,
+				active: editFormData.active,
+			};
+
+			if (editFormData.password && editFormData.password.trim().length > 0) {
+				updates.password = editFormData.password.trim();
+			}
+
+			await updateUser({ id: editingUser.id, updates });
+			setEditingUser(null);
+			setShowEditPassword(false);
+		} catch {
+			// Handled by mutation toast
+		}
+	};
 
 	if (isLoading) {
 		return (
@@ -209,7 +227,7 @@ const handleEditSubmit = async (e) => {
 				<div>
 					<div className="flex items-center gap-2">
 						<h1 className="text-lg sm:text-xl font-black text-slate-900 tracking-tight">
-							Auditors & Staff Management
+							Auditors &amp; Staff Management
 						</h1>
 						<span className="rounded-md bg-red-50 border border-red-200 px-2 py-0.5 text-[9px] sm:text-[10px] font-bold text-[#A41821] uppercase tracking-wider">
 							Admin Only
@@ -235,7 +253,7 @@ const handleEditSubmit = async (e) => {
 				</button>
 			</div>
 
-			{/* Desktop Table View (Visible md and above) */}
+			{/* Desktop Table View */}
 			<div className="hidden md:block rounded-2xl border border-slate-200 bg-white shadow-xs overflow-hidden">
 				<div className="overflow-x-auto">
 					<table className="w-full text-left text-xs">
@@ -337,14 +355,13 @@ const handleEditSubmit = async (e) => {
 				</div>
 			</div>
 
-			{/* Mobile Card List View (Visible on small screens < md) */}
+			{/* Mobile Card List View */}
 			<div className="space-y-3 md:hidden">
 				{users.map((u) => (
 					<div
 						key={u.id}
 						className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs space-y-3 transition"
 					>
-						{/* User Title & Badges */}
 						<div className="flex items-start justify-between gap-2">
 							<div className="min-w-0 flex-1">
 								<div className="font-bold text-slate-900 text-sm truncate">
@@ -384,7 +401,6 @@ const handleEditSubmit = async (e) => {
 							</div>
 						</div>
 
-						{/* Quick Metadata Matrix */}
 						<div className="grid grid-cols-2 gap-2 text-xs bg-slate-50/70 rounded-xl p-2.5 border border-slate-100">
 							<div>
 								<span className="text-slate-400 block text-[9px] uppercase font-bold tracking-wider">
@@ -407,13 +423,11 @@ const handleEditSubmit = async (e) => {
 							</div>
 						</div>
 
-						{/* Stats Summary */}
 						<div className="text-[11px] text-slate-500 font-medium">
 							{u.stats?.assignments || 0} assignments •{" "}
 							{u.stats?.createdAudits || 0} audits
 						</div>
 
-						{/* Mobile Actions */}
 						<div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
 							<button
 								type="button"
@@ -440,6 +454,94 @@ const handleEditSubmit = async (e) => {
 					</div>
 				))}
 			</div>
+
+			{/* Pagination footer */}
+			{!isLoading && meta.totalPages > 1 && (
+				<div className="flex flex-col items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-xs sm:flex-row">
+					<p className="text-[11px] font-semibold text-slate-500">
+						Page{" "}
+						<span className="font-mono font-bold text-slate-700">
+							{meta.page}
+						</span>{" "}
+						of{" "}
+						<span className="font-mono font-bold text-slate-700">
+							{meta.totalPages}
+						</span>{" "}
+						·{" "}
+						<span className="font-mono font-bold text-slate-700">
+							{meta.total}
+						</span>{" "}
+						total users
+					</p>
+
+					<div className="flex items-center gap-1.5">
+						<button
+							type="button"
+							onClick={() => setPage(1)}
+							disabled={meta.page <= 1 || isFetching}
+							className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+							aria-label="First page"
+						>
+							«
+						</button>
+						<button
+							type="button"
+							onClick={() => setPage(meta.page - 1)}
+							disabled={meta.page <= 1 || isFetching}
+							className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+						>
+							Previous
+						</button>
+
+						{(() => {
+							const total = meta.totalPages;
+							const current = meta.page;
+							const span = 2;
+							const start = Math.max(1, current - span);
+							const end = Math.min(total, current + span);
+							const nums = [];
+							for (let i = start; i <= end; i += 1) nums.push(i);
+
+							return nums.map((num) => {
+								const active = num === current;
+								return (
+									<button
+										key={num}
+										type="button"
+										onClick={() => setPage(num)}
+										disabled={isFetching}
+										className={`min-w-[32px] rounded-lg border px-2 py-1.5 text-xs font-bold transition ${
+											active
+												? "border-[#A41821] bg-[#A41821] text-white shadow-xs"
+												: "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+										} disabled:cursor-not-allowed disabled:opacity-40`}
+									>
+										{num}
+									</button>
+								);
+							});
+						})()}
+
+						<button
+							type="button"
+							onClick={() => setPage(meta.page + 1)}
+							disabled={meta.page >= meta.totalPages || isFetching}
+							className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+						>
+							Next
+						</button>
+						<button
+							type="button"
+							onClick={() => setPage(meta.totalPages)}
+							disabled={meta.page >= meta.totalPages || isFetching}
+							className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+							aria-label="Last page"
+						>
+							»
+						</button>
+					</div>
+				</div>
+			)}
 
 			{/* Add User Modal */}
 			{isCreateModalOpen && (
@@ -486,11 +588,9 @@ const handleEditSubmit = async (e) => {
 									<label className="font-semibold text-slate-700">
 										Phone Number
 									</label>
-								
 								</div>
 								<input
 									type="tel"
-								
 									placeholder="+251911223344"
 									value={createFormData.phone}
 									onChange={(e) =>
@@ -505,7 +605,7 @@ const handleEditSubmit = async (e) => {
 
 							<div>
 								<label className="block font-semibold text-slate-700 mb-1">
-									Email 
+									Email
 								</label>
 								<input
 									type="email"
@@ -521,7 +621,6 @@ const handleEditSubmit = async (e) => {
 								/>
 							</div>
 
-							{/* Password with Eye Show/Hide Toggle */}
 							<div>
 								<label className="block font-semibold text-slate-700 mb-1">
 									Password
@@ -707,7 +806,6 @@ const handleEditSubmit = async (e) => {
 								/>
 							</div>
 
-							{/* Reset Password with Eye Show/Hide Toggle */}
 							<div>
 								<div className="flex items-center justify-between mb-1">
 									<label className="font-semibold text-slate-700">

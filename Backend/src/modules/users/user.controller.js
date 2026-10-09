@@ -1,5 +1,5 @@
 import { userService } from "./user.service.js";
-// Add to Backend/src/modules/user/user.controller.js
+
 export const updateMyLocationPermission = async (req, res, next) => {
   try {
     const { status } = req.body;
@@ -12,8 +12,13 @@ export const updateMyLocationPermission = async (req, res, next) => {
 
 export const getAll = async (req, res, next) => {
   try {
-    const users = await userService.getAll(req.query);
-    res.status(200).json({ status: "success", results: users.length, data: { users } });
+    const result = await userService.getAll(req.query);
+    res.status(200).json({
+      status: "success",
+      results: result.data.length,
+      data: { users: result.data },
+      meta: result.meta,
+    });
   } catch (error) {
     next(error);
   }
@@ -31,7 +36,9 @@ export const getById = async (req, res, next) => {
 export const create = async (req, res, next) => {
   try {
     const user = await userService.create(req.body);
-    res.status(201).json({ status: "success", message: "User created successfully", data: { user } });
+    res
+      .status(201)
+      .json({ status: "success", message: "User created successfully", data: { user } });
   } catch (error) {
     next(error);
   }
@@ -40,7 +47,9 @@ export const create = async (req, res, next) => {
 export const update = async (req, res, next) => {
   try {
     const user = await userService.update(req.params.id, req.body);
-    res.status(200).json({ status: "success", message: "User updated successfully", data: { user } });
+    res
+      .status(200)
+      .json({ status: "success", message: "User updated successfully", data: { user } });
   } catch (error) {
     next(error);
   }
@@ -61,4 +70,5 @@ export const userController = {
   create,
   update,
   remove,
+  updateMyLocationPermission,
 };

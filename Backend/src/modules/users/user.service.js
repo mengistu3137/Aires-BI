@@ -5,17 +5,24 @@ import { emitToRoles } from "../../config/socket.js";
 import { sanitizeUserRecord, getRolePermissions } from "./user.helpers.js";
 
 export const updateMyLocationPermission = async (userId, permissionStatus) => {
-  const allowedStatuses = ["ALLOWED", "GRANTED", "DENIED", "PROMPT", "NOT_REQUESTED"];
+  const allowedStatuses = [
+    "ALLOWED",
+    "GRANTED",
+    "DENIED",
+    "PROMPT",
+    "NOT_REQUESTED",
+  ];
 
-  // Normalize incoming browser state (e.g., 'granted' -> 'GRANTED')
   let status = (permissionStatus || "NOT_REQUESTED").toUpperCase().trim();
   if (status === "ALLOWED") status = "GRANTED";
 
   if (!allowedStatuses.includes(status)) {
-    throw new ApiError(400, `Invalid GPS status. Must be one of: ${allowedStatuses.join(", ")}`);
+    throw new ApiError(
+      400,
+      `Invalid GPS status. Must be one of: ${allowedStatuses.join(", ")}`,
+    );
   }
 
-  // 1. Persist the updated state to the DB
   const updatedUser = await prisma.user.update({
     where: { id: userId },
     data: { locationPermission: status },
@@ -29,7 +36,6 @@ export const updateMyLocationPermission = async (userId, permissionStatus) => {
     },
   });
 
-  // 2. Broadcast realtime update specifically to ADMIN and MANAGER clients
   const payload = {
     userId: updatedUser.id,
     name: updatedUser.name,
@@ -47,37 +53,66 @@ export const updateMyLocationPermission = async (userId, permissionStatus) => {
 
   return payload;
 };
+
+/**
+ * List users with filtering, pagination, and stats counts.
+ * Returns { data, meta } — the controller forwards meta to the client.
+ */
 export const getAll = async (query = {}) => {
+  const {
+    page: rawPage = 1,
+    limit: rawLimit = 20,
+    role,
+    active,
+    search,
+  } = query;
+
   const where = {};
-  if (query.role) where.role = query.role;
-  if (query.active !== undefined) where.active = query.active === "true";
-  if (query.search) {
+  if (role) where.role = role;
+  if (active !== undefined) where.active = active === "true";
+  if (search) {
     where.OR = [
-      { name: { contains: query.search, mode: "insensitive" } },
-      { phone: { contains: query.search, mode: "insensitive" } },
-      { email: { contains: query.search, mode: "insensitive" } },
+      { name: { contains: search, mode: "insensitive" } },
+      { phone: { contains: search, mode: "insensitive" } },
+      { email: { contains: search, mode: "insensitive" } },
     ];
   }
 
-  const users = await prisma.user.findMany({
-    where,
-    orderBy: { createdAt: "desc" },
-    include: {
-      _count: {
-        select: {
-          assignments: true,
-          createdAudits: true,
-          observations: true,
+  const page = Math.max(1, parseInt(rawPage, 10) || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(rawLimit, 10) || 20));
+  const skip = (page - 1) * limit;
+
+  const [total, users] = await prisma.$transaction([
+    prisma.user.count({ where }),
+    prisma.user.findMany({
+      where,
+      skip,
+      take: limit,
+      orderBy: { createdAt: "desc" },
+      include: {
+        _count: {
+          select: {
+            assignments: true,
+            createdAudits: true,
+            observations: true,
+          },
         },
       },
-    },
-  });
+    }),
+  ]);
 
-  return users.map((u) => ({
+  const data = users.map((u) => ({
     ...sanitizeUserRecord(u),
     permissions: getRolePermissions(u.role),
     stats: u._count,
   }));
+
+  const totalPages = Math.ceil(total / limit) || 1;
+
+  return {
+    data,
+    meta: { page, limit, total, totalPages },
+  };
 };
 
 export const getById = async (id) => {
@@ -124,8 +159,12 @@ export const create = async (payload) => {
 
   const passwordHash = await bcrypt.hash(payload.password, 10);
   const { password, ...data } = payload;
-  const cleanPhone = payload.phone && payload.phone !== "+251" ? payload.phone.trim() : null;
-  const cleanEmail = payload.email && payload.email.trim() !== "" ? payload.email.trim().toLowerCase() : null;
+  const cleanPhone =
+    payload.phone && payload.phone !== "+251" ? payload.phone.trim() : null;
+  const cleanEmail =
+    payload.email && payload.email.trim() !== ""
+      ? payload.email.trim().toLowerCase()
+      : null;
 
   const newUser = await prisma.user.create({
     data: {
@@ -138,47 +177,52 @@ export const create = async (payload) => {
 
   return sanitizeUserRecord(newUser);
 };
+
 export const update = async (id, payload) => {
   await getById(id);
 
-  // Clean phone and email upfront if present in payload
-  const cleanPhone = payload.phone !== undefined
-    ? (payload.phone && payload.phone !== "+251" ? payload.phone.trim() : null)
-    : undefined;
+  const cleanPhone =
+    payload.phone !== undefined
+      ? payload.phone && payload.phone !== "+251"
+        ? payload.phone.trim()
+        : null
+      : undefined;
 
-  const cleanEmail = payload.email !== undefined
-    ? (payload.email && payload.email.trim() !== "" ? payload.email.trim().toLowerCase() : null)
-    : undefined;
+  const cleanEmail =
+    payload.email !== undefined
+      ? payload.email && payload.email.trim() !== ""
+        ? payload.email.trim().toLowerCase()
+        : null
+      : undefined;
 
-  // Duplicate check using cleaned phone
   if (cleanPhone) {
     const duplicate = await prisma.user.findFirst({
       where: { phone: cleanPhone, NOT: { id } },
     });
     if (duplicate) {
-      throw new ApiError(409, `Phone number '${cleanPhone}' is already in use by another user.`);
+      throw new ApiError(
+        409,
+        `Phone number '${cleanPhone}' is already in use by another user.`,
+      );
     }
   }
 
-  // Duplicate check using cleaned email
   if (cleanEmail) {
     const duplicateEmail = await prisma.user.findFirst({
       where: { email: cleanEmail, NOT: { id } },
     });
     if (duplicateEmail) {
-      throw new ApiError(409, `Email '${cleanEmail}' is already in use by another user.`);
+      throw new ApiError(
+        409,
+        `Email '${cleanEmail}' is already in use by another user.`,
+      );
     }
   }
 
   const data = { ...payload };
 
-  if (cleanPhone !== undefined) {
-    data.phone = cleanPhone;
-  }
-
-  if (cleanEmail !== undefined) {
-    data.email = cleanEmail;
-  }
+  if (cleanPhone !== undefined) data.phone = cleanPhone;
+  if (cleanEmail !== undefined) data.email = cleanEmail;
 
   if (payload.password && payload.password.trim().length >= 6) {
     data.passwordHash = await bcrypt.hash(payload.password.trim(), 10);
@@ -192,19 +236,19 @@ export const update = async (id, payload) => {
 
   return sanitizeUserRecord(updatedUser);
 };
+
 export const remove = async (id) => {
   const user = await getById(id);
 
-  // Referential check: prevent deletion if historical audits exist
   if (user.stats?.createdAudits > 0 || user.stats?.observations > 0) {
-    // Graceful deactivation instead of breaking audit history
     await prisma.user.update({
       where: { id },
       data: { active: false },
     });
     return {
       deactivated: true,
-      message: "User has historical field audit records. Account has been deactivated instead of permanently deleted.",
+      message:
+        "User has historical field audit records. Account has been deactivated instead of permanently deleted.",
     };
   }
 
@@ -218,4 +262,5 @@ export const userService = {
   create,
   update,
   remove,
+  updateMyLocationPermission,
 };
