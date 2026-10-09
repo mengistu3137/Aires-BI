@@ -92,7 +92,9 @@ export const AuditCard = ({ audit }) => {
 						</svg>
 						<span className="truncate">
 							{auditor.name}
-							{auditorRoleLabel ? ` · ${auditorRoleLabel}` : ""}
+							{auditorRoleLabel ? (
+								<span className="hidden lg:inline"> · {auditorRoleLabel}</span>
+							) : null}
 						</span>
 					</span>
 				)}

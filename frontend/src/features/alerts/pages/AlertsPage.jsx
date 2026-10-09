@@ -8,6 +8,7 @@ import { AlertListTable } from "../components/AlertListTable.jsx";
 import { AlertMobileList } from "../components/AlertMobileList.jsx";
 import { AlertEmptyState } from "../components/AlertEmptyState.jsx";
 import { AlertSummaryBar } from "../components/AlertSummaryBar.jsx";
+import { RapidPriceAdjustmentDrawer } from "@/features/price-analysis/components/RapidPriceAdjustmentDrawer.jsx";
 import toast from "react-hot-toast";
 
 const PAGE_SIZE = 20;
@@ -18,6 +19,7 @@ export const AlertsPage = () => {
 	const [searchParams, setSearchParams] = useSearchParams();
 
 	const [search, setSearch] = useState("");
+	const [rapidAnalysis, setRapidAnalysis] = useState(null);
 
 	// URL-driven filters
 	const statusFilter = searchParams.get("resolved") || "";
@@ -71,7 +73,7 @@ export const AlertsPage = () => {
 	const handleGenerate = async () => {
 		if (!surveyPeriodId) {
 			toast.error(
-				"Pick a survey period first (add ?surveyPeriodId=... to the URL)",
+				"Pick a survey period first (?surveyPeriodId=... in the URL)",
 			);
 			return;
 		}
@@ -82,7 +84,42 @@ export const AlertsPage = () => {
 		}
 	};
 
-	// Client-side search across the loaded page (message + product name)
+	// Build a Rapid-Adjust-compatible analysis object from an alert
+	const buildAnalysisFromAlert = (alert) => {
+		if (!alert?.analysisId || alert.recommendedPrice == null) return null;
+		return {
+			id: alert.analysisId,
+			productId: alert.productId,
+			surveyPeriodId: alert.surveyPeriodId,
+			queensPrice: alert.queensPrice,
+			competitorAveragePrice: alert.competitorAveragePrice,
+			minimumCompetitorPrice: alert.minimumCompetitorPrice,
+			priceIndex: alert.priceIndex,
+			targetIndex: alert.targetIndex,
+			recommendedPrice: alert.recommendedPrice,
+			action: alert.analysisAction || alert.type,
+			notes: alert.analysisNotes || null,
+			product: alert.product,
+		};
+	};
+
+	const handleRowClick = (alert) => {
+		if (alert.resolved) {
+			// Resolved alerts → go to the detail page (no action to take)
+			navigate(`/alerts/${alert.id}`);
+			return;
+		}
+
+		const analysis = buildAnalysisFromAlert(alert);
+		if (!analysis) {
+			// No linked analysis (or no recommended price) → fall back to detail page
+			navigate(`/alerts/${alert.id}`);
+			return;
+		}
+		setRapidAnalysis(analysis);
+	};
+
+	// Client-side search across loaded page
 	const visibleAlerts = useMemo(() => {
 		if (!search.trim()) return alerts;
 		const term = search.toLowerCase();
@@ -114,7 +151,7 @@ export const AlertsPage = () => {
 				<div>
 					<h1 className="text-lg font-black text-slate-800">Alerts</h1>
 					<p className="mt-0.5 text-xs text-slate-500">
-						Review pricing alerts that require attention across survey periods.
+						Click any open alert to fix the price inline — no page navigation.
 					</p>
 				</div>
 
@@ -236,10 +273,16 @@ export const AlertsPage = () => {
 					) : (
 						<>
 							<div className="hidden md:block">
-								<AlertListTable alerts={visibleAlerts} />
+								<AlertListTable
+									alerts={visibleAlerts}
+									onRowClick={handleRowClick}
+								/>
 							</div>
 							<div className="md:hidden">
-								<AlertMobileList alerts={visibleAlerts} />
+								<AlertMobileList
+									alerts={visibleAlerts}
+									onRowClick={handleRowClick}
+								/>
 							</div>
 						</>
 					)}
@@ -269,7 +312,6 @@ export const AlertsPage = () => {
 									onClick={() => setPage(1)}
 									disabled={meta.page <= 1 || isFetching}
 									className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-									aria-label="First page"
 								>
 									«
 								</button>
@@ -281,7 +323,6 @@ export const AlertsPage = () => {
 								>
 									Previous
 								</button>
-
 								{(() => {
 									const total = meta.totalPages;
 									const current = meta.page;
@@ -309,7 +350,6 @@ export const AlertsPage = () => {
 										);
 									});
 								})()}
-
 								<button
 									type="button"
 									onClick={() => setPage(meta.page + 1)}
@@ -323,7 +363,6 @@ export const AlertsPage = () => {
 									onClick={() => setPage(meta.totalPages)}
 									disabled={meta.page >= meta.totalPages || isFetching}
 									className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-									aria-label="Last page"
 								>
 									»
 								</button>
@@ -332,6 +371,13 @@ export const AlertsPage = () => {
 					)}
 				</>
 			)}
+
+			{/* Rapid Adjust drawer — opens inline on row click */}
+			<RapidPriceAdjustmentDrawer
+				isOpen={Boolean(rapidAnalysis)}
+				onClose={() => setRapidAnalysis(null)}
+				analyses={rapidAnalysis ? [rapidAnalysis] : []}
+			/>
 		</div>
 	);
 };
