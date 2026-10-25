@@ -7,6 +7,7 @@ import {
   updateProductSchema,
   addQueensPriceSchema,
   productQuerySchema,
+  bulkProductImportSchema,
 } from "./product.validation.js";
 
 const router = Router();
@@ -17,6 +18,14 @@ router
   .route("/")
   .get(validate(productQuerySchema, "query"), productController.getAll)
   .post(restrictTo("ADMIN", "MANAGER"), validate(createProductSchema), productController.create);
+
+// Bulk Ingestion Route for 3,412 Item Master (Must be placed BEFORE /:id)
+router.post(
+  "/bulk",
+  restrictTo("ADMIN", "MANAGER"),
+  validate(bulkProductImportSchema),
+  productController.bulkCreate
+);
 
 router
   .route("/:id")

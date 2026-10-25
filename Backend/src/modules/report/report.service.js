@@ -33,6 +33,7 @@ const PRODUCT_SELECT = {
   sku: true,
   barcode: true,
   category: true,
+  frequency: true,
   unit: true,
 };
 
@@ -468,10 +469,6 @@ const loadRawData = async ({
   };
 };
 
-// ============================================================
-// Section builder (per report type) — cycle-aware, list-driven
-// ============================================================
-
 const buildCycle = (
   config,
   cycle,
@@ -490,9 +487,8 @@ const buildCycle = (
   const competitorColumns = columns.filter((c) => c.kind === "COMPETITOR");
   const queensColumn = columns.find((c) => c.kind === "QUEENS") || null;
 
-  const products = masterProducts.filter((p) =>
-    config.acceptsCategory(categoryOf(p)),
-  );
+  // Filter master products belonging to this specific Track
+  const products = masterProducts.filter((p) => config.acceptsProduct(p));
   if (products.length === 0) return null;
 
   const pairs = new Map();
@@ -506,13 +502,17 @@ const buildCycle = (
     return pairs.get(key);
   };
 
+  const productIdsSet = new Set(products.map((p) => p.id));
+
   for (const item of assignmentItems) {
     if (item.assignment?.surveyPeriodId !== cycle.id) continue;
+    if (!productIdsSet.has(item.productId)) continue;
+
     const column = matchColumn(
       competitorColumns,
       item.assignment.store?.competitor?.name,
     );
-    if (!column || !config.acceptsCategory(categoryOf(item.product))) continue;
+    if (!column) continue;
 
     columnStores.get(column.key).add(item.assignment.storeId);
     getPair(column.key, item.productId);
@@ -520,9 +520,11 @@ const buildCycle = (
 
   for (const obs of observations) {
     if (obs.audit?.surveyPeriodId !== cycle.id) continue;
+    if (!productIdsSet.has(obs.productId)) continue;
+
     const obsStore = obs.audit.store;
     const column = matchColumn(competitorColumns, obsStore?.competitor?.name);
-    if (!column || !config.acceptsCategory(categoryOf(obs.product))) continue;
+    if (!column) continue;
 
     columnStores.get(column.key).add(obsStore.id);
     getPair(column.key, obs.productId).observations.push(obs);
@@ -549,6 +551,7 @@ const buildCycle = (
           best.price !== null && best.price !== undefined
             ? Number(best.price)
             : null,
+        substituteProduct: best.substituteProduct || null,
         observedUnit: best.observedUnit ?? null,
         packageSize: best.packageSize ?? null,
         capturedAt: best.capturedAt,
@@ -570,18 +573,12 @@ const buildCycle = (
       code: p.sku || p.barcode || p.id,
       unit: p.unit ?? "",
       category: cat,
+      frequency: p.frequency,
     });
   }
 
   let queensPriced = 0;
 
-  // ─────────────────────────────────────────────────────────────
-  // Category order: use CATEGORY_ORDER[config.key] as the primary
-  // sort, falling back to alphabetical for anything not listed.
-  // This makes the Fresh Corner PDF match the Queen's master list
-  // layout (Vegetables → Fruits → Dairy → Meat → Poultry) instead
-  // of sorting alphabetically (Dairy → Fresh → Meat → Poultry).
-  // ─────────────────────────────────────────────────────────────
   const categoryOrder = CATEGORY_ORDER[config.key] || [];
   const rankOf = (name) => {
     const idx = categoryOrder.indexOf(name);

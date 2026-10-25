@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const PERIOD_STATUSES = ["DRAFT", "OPEN", "CLOSED"];
+export const PERIOD_STATUSES = ["DRAFT", "OPEN", "CLOSED", "ARCHIVED"];
 
 export const createPeriodSchema = z.object({
     id: z
@@ -14,4 +14,8 @@ export const createPeriodSchema = z.object({
 
 export const updatePeriodStatusSchema = z.object({
     status: z.enum(PERIOD_STATUSES),
+});
+
+export const periodQuerySchema = z.object({
+    includeArchived: z.enum(["true", "false"]).optional(),
 });

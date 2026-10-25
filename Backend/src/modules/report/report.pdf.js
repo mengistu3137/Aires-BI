@@ -558,6 +558,7 @@ const drawCycleTable = (doc, cycle, section, left, W, startY) => {
         const cell = prod.cells?.[col.key];
         let valStr = "Not found";
         let color = C.muted;
+        let subText = null;
 
         if (cell) {
           if (cell.availability === "AVAILABLE" && cell.price !== null) {
@@ -565,26 +566,52 @@ const drawCycleTable = (doc, cycle, section, left, W, startY) => {
             color = C.textDark;
             if (col.kind === "QUEENS") color = C.headerBlue;
           } else if (cell.availability === "OUT_OF_STOCK") {
-            valStr = "OUT OF STOCK";
-            color = "#B91C1C";
+            if (cell.substituteProduct) {
+              valStr = cell.price ? `${formatPrice(cell.price)} ETB` : "OUT OF STOCK";
+              subText = `↳ ${cell.substituteProduct.slice(0, 18)}`;
+              color = C.airesOrange;
+            } else {
+              valStr = "OUT OF STOCK";
+              color = "#B91C1C";
+            }
           } else if (cell.availability === "NOT_FOUND") {
-            valStr = "Not found";
-            color = C.muted;
+            if (cell.substituteProduct) {
+              valStr = cell.price ? `${formatPrice(cell.price)} ETB` : "Not found";
+              subText = `↳ ${cell.substituteProduct.slice(0, 18)}`;
+              color = C.airesOrange;
+            } else {
+              valStr = "Not found";
+              color = C.muted;
+            }
           }
         }
 
         doc
           .font("Helvetica")
-          .fontSize(7.5)
+          .fontSize(7)
           .fillColor(color)
-          .text(valStr, curX + 2, y + 5, {
+          .text(valStr, curX + 2, y + (subText ? 2 : 5), {
             width: compW - 6,
             align: "right",
           });
+
+        if (subText) {
+          doc
+            .font("Helvetica-Oblique")
+            .fontSize(6)
+            .fillColor(C.airesOrange)
+            .text(subText, curX + 2, y + 10, {
+              width: compW - 6,
+              align: "right",
+            });
+        }
+
         curX += compW;
       });
 
       y += rowH;
+
+   
     }
   }
 

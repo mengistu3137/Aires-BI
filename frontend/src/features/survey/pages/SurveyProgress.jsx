@@ -4,6 +4,7 @@ import { useAuth } from "@/hooks/useAuth.js";
 import {
 	useAssignments,
 	useDeleteAssignment,
+	useArchiveStoreDispatch,
 } from "../hooks/useAssignments.js";
 import { StatusBadge } from "@/components/StatusBadge.jsx";
 import { Can } from "@/components/Can.jsx";
@@ -13,11 +14,11 @@ import { ConfirmDeleteAssignmentModal } from "../components/ConfirmDeleteAssignm
 import toast from "react-hot-toast";
 
 const STATUS_FILTERS = [
-	{ value: "", label: "All" },
+	{ value: "", label: "Active Dispatches" },
 	{ value: "NOT_STARTED", label: "Not started" },
 	{ value: "IN_PROGRESS", label: "In progress" },
 	{ value: "COMPLETED", label: "Completed" },
-	{ value: "CANCELLED", label: "Cancelled" },
+	{ value: "ARCHIVED", label: "Archived" },
 ];
 
 const PAGE_SIZE = 10;
@@ -38,7 +39,6 @@ export const SurveyProgress = () => {
 	const { isAuditor } = useAuth();
 	const [searchParams, setSearchParams] = useSearchParams();
 
-	// URL-backed pagination (survives refresh + shareable)
 	const page = Math.max(1, Number(searchParams.get("page") || 1));
 	const statusFromUrl = searchParams.get("status") || "";
 
@@ -53,12 +53,10 @@ export const SurveyProgress = () => {
 		const nextParams = new URLSearchParams(searchParams);
 		if (!value) nextParams.delete("status");
 		else nextParams.set("status", value);
-		// Reset to page 1 whenever the filter changes
 		nextParams.delete("page");
 		setSearchParams(nextParams, { replace: true });
 	};
 
-	// Server-side filters + pagination
 	const { data, isLoading, isError, error, refetch, isFetching } =
 		useAssignments({
 			page,
@@ -70,8 +68,9 @@ export const SurveyProgress = () => {
 	const meta = data?.meta || { page: 1, totalPages: 1, total: 0 };
 
 	const deleteAssignment = useDeleteAssignment();
+	const archiveDispatch = useArchiveStoreDispatch();
 
-	const [viewMode, setViewMode] = useState("STORE_DISPATCH"); // 'STORE_DISPATCH' | 'INDIVIDUAL_TASKS'
+	const [viewMode, setViewMode] = useState("STORE_DISPATCH");
 	const [isAssignmentModalOpen, setIsAssignmentModalOpen] = useState(false);
 	const [isPeriodModalOpen, setIsPeriodModalOpen] = useState(false);
 	const [selectedStoreId, setSelectedStoreId] = useState(null);
@@ -79,10 +78,9 @@ export const SurveyProgress = () => {
 	const [deleteCandidate, setDeleteCandidate] = useState(null);
 	const [searchTerm, setSearchTerm] = useState("");
 
-	// Alias for readability further down
 	const statusFilter = statusFromUrl;
 
-	// Group assignments by Store + SurveyPeriod for Overall Store Dispatch Tracking
+	// Group assignments by Store + SurveyPeriod
 	const storeDispatches = useMemo(() => {
 		const groups = new Map();
 
@@ -95,6 +93,7 @@ export const SurveyProgress = () => {
 				groups.set(groupKey, {
 					id: groupKey,
 					storeId,
+					surveyPeriodId: cycleId,
 					store: asn.store,
 					surveyPeriod: asn.surveyPeriod,
 					assignments: [],
@@ -107,7 +106,6 @@ export const SurveyProgress = () => {
 			const group = groups.get(groupKey);
 			group.assignments.push(asn);
 
-			// Collect all assigned product IDs for this store
 			if (Array.isArray(asn.items)) {
 				asn.items.forEach((it) => {
 					const pId = it.productId || it.id;
@@ -115,10 +113,7 @@ export const SurveyProgress = () => {
 				});
 			}
 
-			// Authoritative count from backend helper (asn.observedCount)
 			let asnObsCount = Number(asn.observedCount ?? asn.observationsCount ?? 0);
-
-			// Fallback if raw relational audits array is provided
 			if (!asnObsCount && Array.isArray(asn.audits)) {
 				asn.audits.forEach((aud) => {
 					asnObsCount +=
@@ -149,17 +144,25 @@ export const SurveyProgress = () => {
 			const percentDone =
 				totalProducts > 0 ? Math.round((observed / totalProducts) * 100) : 0;
 
+			const isArchived =
+				g.assignments.length > 0 &&
+				g.assignments.every((a) => a.status === "ARCHIVED");
+
 			const allCompleted =
 				g.assignments.length > 0 &&
 				g.assignments.every((a) => a.status === "COMPLETED");
+
 			const anyInProgress = g.assignments.some(
 				(a) => a.status === "IN_PROGRESS" || (a.observedCount || 0) > 0,
 			);
-			const overallStatus = allCompleted
+
+			const overallStatus = isArchived
+				? "ARCHIVED"
+				: allCompleted
 				? "COMPLETED"
 				: anyInProgress || observed > 0
-					? "IN_PROGRESS"
-					: "NOT_STARTED";
+				? "IN_PROGRESS"
+				: "NOT_STARTED";
 
 			return {
 				...g,
@@ -167,11 +170,11 @@ export const SurveyProgress = () => {
 				observedCount: observed,
 				percentDone,
 				overallStatus,
+				isArchived,
 			};
 		});
 	}, [assignments]);
 
-	// Filtering for Store Dispatches
 	const filteredStoreDispatches = useMemo(() => {
 		let list = storeDispatches;
 
@@ -198,33 +201,6 @@ export const SurveyProgress = () => {
 
 		return list;
 	}, [storeDispatches, statusFilter, searchTerm]);
-
-	// Filtering for Individual Assignments
-	const visibleAssignments = useMemo(() => {
-		let list = assignments;
-
-		if (statusFilter) {
-			list = list.filter((a) => a.status === statusFilter);
-		}
-
-		if (searchTerm.trim()) {
-			const term = searchTerm.toLowerCase();
-			list = list.filter((a) => {
-				const storeName = (a.store?.name || "").toLowerCase();
-				const area = (a.store?.area || a.store?.address || "").toLowerCase();
-				const auditorName = (a.auditor?.name || "").toLowerCase();
-				const cycleId = (a.surveyPeriod?.id || "").toLowerCase();
-				return (
-					storeName.includes(term) ||
-					area.includes(term) ||
-					auditorName.includes(term) ||
-					cycleId.includes(term)
-				);
-			});
-		}
-
-		return list;
-	}, [assignments, statusFilter, searchTerm]);
 
 	const counts = useMemo(
 		() => ({
@@ -253,6 +229,19 @@ export const SurveyProgress = () => {
 		}
 	};
 
+	const handleArchiveDispatch = async (dispatch) => {
+		try {
+			await archiveDispatch.mutateAsync({
+				storeId: dispatch.storeId,
+				surveyPeriodId: dispatch.surveyPeriodId,
+				archive: !dispatch.isArchived,
+			});
+			refetch();
+		} catch (err) {
+			// Handled by mutation toast
+		}
+	};
+
 	const handleOpenDispatchModal = (storeId = null) => {
 		setSelectedStoreId(storeId);
 		setEditingAssignment(null);
@@ -270,7 +259,7 @@ export const SurveyProgress = () => {
 					<p className="mt-0.5 text-xs text-slate-500">
 						{isAuditor
 							? "Your assigned store audits and target product checklists"
-							: "Monitor store dispatch completion and allocate tasks across multiple field auditors"}
+							: "Monitor store dispatch completion and allocate tasks across field auditors"}
 					</p>
 				</div>
 
@@ -294,9 +283,9 @@ export const SurveyProgress = () => {
 				</Can>
 			</div>
 
-			{/* KPI Summary (Reflects Total Store Dispatches) */}
+			{/* KPI Summary */}
 			<div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-				<Kpi label="Store Dispatches" value={counts.all} tone="slate" />
+				<Kpi label="Active Dispatches" value={counts.all} tone="slate" />
 				<Kpi label="Not Started" value={counts.notStarted} tone="amber" />
 				<Kpi label="In Progress" value={counts.inProgress} tone="blue" />
 				<Kpi label="Completed" value={counts.completed} tone="emerald" />
@@ -328,7 +317,6 @@ export const SurveyProgress = () => {
 						</svg>
 					</div>
 
-					{/* View Mode Toggle (Management only) */}
 					{!isAuditor && (
 						<div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-slate-100 p-1 text-xs font-bold flex-none">
 							<button
@@ -357,7 +345,7 @@ export const SurveyProgress = () => {
 					)}
 				</div>
 
-				{/* Status Filters */}
+				{/* Status Filters with Archive Tab */}
 				<div className="flex flex-wrap gap-2">
 					{STATUS_FILTERS.map((f) => (
 						<button
@@ -383,27 +371,10 @@ export const SurveyProgress = () => {
 				</div>
 			)}
 
-			{/* Error */}
-			{isError && (
-				<div className="rounded-2xl border border-red-200 bg-red-50 p-4">
-					<p className="text-xs font-medium text-[#A41821]">
-						{error?.message || "Unable to load assignments"}
-					</p>
-					<button
-						type="button"
-						onClick={() => refetch()}
-						className="mt-2 cursor-pointer rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-semibold text-[#A41821] hover:bg-red-50"
-					>
-						Try again
-					</button>
-				</div>
-			)}
-
-			{/* Cards Content */}
+			{/* Content */}
 			{!isLoading && !isError && (
 				<>
 					{viewMode === "STORE_DISPATCH" && !isAuditor ? (
-						/* A. OVERALL STORE DISPATCH CARDS (Aggregated Multi-Auditor Progress) */
 						filteredStoreDispatches.length === 0 ? (
 							<EmptyState
 								statusFilter={statusFilter}
@@ -417,6 +388,8 @@ export const SurveyProgress = () => {
 										key={dispatch.id}
 										dispatch={dispatch}
 										onManage={() => handleOpenDispatchModal(dispatch.storeId)}
+										onArchive={() => handleArchiveDispatch(dispatch)}
+										isArchiving={archiveDispatch.isPending}
 										onViewAudits={() =>
 											navigate(`/audits?storeId=${dispatch.storeId}`)
 										}
@@ -424,16 +397,9 @@ export const SurveyProgress = () => {
 								))}
 							</div>
 						)
-					) : /* B. INDIVIDUAL AUDITOR ASSIGNMENTS */
-					visibleAssignments.length === 0 ? (
-						<EmptyState
-							statusFilter={statusFilter}
-							searchTerm={searchTerm}
-							onNew={() => handleOpenDispatchModal(null)}
-						/>
 					) : (
 						<div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-							{visibleAssignments.map((assignment) => (
+							{assignments.map((assignment) => (
 								<AssignmentCard
 									key={assignment.id}
 									assignment={assignment}
@@ -453,96 +419,7 @@ export const SurveyProgress = () => {
 				</>
 			)}
 
-			{/* Pagination footer (managers/admins only) */}
-			{!isLoading && !isError && !isAuditor && meta.totalPages > 1 && (
-				<div className="flex flex-col items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-xs sm:flex-row">
-					<p className="text-[11px] font-semibold text-slate-500">
-						Page{" "}
-						<span className="font-mono font-bold text-slate-700">
-							{meta.page}
-						</span>{" "}
-						of{" "}
-						<span className="font-mono font-bold text-slate-700">
-							{meta.totalPages}
-						</span>{" "}
-						·{" "}
-						<span className="font-mono font-bold text-slate-700">
-							{meta.total}
-						</span>{" "}
-						total assignments
-					</p>
-
-					<div className="flex items-center gap-1.5">
-						<button
-							type="button"
-							onClick={() => setPage(1)}
-							disabled={meta.page <= 1 || isFetching}
-							className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-							aria-label="First page"
-						>
-							«
-						</button>
-						<button
-							type="button"
-							onClick={() => setPage(meta.page - 1)}
-							disabled={meta.page <= 1 || isFetching}
-							className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-						>
-							Previous
-						</button>
-
-						{/* Page number pills (window of ±2 around the current page) */}
-						{(() => {
-							const total = meta.totalPages;
-							const current = meta.page;
-							const span = 2;
-							const start = Math.max(1, current - span);
-							const end = Math.min(total, current + span);
-							const nums = [];
-							for (let i = start; i <= end; i += 1) nums.push(i);
-
-							return nums.map((num) => {
-								const active = num === current;
-								return (
-									<button
-										key={num}
-										type="button"
-										onClick={() => setPage(num)}
-										disabled={isFetching}
-										className={`min-w-[32px] rounded-lg border px-2 py-1.5 text-xs font-bold transition ${
-											active
-												? "border-[#A41821] bg-[#A41821] text-white shadow-xs"
-												: "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-										} disabled:cursor-not-allowed disabled:opacity-40`}
-									>
-										{num}
-									</button>
-								);
-							});
-						})()}
-
-						<button
-							type="button"
-							onClick={() => setPage(meta.page + 1)}
-							disabled={meta.page >= meta.totalPages || isFetching}
-							className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-						>
-							Next
-						</button>
-						<button
-							type="button"
-							onClick={() => setPage(meta.totalPages)}
-							disabled={meta.page >= meta.totalPages || isFetching}
-							className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-							aria-label="Last page"
-						>
-							»
-						</button>
-					</div>
-				</div>
-			)}
-
-			{/* Dispatch Modal */}
+			{/* Modals */}
 			<SurveyAssignmentModal
 				isOpen={isAssignmentModalOpen}
 				onClose={() => {
@@ -555,13 +432,11 @@ export const SurveyProgress = () => {
 				assignment={editingAssignment}
 			/>
 
-			{/* Period management modal */}
 			<PeriodManagementModal
 				isOpen={isPeriodModalOpen}
 				onClose={() => setIsPeriodModalOpen(false)}
 			/>
 
-			{/* Confirm delete */}
 			<ConfirmDeleteAssignmentModal
 				isOpen={Boolean(deleteCandidate)}
 				onClose={() => setDeleteCandidate(null)}
@@ -573,10 +448,12 @@ export const SurveyProgress = () => {
 	);
 };
 
-/* Overall Store Dispatch Card Component */
-const StoreDispatchCard = ({ dispatch, onManage, onViewAudits }) => {
+/* Overall Store Dispatch Card with Archive Button */
+const StoreDispatchCard = ({ dispatch, onManage, onArchive, isArchiving, onViewAudits }) => {
 	const store = dispatch.store || {};
+	const cycle = dispatch.surveyPeriod || {};
 	const isDone = dispatch.overallStatus === "COMPLETED";
+	const isArchived = dispatch.isArchived;
 
 	const statusAccent =
 		{
@@ -584,30 +461,33 @@ const StoreDispatchCard = ({ dispatch, onManage, onViewAudits }) => {
 			IN_PROGRESS: "bg-[#FE7914]",
 			COMPLETED: "bg-[#017C4D]",
 			CANCELLED: "bg-slate-400",
+			ARCHIVED: "bg-slate-500",
 		}[dispatch.overallStatus] || "bg-slate-300";
 
 	return (
-		<div className="flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs transition hover:border-slate-300 hover:shadow-sm">
+		<div className={`flex flex-col overflow-hidden rounded-2xl border bg-white shadow-xs transition hover:shadow-sm ${
+			isArchived ? "border-slate-300 opacity-75" : "border-slate-200 hover:border-slate-300"
+		}`}>
 			<div className={`h-1.5 w-full ${statusAccent}`} />
 
 			<div className="flex flex-1 flex-col p-4 space-y-3.5">
-				{/* Header: Store Name + Overall Status */}
+				{/* Header: Store Name + Status Badge */}
 				<div className="flex items-start justify-between gap-2">
 					<div className="min-w-0 flex-1">
 						<h3 className="truncate text-base font-black text-slate-900">
 							{store.name || "Unknown Store"}
 						</h3>
 						<p className="mt-0.5 truncate text-[11px] text-slate-500 font-medium">
-							{store.area || store.address || "Addis Ababa"} • {store.type}
+							{store.area || store.address || "Addis Ababa"} • Cycle {cycle.id || ""}
 						</p>
 					</div>
 					<StatusBadge status={dispatch.overallStatus} />
 				</div>
 
-				{/* OVERALL DISPATCH PROGRESS BAR */}
+				{/* Progress Bar */}
 				<div className="space-y-1.5 rounded-xl bg-slate-50/80 p-3 border border-slate-100">
 					<div className="flex items-center justify-between text-xs font-bold text-slate-700">
-						<span>Overall Dispatch Progress:</span>
+						<span>Overall Progress:</span>
 						<span className="font-mono text-slate-900">
 							{dispatch.observedCount} / {dispatch.totalProducts} items
 						</span>
@@ -634,7 +514,7 @@ const StoreDispatchCard = ({ dispatch, onManage, onViewAudits }) => {
 					</div>
 				</div>
 
-				{/* Team on Duty (Assigned Auditors) */}
+				{/* Team on Duty */}
 				<div>
 					<span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1.5">
 						Team on Duty ({dispatch.assignments.length} Auditors)
@@ -652,23 +532,36 @@ const StoreDispatchCard = ({ dispatch, onManage, onViewAudits }) => {
 					</div>
 				</div>
 
-				{/* Card Footer Actions */}
-				<div className="mt-auto flex items-center justify-between border-t border-slate-100 pt-3 text-xs font-semibold">
+				{/* Card Footer: View Visits, Manage Dispatch & ARCHIVE BUTTON */}
+				<div className="mt-auto flex items-center justify-between border-t border-slate-100 pt-3 text-xs font-semibold gap-2">
 					<button
 						type="button"
 						onClick={onViewAudits}
 						className="text-slate-700 hover:text-slate-900 hover:underline cursor-pointer"
 					>
-						View Visits →
+						Visits →
 					</button>
 
-					<button
-						type="button"
-						onClick={onManage}
-						className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 transition cursor-pointer"
-					>
-						Manage Dispatch
-					</button>
+					<div className="flex items-center gap-2">
+						<button
+							type="button"
+							onClick={onManage}
+							className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 transition cursor-pointer"
+						>
+							Manage
+						</button>
+
+						{/* ARCHIVE / UNARCHIVE BUTTON */}
+						<button
+							type="button"
+							disabled={isArchiving}
+							onClick={onArchive}
+							className="rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition cursor-pointer disabled:opacity-50"
+							title={isArchived ? "Restore to active dispatches" : "Archive and hide from active dispatches"}
+						>
+							{isArchived ? "Unarchive" : "Archive"}
+						</button>
+					</div>
 				</div>
 			</div>
 		</div>
@@ -699,6 +592,7 @@ const AssignmentCard = ({
 			IN_PROGRESS: "bg-[#FE7914]",
 			COMPLETED: "bg-[#017C4D]",
 			CANCELLED: "bg-slate-400",
+			ARCHIVED: "bg-slate-500",
 		}[assignment.status] || "bg-slate-300";
 
 	return (
@@ -801,7 +695,7 @@ const EmptyState = ({ statusFilter, searchTerm, onNew }) => (
 		<h3 className="mt-4 text-sm font-bold text-slate-800">
 			{statusFilter || searchTerm
 				? "No dispatches match your filters"
-				: "No store dispatches yet"}
+				: "No active store dispatches"}
 		</h3>
 		<p className="mx-auto mt-1 max-w-sm text-xs text-slate-500">
 			{statusFilter || searchTerm
@@ -812,7 +706,7 @@ const EmptyState = ({ statusFilter, searchTerm, onNew }) => (
 			<button
 				type="button"
 				onClick={onNew}
-				className="rounded-xl bg-[#A41821] px-4 py-2 text-xs font-bold text-white shadow-xs"
+				className="rounded-xl bg-[#A41821] px-4 py-2 text-xs font-bold text-white shadow-xs cursor-pointer"
 			>
 				+ Dispatch Store Survey
 			</button>

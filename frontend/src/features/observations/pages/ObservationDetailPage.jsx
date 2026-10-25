@@ -62,7 +62,6 @@ export const ObservationDetailPage = () => {
 		if (currentIndex >= 0 && currentIndex < pendingList.length - 1) {
 			return pendingList[currentIndex + 1].id;
 		}
-		// If approving the first or current, get the other pending item
 		const remaining = pendingList.filter((item) => item.id !== observationId);
 		return remaining.length > 0 ? remaining[0].id : null;
 	}, [pendingList, currentIndex, observationId]);
@@ -106,14 +105,12 @@ export const ObservationDetailPage = () => {
 	const canApprove = isManager && isPending && !isUnsynced;
 	const canReject = isManager && isPending && !isUnsynced;
 
-	// Groq AI Anomaly Guardian — screen pending observations for price anomalies
+	// Groq AI Anomaly Guardian
 	const { data: aiScreen, isLoading: isAILoading } = useObservationAI(
-		
 		observationId,
 		isManager && isPending,
 	);
 
-	// Advance to next without creating duplicate toast notifications
 	const advanceToNext = () => {
 		if (nextObservationId) {
 			navigate(`/observations/${nextObservationId}`, { replace: true });
@@ -226,13 +223,15 @@ export const ObservationDetailPage = () => {
 	const review = observation.review;
 	const sync = observation.sync;
 
-	const hasReviewSection = review && review.status !== "PENDING";
-	const hasSyncSection = sync && sync.status && sync.status !== "SYNCED";
+	const hasSubstitute = Boolean(observation.substituteProduct);
+	const isUnavailable =
+		observation.availability === "OUT_OF_STOCK" ||
+		observation.availability === "NOT_FOUND";
 
-	const isAvailable =
-		observation.availability === "AVAILABLE" &&
+	const hasPrice =
 		observation.price !== null &&
-		observation.price !== undefined;
+		observation.price !== undefined &&
+		Number(observation.price) > 0;
 
 	return (
 		<div className="pb-28">
@@ -248,7 +247,6 @@ export const ObservationDetailPage = () => {
 							← Back
 						</button>
 
-						{/* Queue Counter Badge */}
 						{currentIndex >= 0 && (
 							<span className="rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 font-mono text-[10px] font-black uppercase tracking-wider text-[#FE7914]">
 								Item {currentIndex + 1} of {pendingList.length} Pending
@@ -256,7 +254,6 @@ export const ObservationDetailPage = () => {
 						)}
 					</div>
 
-					{/* Quick Prev / Next Controls */}
 					{pendingList.length > 1 && (
 						<div className="flex items-center gap-1.5">
 							<button
@@ -288,18 +285,28 @@ export const ObservationDetailPage = () => {
 					</div>
 				)}
 
-				{/* Hero: Product + Price */}
-				<div className="border-b border-slate-200 px-4 pb-5 pt-4 sm:px-6 sm:pt-5">
-					<h1 className="text-lg font-black text-slate-900 sm:text-xl capitalize">
-						{formatProductName(product?.name) || "Unknown product"}
-					</h1>
-					<p className="mt-1 text-xs text-slate-500 font-medium">
-						{product?.category}
-						{product?.sku && ` · SKU ${product.sku}`}
-						{product?.barcode && ` · ${product.barcode}`}
-					</p>
+				{/* Hero: Product + Substitute Context */}
+				<div className="border-b border-slate-200 px-4 pb-5 pt-4 sm:px-6 sm:pt-5 space-y-3">
+					<div>
+						{/* Struck-Through Product Name when substituted */}
+						<h1
+							className={`text-lg sm:text-xl font-black capitalize ${
+								isUnavailable && hasSubstitute
+									? "text-slate-400 line-through decoration-slate-400 decoration-2"
+									: "text-slate-900"
+							}`}
+						>
+							{formatProductName(product?.name) || "Unknown product"}
+						</h1>
+						<p className="mt-1 text-xs text-slate-500 font-medium">
+							{product?.category}
+							{product?.sku && ` · SKU ${product.sku}`}
+							{product?.barcode && ` · ${product.barcode}`}
+						</p>
+					</div>
 
-					<div className="mt-3 flex flex-wrap items-center gap-1.5">
+					{/* Badges Bar */}
+					<div className="flex flex-wrap items-center gap-1.5">
 						<span
 							className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${colors.bg} ${colors.border} ${colors.text}`}
 						>
@@ -310,17 +317,57 @@ export const ObservationDetailPage = () => {
 						<ObservationReviewBadge status={review?.status} />
 					</div>
 
-					<div className="mt-5">
-						{isAvailable ? (
-							<p className="font-mono text-2xl font-black text-[#017C4D]">
-								{formatPrice(observation.price)}
-							</p>
+					{/* DEDICATED SUBSTITUTE PRODUCT BANNER (Show, Don't Tell) */}
+					{isUnavailable && hasSubstitute && (
+						<div className="rounded-xl border border-amber-300 bg-amber-50/80 p-3.5 space-y-1.5 shadow-2xs animate-in fade-in">
+							<div className="flex items-center justify-between">
+								<span className="text-[10px] font-black uppercase tracking-wider text-[#FE7914]">
+									Shelf Substitute Recorded (Action Taken)
+								</span>
+								<span className="rounded-md bg-white border border-amber-200 px-2 py-0.5 text-[10px] font-bold text-amber-900 font-mono">
+									Original {observation.availability.replace("_", " ")}
+								</span>
+							</div>
+
+							<div className="flex items-baseline gap-2 pt-1">
+								<span className="text-xs font-bold text-[#FE7914]">↳</span>
+								<p className="text-sm font-extrabold text-slate-900">
+									{observation.substituteProduct}
+								</p>
+							</div>
+
+							{hasPrice && (
+								<div className="flex items-center justify-between pt-1 border-t border-amber-200/60 mt-2">
+									<span className="text-[11px] font-semibold text-slate-600">
+										Substitute Observed Price:
+									</span>
+									<span className="font-mono text-base font-black text-[#017C4D]">
+										{formatPrice(observation.price)}
+									</span>
+								</div>
+							)}
+						</div>
+					)}
+
+					{/* Price & Timestamp */}
+					<div className="pt-2">
+						{hasPrice ? (
+							<div className="flex items-baseline gap-2">
+								<p className="font-mono text-2xl font-black text-[#017C4D]">
+									{formatPrice(observation.price)}
+								</p>
+								{isUnavailable && hasSubstitute && (
+									<span className="rounded-md bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[#017C4D]">
+										Substitute Price
+									</span>
+								)}
+							</div>
 						) : (
 							<p className="font-mono text-xl font-bold text-slate-500">
 								{getAvailabilityBadgeLabel(observation.availability) || "—"}
 							</p>
 						)}
-						<p className="mt-1.5 text-[11px] text-slate-400 font-medium">
+						<p className="mt-1 text-[11px] text-slate-400 font-medium font-mono">
 							Captured {formatCapturedAt(observation.capturedAt)}
 						</p>
 					</div>
@@ -404,9 +451,8 @@ export const ObservationDetailPage = () => {
 									⚡
 								</span>
 								<span className="text-xs font-black text-slate-800">
-									 AI Anomaly Guardian
+									AI Anomaly Guardian
 								</span>
-								
 							</div>
 
 							{isAILoading ? (
@@ -438,7 +484,9 @@ export const ObservationDetailPage = () => {
 								<>
 									<p className="text-xs font-medium text-slate-700 leading-relaxed">
 										{aiScreen?.reason ||
-											"Observation appears consistent with market baselines."}
+											(hasSubstitute
+												? `Substituted with "${observation.substituteProduct}". Price logged at ${formatPrice(observation.price)}.`
+												: "Observation appears consistent with market baselines.")}
 									</p>
 
 									{aiScreen?.isAnomaly && (
@@ -462,12 +510,10 @@ export const ObservationDetailPage = () => {
 			{/* High-Speed Action Sticky Bar with Enter Hint */}
 			{isManager && (canApprove || canReject) && (
 				<div className="sticky bottom-0 z-20 overflow-hidden border-t border-slate-200/80 bg-white/95 backdrop-blur-md shadow-lg shadow-slate-900/5">
-					{/* Ultra-thin 1.5px Aires brand hairline */}
 					<div className="h-[1.5px] w-full bg-gradient-to-r from-[#A41821] to-[#CC242F] shadow-[0_1px_3px_rgba(164,24,33,0.2)]" />
 
 					<div className="mx-auto max-w-3xl px-4 py-3 sm:px-6">
 						<div className="flex flex-col-reverse sm:flex-row items-center gap-2.5">
-							{/* Reject Action: Aires Primary Red Outlined */}
 							{canReject && (
 								<button
 									type="button"
@@ -479,7 +525,6 @@ export const ObservationDetailPage = () => {
 								</button>
 							)}
 
-							{/* Approve Action: Aires Secondary Green Filled */}
 							{canApprove && (
 								<button
 									type="button"

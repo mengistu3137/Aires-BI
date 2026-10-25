@@ -1,6 +1,19 @@
 import { assignmentService } from "./assignment.service.js";
 
-
+export const archiveStoreDispatch = async (req, res, next) => {
+  try {
+    const { storeId, surveyPeriodId } = req.params;
+    const { archive = true } = req.body;
+    const result = await assignmentService.archiveStoreDispatch({
+      storeId,
+      surveyPeriodId,
+      archive,
+    });
+    res.status(200).json({ status: "success", data: result });
+  } catch (error) {
+    next(error);
+  }
+};
 export const createBatch = async (req, res, next) => {
   try {
     const assignments = await assignmentService.createBatch(req.body);

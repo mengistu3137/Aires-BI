@@ -58,18 +58,19 @@ export const validateCapturedAt = (capturedAtStr, audit) => {
 
   return { isValid: true };
 };
-
 /**
  * Validates business rules regarding product availability and price:
- * - AVAILABLE: price is required, must be > 0.
- * - OUT_OF_STOCK / NOT_FOUND: price must be null. Price = 0 is rejected.
+ * - AVAILABLE: price is required (> 0), substituteProduct must be null.
+ * - OUT_OF_STOCK / NOT_FOUND:
+ *     - If substituteProduct is given: price can be captured for that substitute.
+ *     - If no substitute is given: price must be null.
  */
-export const validateAvailabilityPriceCombination = (availability, price) => {
+export const validateAvailabilityPriceCombination = (availability, price, substituteProduct = null) => {
   if (availability === "AVAILABLE") {
     if (price === null || price === undefined) {
       return {
         isValid: false,
-        message: "Price is required when availability is AVAILABLE",
+        message: "Price is required when product is AVAILABLE",
       };
     }
     const numPrice = Number(price);
@@ -79,22 +80,29 @@ export const validateAvailabilityPriceCombination = (availability, price) => {
         message: "Price must be a positive number greater than 0",
       };
     }
-  } else {
-    // OUT_OF_STOCK or NOT_FOUND
-    if (price !== null && price !== undefined) {
+    return { isValid: true };
+  }
+
+  // Both OUT_OF_STOCK and NOT_FOUND
+  if (price !== null && price !== undefined) {
+    if (!substituteProduct || !substituteProduct.trim()) {
       return {
         isValid: false,
-        message: `Price must be null when product is marked ${availability}. Zero is not allowed.`,
+        message: `Price can only be recorded for ${availability.replace("_", " ")} if a substitute product is specified.`,
+      };
+    }
+    const numPrice = Number(price);
+    if (Number.isNaN(numPrice) || numPrice <= 0) {
+      return {
+        isValid: false,
+        message: "Substitute price must be a positive number greater than 0",
       };
     }
   }
+
   return { isValid: true };
 };
 
-/**
- * Formats a PriceObservation model into a uniform JSON response DTO.
- * Explicitly serializes Decimal values and strips sensitive User details.
- */
 export const formatObservationResponse = (obs) => {
   if (!obs) return null;
 
@@ -106,6 +114,7 @@ export const formatObservationResponse = (obs) => {
     availability: obs.availability,
     price:
       obs.price !== null && obs.price !== undefined ? Number(obs.price) : null,
+    substituteProduct: obs.substituteProduct || null,
     observedUnit: obs.observedUnit,
     packageSize: obs.packageSize,
     capturedAt: obs.capturedAt,
@@ -122,54 +131,55 @@ export const formatObservationResponse = (obs) => {
       reviewNote: obs.reviewNote,
       reviewedBy: obs.reviewedBy
         ? {
-            id: obs.reviewedBy.id,
-            name: obs.reviewedBy.name,
-            role: obs.reviewedBy.role,
-          }
+          id: obs.reviewedBy.id,
+          name: obs.reviewedBy.name,
+          role: obs.reviewedBy.role,
+        }
         : null,
     },
     evidencePhotoUrl: obs.evidencePhotoUrl,
     notes: obs.notes,
     product: obs.product
       ? {
-          id: obs.product.id,
-          name: obs.product.name,
-          sku: obs.product.sku,
-          barcode: obs.product.barcode,
-          category: obs.product.category,
-          unit: obs.product.unit,
-        }
+        id: obs.product.id,
+        name: obs.product.name,
+        sku: obs.product.sku,
+        barcode: obs.product.barcode,
+        category: obs.product.category,
+        unit: obs.product.unit,
+      }
       : undefined,
     auditor: obs.auditor
       ? {
-          id: obs.auditor.id,
-          name: obs.auditor.name,
-          email: obs.auditor.email,
-          phone: obs.auditor.phone,
-          role: obs.auditor.role,
-        }
+        id: obs.auditor.id,
+        name: obs.auditor.name,
+        email: obs.auditor.email,
+        phone: obs.auditor.phone,
+        role: obs.auditor.role,
+      }
       : undefined,
     audit: obs.audit
       ? {
-          id: obs.audit.id,
-          status: obs.audit.status,
-          storeId: obs.audit.storeId,
-          surveyPeriodId: obs.audit.surveyPeriodId,
-          store: obs.audit.store
-            ? {
-                id: obs.audit.store.id,
-                name: obs.audit.store.name,
-                competitor: obs.audit.store.competitor
-                  ? {
-                      id: obs.audit.store.competitor.id,
-                      name: obs.audit.store.competitor.name,
-                    }
-                  : undefined,
+        id: obs.audit.id,
+        status: obs.audit.status,
+        storeId: obs.audit.storeId,
+        surveyPeriodId: obs.audit.surveyPeriodId,
+        store: obs.audit.store
+          ? {
+            id: obs.audit.store.id,
+            name: obs.audit.store.name,
+            competitor: obs.audit.store.competitor
+              ? {
+                id: obs.audit.store.competitor.id,
+                name: obs.audit.store.competitor.name,
               }
-            : undefined,
-        }
+              : undefined,
+          }
+          : undefined,
+      }
       : undefined,
     createdAt: obs.createdAt,
     updatedAt: obs.updatedAt,
   };
 };
+

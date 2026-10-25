@@ -21,22 +21,31 @@ const FileIcon = ({ className = "" }) => (
 		/>
 	</svg>
 );
-
 const REPORT_TYPES = [
 	{
-		value: "FRESH_CORNER",
-		label: "Fresh Corner",
-		hint: "Fresh Corner, Garment Market, Straight Market, Queens Price",
+		value: "DAILY",
+		label: "Daily Fresh",
+		hint: "20 Volatile Produce items (Fresh Corner, Garment, Straight Market)",
 	},
 	{
-		value: "ULTRA_SENSITIVE",
+		value: "WEEKLY",
 		label: "Ultra-Sensitive",
-		hint: "Shoa, Abadir, Allmart, Bambis",
+		hint: "100 FMCG Staples (Shoa, Abadir, Allmart, Bambis)",
+	},
+	{
+		value: "MONTHLY",
+		label: "Sensitive",
+		hint: "500 Sensitive Packaged Grocery items",
+	},
+	{
+		value: "BI_YEARLY",
+		label: "Bi-Yearly",
+		hint: "2,804 Non-Sensitive Long-Tail articles",
 	},
 	{
 		value: "",
-		label: "Both",
-		hint: "Fresh Corner and Ultra-Sensitive in one file",
+		label: "All 4 Tracks",
+		hint: "Complete 3,424-item catalog in one consolidated report",
 	},
 ];
 
@@ -372,31 +381,33 @@ export const ReportExportMenu = ({
 						<p className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
 							Report Stream
 						</p>
-						<div
-							role="radiogroup"
-							aria-label="Report type"
-							className="grid grid-cols-3 gap-1 rounded-xl bg-slate-100 p-1"
-						>
-							{REPORT_TYPES.map((t) => {
-								const active = t.value === reportType;
-								return (
-									<button
-										key={t.value || "both"}
-										type="button"
-										role="radio"
-										aria-checked={active}
-										onClick={() => setReportType(t.value)}
-										className={`rounded-lg px-1.5 py-1.5 text-[11px] font-bold transition ${
-											active
-												? "bg-white text-[#A41821] shadow-xs"
-												: "text-slate-500 hover:text-slate-800"
-										}`}
-									>
-										{t.label}
-									</button>
-								);
-							})}
-						</div>
+
+					<div
+	role="radiogroup"
+	aria-label="Report type"
+	className="grid grid-cols-2 sm:grid-cols-5 gap-1 rounded-xl bg-slate-100 p-1"
+>
+	{REPORT_TYPES.map((t) => {
+		const active = t.value === reportType;
+		return (
+			<button
+				key={t.value || "all"}
+				type="button"
+				role="radio"
+				aria-checked={active}
+				onClick={() => setReportType(t.value)}
+				className={`rounded-lg px-1.5 py-1.5 text-[10px] font-bold transition text-center ${
+					active
+						? "bg-white text-[#A41821] shadow-xs"
+						: "text-slate-500 hover:text-slate-800"
+				}`}
+			>
+				{t.label}
+			</button>
+		);
+	})}
+</div>
+
 						<p className="mt-1.5 text-[11px] leading-snug text-slate-500">
 							{selectedType?.hint}
 						</p>
