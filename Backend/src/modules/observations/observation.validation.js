@@ -35,6 +35,12 @@ export const createObservationSchema = z
       )
       .nullable()
       .optional(),
+    substituteProduct: z
+      .string()
+      .trim()
+      .max(255, "Substitute product description cannot exceed 255 characters")
+      .nullable()
+      .optional(),
     observedUnit: z.string().trim().max(30).nullable().optional(),
     packageSize: z.string().trim().max(50).nullable().optional(),
     capturedAt: z
@@ -71,6 +77,7 @@ export const updateObservationSchema = z
       )
       .nullable()
       .optional(),
+    substituteProduct: z.string().trim().max(255).nullable().optional(),
     observedUnit: z.string().trim().max(30).nullable().optional(),
     packageSize: z.string().trim().max(50).nullable().optional(),
     evidencePhotoUrl: z
@@ -84,6 +91,8 @@ export const updateObservationSchema = z
   .strict(
     "Modifying protected system fields (auditId, productId, auditorId, syncStatus) is forbidden",
   );
+
+
 
 export const rejectObservationSchema = z.object({
   reviewNote: z

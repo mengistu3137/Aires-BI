@@ -60,7 +60,15 @@ export const Survey = () => {
 		}
 	}, [currentAssignment, activeAssignment, setActiveAssignment]);
 
-	const sessionContext = getSessionContext();
+	// getSessionContext() returns a brand-new object on every call. Memoize it so
+	// it only changes when the assignment changes (otherwise any effect that
+	// depends on it re-runs on every render).
+	const sessionContext = useMemo(
+		() => getSessionContext(),
+		[activeAssignment, getSessionContext],
+	);
+	const storeLatitude = sessionContext?.storeLatitude;
+	const storeLongitude = sessionContext?.storeLongitude;
 
 	const assignedProducts = useMemo(() => {
 		return currentAssignment?.items || [];
@@ -78,31 +86,41 @@ export const Survey = () => {
 		acquired: false,
 	});
 
+	// Runs once per store, using primitive deps. Previously this depended on the
+	// sessionContext object: setGps() -> re-render -> new object -> effect again
+	// -> getCurrentPosition -> setGps() ... an endless render loop.
 	useEffect(() => {
-		if ("geolocation" in navigator) {
-			navigator.geolocation.getCurrentPosition(
-				(pos) => {
+		if (!("geolocation" in navigator)) return;
+		let cancelled = false;
+
+		navigator.geolocation.getCurrentPosition(
+			(pos) => {
+				if (cancelled) return;
+				setGps({
+					latitude: Number(pos.coords.latitude.toFixed(7)),
+					longitude: Number(pos.coords.longitude.toFixed(7)),
+					accuracy: Math.round(pos.coords.accuracy),
+					acquired: true,
+				});
+			},
+			() => {
+				if (cancelled) return;
+				if (storeLatitude && storeLongitude) {
 					setGps({
-						latitude: Number(pos.coords.latitude.toFixed(7)),
-						longitude: Number(pos.coords.longitude.toFixed(7)),
-						accuracy: Math.round(pos.coords.accuracy),
+						latitude: Number(storeLatitude),
+						longitude: Number(storeLongitude),
+						accuracy: 8,
 						acquired: true,
 					});
-				},
-				() => {
-					if (sessionContext?.storeLatitude) {
-						setGps({
-							latitude: Number(sessionContext.storeLatitude),
-							longitude: Number(sessionContext.storeLongitude),
-							accuracy: 8,
-							acquired: true,
-						});
-					}
-				},
-				{ enableHighAccuracy: true, timeout: 7000 },
-			);
-		}
-	}, [sessionContext]);
+				}
+			},
+			{ enableHighAccuracy: true, timeout: 7000 },
+		);
+
+		return () => {
+			cancelled = true;
+		};
+	}, [storeLatitude, storeLongitude]);
 
 	// 2. Initialize or Recover Audit
 	useEffect(() => {
@@ -173,8 +191,12 @@ export const Survey = () => {
 		records.forEach((obs) => {
 			map[obs.productId] = {
 				id: obs.id,
-				price: obs.price !== null ? Number(obs.price) : null,
+				price:
+					obs.price !== null && obs.price !== undefined
+						? Number(obs.price)
+						: null,
 				availability: obs.availability,
+				substituteProduct: obs.substituteProduct || null,
 				timestamp: obs.capturedAt,
 			};
 		});
@@ -187,6 +209,12 @@ export const Survey = () => {
 	const [isDrawerOpen, setIsDrawerOpen] = useState(false);
 	const [autoAdvance, setAutoAdvance] = useState(true); // Sequential Mode default ON
 	const searchRef = useRef(null);
+
+	const focusSearch = useCallback(() => {
+		setTimeout(() => searchRef.current?.focusInput?.(), 60);
+	}, []);
+
+	const handleSelectProduct = useCallback((p) => setSelectedProduct(p), []);
 
 	const completedIds = useMemo(
 		() => new Set(Object.keys(observationsMap)),
@@ -276,8 +304,9 @@ export const Survey = () => {
 		setSelectedProduct(assignedProducts[prevIdx]);
 	};
 
-	// 4. Save Observation with Auto-Advance Conveyor Belt Logic
-	const handleSaveObservation = async (payload) => {
+	// `advance: false` is used when editing from the audit drawer, so an edit
+	// does not pop the price modal open on the next product.
+	const handleSaveObservation = async (payload, { advance = true } = {}) => {
 		if (!activeAudit?.id) {
 			toast.error("Audit session is not ready yet. Please wait...");
 			return;
@@ -286,6 +315,12 @@ export const Survey = () => {
 		setIsSaving(true);
 		const clientObservationId = `obs_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
+		const hasSubstitute = Boolean(payload.substituteProduct?.trim());
+		const finalPrice =
+			payload.availability === "AVAILABLE" || hasSubstitute
+				? payload.price
+				: null;
+
 		try {
 			await createObservationRequest({
 				auditId: activeAudit.id,
@@ -293,7 +328,8 @@ export const Survey = () => {
 					clientObservationId,
 					productId: payload.productId,
 					availability: payload.availability,
-					price: payload.availability === "AVAILABLE" ? payload.price : null,
+					price: finalPrice,
+					substituteProduct: payload.substituteProduct?.trim() || null,
 					capturedAt: new Date().toISOString(),
 				},
 			});
@@ -307,9 +343,13 @@ export const Survey = () => {
 			toast.success(
 				payload.availability === "AVAILABLE"
 					? `Saved: ${Number(payload.price).toFixed(2)} ETB`
-					: `Marked: ${payload.availability.replace("_", " ")}`,
+					: hasSubstitute
+						? `${payload.availability.replace("_", " ")}: Substitute logged`
+						: `Marked: ${payload.availability.replace("_", " ")}`,
 				{ id: "observation-toast", duration: 1800 },
 			);
+
+			if (!advance) return;
 
 			// AUTO-ADVANCE: Stay inside the price modal, immediately display next product
 			if (autoAdvance) {
@@ -319,11 +359,11 @@ export const Survey = () => {
 				} else {
 					setSelectedProduct(null);
 					toast.success("All assigned products completed!", { icon: "🎉" });
-					setTimeout(() => searchRef.current?.focusInput(), 60);
+					focusSearch();
 				}
 			} else {
 				setSelectedProduct(null);
-				setTimeout(() => searchRef.current?.focusInput(), 60);
+				focusSearch();
 			}
 		} catch (err) {
 			const msg =
@@ -521,13 +561,13 @@ export const Survey = () => {
 				totalItems={totalCount}
 				autoAdvance={autoAdvance}
 				onToggleAutoAdvance={() => setAutoAdvance((prev) => !prev)}
-				onSavePrice={handleSaveObservation}
-				onSaveAvailability={handleSaveObservation}
+				onSavePrice={(p) => handleSaveObservation(p)}
+				onSaveAvailability={(p) => handleSaveObservation(p)}
 				onNext={handleSkipNext}
 				onPrev={handleSkipPrev}
 				onCancel={() => {
 					setSelectedProduct(null);
-					setTimeout(() => searchRef.current?.focusInput(), 60);
+					focusSearch();
 				}}
 				isSaving={isSaving}
 			/>
@@ -537,7 +577,7 @@ export const Survey = () => {
 				ref={searchRef}
 				products={assignedProducts}
 				completedProductIds={completedIds}
-				onSelectProduct={(p) => setSelectedProduct(p)}
+				onSelectProduct={handleSelectProduct}
 				disabled={isSaving}
 			/>
 
@@ -596,6 +636,7 @@ export const Survey = () => {
 							const pId = p.productId || p.id;
 							const observation = observationsMap[pId];
 							const isDone = Boolean(observation);
+							const hasSubstitute = Boolean(observation?.substituteProduct);
 							const isSelected =
 								selectedProduct &&
 								(selectedProduct.productId || selectedProduct.id) === pId;
@@ -617,12 +658,32 @@ export const Survey = () => {
 											<span className="font-mono text-xs font-semibold text-slate-400">
 												#{pIdx + 1}
 											</span>
+											{/* Original product is struck through when a substitute was captured */}
 											<span
-												className={`block truncate text-sm font-bold ${isDone ? "text-slate-800" : "text-slate-900"}`}
+												className={`block truncate text-sm font-bold ${
+													hasSubstitute
+														? "text-slate-400 line-through decoration-[#A41821] decoration-2"
+														: isDone
+															? "text-slate-800"
+															: "text-slate-900"
+												}`}
 											>
 												{formatProductName(p.name)}
 											</span>
 										</div>
+
+										{/* Substitute product shown next to / under the struck-through name */}
+										{hasSubstitute && (
+											<div className="mt-0.5 flex items-center gap-1 pl-5">
+												<span className="flex-none text-xs font-black text-[#FE7914]">
+													↳
+												</span>
+												<span className="truncate text-xs font-bold text-[#FE7914]">
+													{observation.substituteProduct}
+												</span>
+											</div>
+										)}
+
 										<div className="mt-0.5 font-mono text-[11px] text-slate-400 pl-5">
 											{p.barcode || p.sku || pId} • {p.category} ({p.unit})
 										</div>
@@ -636,9 +697,16 @@ export const Survey = () => {
 														{Number(observation.price).toFixed(2)} ETB
 													</span>
 												) : (
-													<span className="rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-[#FE7914]">
-														{observation.availability.replace("_", " ")}
-													</span>
+													<div className="flex flex-col items-end gap-0.5">
+														<span className="rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-[#FE7914]">
+															{observation.availability.replace("_", " ")}
+														</span>
+														{observation.price !== null && (
+															<span className="font-mono text-sm font-black text-slate-800">
+																{Number(observation.price).toFixed(2)} ETB
+															</span>
+														)}
+													</div>
 												)}
 												<span className="block text-[9px] font-bold text-emerald-600">
 													✓ Saved
@@ -663,7 +731,7 @@ export const Survey = () => {
 				onClose={() => setIsDrawerOpen(false)}
 				observations={observationsMap}
 				products={assignedProducts}
-				onEditPrice={handleSaveObservation}
+				onEditPrice={(p) => handleSaveObservation(p, { advance: false })}
 			/>
 		</div>
 	);

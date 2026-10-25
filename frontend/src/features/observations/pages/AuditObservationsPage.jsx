@@ -655,9 +655,8 @@ const prettyEnum = (value) => {
 		.join(" ");
 };
 
-// ============================================================
-// COLLECTION VIEW (assigned auditor) — fully wired
-// ============================================================
+// Replace CollectionView in frontend/src/features/observations/pages/AuditObservationsPage.jsx:
+
 const CollectionView = ({ audit, observations, auditId }) => {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
@@ -679,25 +678,10 @@ const CollectionView = ({ audit, observations, auditId }) => {
 		[audit],
 	);
 
-	// ────────────────────────────────────────────────────────────
-	// Merge server + local queue observations.
-	//
-	// 1. Server rows first, tagged __local: false.
-	// 2. Local queue rows only added if the clientObservationId is not
-	//    already present from the server (dedupe).
-	// 3. Group by productId, keeping the latest capturedAt. On ties,
-	//    prefer the non-local (server) record.
-	// ────────────────────────────────────────────────────────────
 	const observationsByProduct = useMemo(() => {
 		const productMap = new Map(products.map((p) => [p.id, p]));
 		const merged = new Map();
 
-		// Server rows. Note: this list can also contain optimistic rows we
-		// wrote into the React Query cache ourselves (see upsertObservationInCache),
-		// so respect each row's own __local flag instead of forcing it to
-		// false — otherwise a still-PENDING offline row briefly reports itself
-		// as synced/server-confirmed, which is what made the status appear to
-		// "flip" before reverting.
 		for (const o of observations) {
 			const key = o.clientObservationId || o.id;
 			merged.set(key, {
@@ -707,7 +691,6 @@ const CollectionView = ({ audit, observations, auditId }) => {
 			});
 		}
 
-		// Local queue rows — add only if not already present from server
 		for (const o of localObservations) {
 			const key = o.clientObservationId || o.id;
 			if (!merged.has(key)) {
@@ -719,7 +702,6 @@ const CollectionView = ({ audit, observations, auditId }) => {
 			}
 		}
 
-		// Group by product, keep latest. Tie-break prefers server.
 		const byProduct = {};
 		for (const o of merged.values()) {
 			const existing = byProduct[o.productId];
@@ -746,11 +728,6 @@ const CollectionView = ({ audit, observations, auditId }) => {
 		observationsByProductRef.current = observationsByProduct;
 	}, [observationsByProduct]);
 
-	const auditStatusRef = useRef(audit?.status);
-	useEffect(() => {
-		auditStatusRef.current = audit?.status;
-	}, [audit?.status]);
-
 	const productsRef = useRef(products);
 	useEffect(() => {
 		productsRef.current = products;
@@ -769,7 +746,17 @@ const CollectionView = ({ audit, observations, auditId }) => {
 	const [filterMode, setFilterMode] = useState("PENDING");
 	const [showCompletionBanner, setShowCompletionBanner] = useState(false);
 	const [isSaving, setIsSaving] = useState(false);
-	const [autoAdvance, setAutoAdvance] = useState(true); // Sequential Mode default ON
+	const [autoAdvance, setAutoAdvance] = useState(true);
+
+	// ────────────────────────────────────────────────────────────
+	// DEDICATED SUBSTITUTE POPUP STATE (Intercepts Out of Stock & Not Carried)
+	// ────────────────────────────────────────────────────────────
+	const [substituteModalState, setSubstituteModalState] = useState(null);
+	// Shape: { product, availability: 'OUT_OF_STOCK' | 'NOT_FOUND' } | null
+	const [substituteDescription, setSubstituteDescription] = useState("");
+	const [substituteShelfPrice, setSubstituteShelfPrice] = useState("");
+	const [substituteModalError, setSubstituteModalError] = useState("");
+
 	const [isOnline, setIsOnline] = useState(
 		typeof navigator !== "undefined" ? navigator.onLine : true,
 	);
@@ -779,14 +766,12 @@ const CollectionView = ({ audit, observations, auditId }) => {
 	const inFlightProductsRef = useRef(new Set());
 	const saveChainRef = useRef(Promise.resolve());
 
-	// Sequential Position Calculation (#X of Y)
 	const currentProductPosition = useMemo(() => {
 		if (!selectedProduct) return 1;
 		const pId = selectedProduct.id || selectedProduct.productId;
 		return products.findIndex((p) => p.id === pId) + 1;
 	}, [selectedProduct, products]);
 
-	// First Unobserved Product for Auto-Resume
 	const firstPendingProduct = useMemo(() => {
 		return products.find((p) => !completedIds.has(p.id)) || null;
 	}, [products, completedIds]);
@@ -796,13 +781,11 @@ const CollectionView = ({ audit, observations, auditId }) => {
 		return products.findIndex((p) => p.id === firstPendingProduct.id) + 1;
 	}, [products, firstPendingProduct, totalCount]);
 
-	// Sequential Step Helpers (< Prev and Skip >)
 	const findNextProduct = useCallback(
 		(currentPId, onlyUncompleted = true) => {
 			const currentIdx = products.findIndex((p) => p.id === currentPId);
 			if (currentIdx === -1) return null;
 
-			// 1. Look forward
 			for (let i = currentIdx + 1; i < products.length; i++) {
 				const candidate = products[i];
 				if (!onlyUncompleted || !completedIds.has(candidate.id)) {
@@ -810,7 +793,6 @@ const CollectionView = ({ audit, observations, auditId }) => {
 				}
 			}
 
-			// 2. Wrap around
 			for (let i = 0; i < currentIdx; i++) {
 				const candidate = products[i];
 				if (!onlyUncompleted || !completedIds.has(candidate.id)) {
@@ -853,13 +835,6 @@ const CollectionView = ({ audit, observations, auditId }) => {
 		queryClient.invalidateQueries({ queryKey: ["dashboard"] });
 	}, [queryClient, auditId]);
 
-	// The app shell already mounts useObservationQueueFlush (auto-flushes the
-	// offline queue on reconnect) and useObservationQueueInvalidator (refetches
-	// these queries whenever the queue reports a sync event). So this view
-	// does NOT call flushQueue() itself on the "online" event — doing so here
-	// too would race the app-shell flush and could double-POST the same
-	// pending observation. "Sync now" below is a manual, user-initiated retry
-	// only (e.g. the auto-flush was missed while the tab was backgrounded).
 	const runQueueFlush = useCallback(async () => {
 		setIsSyncingQueue(true);
 		try {
@@ -881,17 +856,6 @@ const CollectionView = ({ audit, observations, auditId }) => {
 			invalidateDependentQueries();
 		}
 	}, [invalidateDependentQueries]);
-
-	useEffect(() => {
-		const handleOnline = () => setIsOnline(true);
-		const handleOffline = () => setIsOnline(false);
-		window.addEventListener("online", handleOnline);
-		window.addEventListener("offline", handleOffline);
-		return () => {
-			window.removeEventListener("online", handleOnline);
-			window.removeEventListener("offline", handleOffline);
-		};
-	}, []);
 
 	const upsertObservationInCache = useCallback(
 		(formattedObservation) => {
@@ -919,17 +883,6 @@ const CollectionView = ({ audit, observations, auditId }) => {
 		[queryClient, queryKey],
 	);
 
-	useEffect(() => {
-		if (
-			totalCount > 0 &&
-			observedCount >= totalCount &&
-			!completionShownRef.current
-		) {
-			completionShownRef.current = true;
-			setShowCompletionBanner(true);
-		}
-	}, [observedCount, totalCount]);
-
 	const handleSelectProduct = useCallback((product) => {
 		const normalized = product?.productId
 			? { ...product, id: product.productId }
@@ -943,129 +896,140 @@ const CollectionView = ({ audit, observations, auditId }) => {
 		setTimeout(() => searchRef.current?.focusInput(), 60);
 	}, []);
 
-const performSave = useCallback(
-	async ({ productId, price, availability }) => {
-		const existing = observationsByProductRef.current[productId];
-		const currentProducts = productsRef.current;
-		const online = navigator.onLine;
+	const performSave = useCallback(
+		async ({ productId, price, availability, substituteProduct }) => {
+			const existing = observationsByProductRef.current[productId];
+			const currentProducts = productsRef.current;
+			const online = navigator.onLine;
 
-		const productName = formatProductName(
-			currentProducts.find((p) => p.id === productId)?.name || "Item",
-		);
+			const productName = formatProductName(
+				currentProducts.find((p) => p.id === productId)?.name || "Item",
+			);
 
-		// Existing server row: allowed to be updated regardless of review status
-		const isExistingServerRow = existing && existing.id && !existing.__local;
+			const isExistingServerRow = existing && existing.id && !existing.__local;
+			const hasSub = Boolean(substituteProduct?.trim());
+			const finalPrice =
+				availability === "AVAILABLE" || hasSub ? price : null;
 
-		// Direct online update if row already exists on server
-		if (isExistingServerRow && online) {
-			const optimistic = {
-				...existing,
+			if (isExistingServerRow && online) {
+				const optimistic = {
+					...existing,
+					availability,
+					price: finalPrice,
+					substituteProduct: substituteProduct?.trim() || null,
+					capturedAt: new Date().toISOString(),
+					sync: { ...(existing.sync || {}), status: "SYNCED" },
+				};
+				upsertObservationInCache(optimistic);
+
+				try {
+					const response = await updateObservation.mutateAsync({
+						observationId: existing.id,
+						payload: {
+							price: finalPrice,
+							availability,
+							substituteProduct: substituteProduct?.trim() || null,
+						},
+					});
+					if (response?.data) {
+						upsertObservationInCache(response.data);
+					}
+					toast.success(
+						availability === "AVAILABLE"
+							? `${productName}: ${Number(price).toFixed(2)} ETB`
+							: hasSub
+							? `${productName} (${availability.replace("_", " ")}): Substitute logged`
+							: `${productName}: ${availability.replace("_", " ")}`,
+						{ id: "observation-toast", duration: 1500 },
+					);
+					invalidateDependentQueries();
+					return;
+				} catch (err) {
+					upsertObservationInCache(existing);
+					toast.error(
+						err?.response?.data?.message || "Unable to update observation",
+					);
+					return;
+				}
+			}
+
+			const clientObservationId = buildClientObservationId(auditId, productId);
+			const isUpdate = Boolean(
+				existing && (existing.id || existing.serverObservationId),
+			);
+
+			const payload = {
+				clientObservationId,
+				auditId,
+				productId,
 				availability,
-				price: availability === "AVAILABLE" ? price : null,
+				price: finalPrice,
+				substituteProduct: substituteProduct?.trim() || null,
+				observedUnit: existing?.observedUnit || null,
+				packageSize: existing?.packageSize || null,
 				capturedAt: new Date().toISOString(),
-				sync: { ...(existing.sync || {}), status: "SYNCED" },
+				evidencePhotoUrl: existing?.evidencePhotoUrl || null,
+				notes: existing?.notes || null,
+				operation: isUpdate ? "UPDATE" : "CREATE",
+				serverObservationId: isUpdate
+					? existing.serverObservationId || existing.id
+					: null,
 			};
-			upsertObservationInCache(optimistic);
+
+			const optimisticObservation = {
+				id: payload.serverObservationId || clientObservationId,
+				clientObservationId,
+				auditId,
+				productId,
+				availability: payload.availability,
+				price: payload.price,
+				substituteProduct: payload.substituteProduct,
+				capturedAt: payload.capturedAt,
+				sync: { status: "PENDING", attempts: 0 },
+				review: { status: existing?.review?.status || "PENDING" },
+				product: currentProducts.find((p) => p.id === productId) || undefined,
+				__local: true,
+			};
+			upsertObservationInCache(optimisticObservation);
 
 			try {
-				const response = await updateObservation.mutateAsync({
-					observationId: existing.id,
-					payload: { price, availability },
-				});
-				if (response?.data) {
-					upsertObservationInCache(response.data);
+				const queued = await enqueueObservation(payload);
+
+				if (!online) {
+					toast.success(`${productName} saved offline — will sync when online`, {
+						id: "observation-toast",
+						duration: 1800,
+					});
+					return;
 				}
-				toast.success(
-					availability === "AVAILABLE"
-						? `${productName}: ${Number(price).toFixed(2)} ETB`
-						: `${productName}: ${availability.replace("_", " ")}`,
-					{ id: "observation-toast", duration: 1500 },
-				);
-				invalidateDependentQueries();
-				return;
+
+				const result = await syncObservation(queued);
+				if (result.success && result.data) {
+					upsertObservationInCache(result.data);
+					invalidateDependentQueries();
+					toast.success(
+						availability === "AVAILABLE"
+							? `${productName}: ${Number(price).toFixed(2)} ETB`
+							: hasSub
+							? `${productName} (${availability.replace("_", " ")}): Substitute logged`
+							: `${productName}: ${availability.replace("_", " ")}`,
+						{ id: "observation-toast", duration: 1500 },
+					);
+				}
 			} catch (err) {
-				upsertObservationInCache(existing);
-				toast.error(
-					err?.response?.data?.message || "Unable to update observation",
-				);
-				return;
+				toast.error("Unable to save observation locally");
 			}
-		}
-
-		// Offline or brand new observation
-		const clientObservationId = buildClientObservationId(auditId, productId);
-		const isUpdate = Boolean(
-			existing && (existing.id || existing.serverObservationId),
-		);
-
-		const payload = {
-			clientObservationId,
+		},
+		[
 			auditId,
-			productId,
-			availability,
-			price: availability === "AVAILABLE" ? price : null,
-			observedUnit: existing?.observedUnit || null,
-			packageSize: existing?.packageSize || null,
-			capturedAt: new Date().toISOString(),
-			evidencePhotoUrl: existing?.evidencePhotoUrl || null,
-			notes: existing?.notes || null,
-			operation: isUpdate ? "UPDATE" : "CREATE",
-			serverObservationId: isUpdate
-				? existing.serverObservationId || existing.id
-				: null,
-		};
-
-		const optimisticObservation = {
-			id: payload.serverObservationId || clientObservationId,
-			clientObservationId,
-			auditId,
-			productId,
-			availability: payload.availability,
-			price: payload.price,
-			capturedAt: payload.capturedAt,
-			sync: { status: "PENDING", attempts: 0 },
-			review: { status: existing?.review?.status || "PENDING" },
-			product: currentProducts.find((p) => p.id === productId) || undefined,
-			__local: true,
-		};
-		upsertObservationInCache(optimisticObservation);
-
-		try {
-			const queued = await enqueueObservation(payload);
-
-			if (!online) {
-				toast.success(`${productName} saved offline — will sync when online`, {
-					id: "observation-toast",
-					duration: 1800,
-				});
-				return;
-			}
-
-			const result = await syncObservation(queued);
-			if (result.success && result.data) {
-				upsertObservationInCache(result.data);
-				invalidateDependentQueries();
-				toast.success(
-					availability === "AVAILABLE"
-						? `${productName}: ${Number(price).toFixed(2)} ETB`
-						: `${productName}: ${availability.replace("_", " ")}`,
-					{ id: "observation-toast", duration: 1500 },
-				);
-			}
-		} catch (err) {
-			toast.error("Unable to save observation locally");
-		}
-	},
-	[
-		auditId,
-		updateObservation,
-		upsertObservationInCache,
-		invalidateDependentQueries,
-	],
-);
+			updateObservation,
+			upsertObservationInCache,
+			invalidateDependentQueries,
+		],
+	);
 
 	const persistObservation = useCallback(
-		({ productId, price, availability }) => {
+		({ productId, price, availability, substituteProduct }) => {
 			if (inFlightProductsRef.current.has(productId)) {
 				toast("Already saving…", { id: "obs-in-flight", duration: 800 });
 				return Promise.resolve();
@@ -1075,7 +1039,9 @@ const performSave = useCallback(
 
 			const run = saveChainRef.current
 				.catch(() => {})
-				.then(() => performSave({ productId, price, availability }))
+				.then(() =>
+					performSave({ productId, price, availability, substituteProduct }),
+				)
 				.catch(() => {});
 
 			saveChainRef.current = run;
@@ -1093,7 +1059,6 @@ const performSave = useCallback(
 		[performSave],
 	);
 
-	// Sequential Conveyor Belt Flow: Stay in modal, auto-advance to next product
 	const handleSavePrice = useCallback(
 		async ({ productId, price, availability }) => {
 			await persistObservation({ productId, price, availability });
@@ -1115,26 +1080,109 @@ const performSave = useCallback(
 		[autoAdvance, findNextProduct, handleSelectProduct, persistObservation],
 	);
 
-	const handleSaveAvailability = useCallback(
-		async ({ productId, availability, price }) => {
-			await persistObservation({ productId, price, availability });
-
-			if (autoAdvance) {
-				const next = findNextProduct(productId, true);
-				if (next) {
-					handleSelectProduct(next);
-				} else {
-					setSelectedProduct(null);
-					toast.success("All assigned items completed!", { icon: "🎉" });
-					setTimeout(() => searchRef.current?.focusInput(), 60);
+	// ────────────────────────────────────────────────────────────
+	// INTERCEPT: When surveyor clicks OUT OF STOCK or NOT CARRIED,
+	// OPEN THE SUBSTITUTE MODAL INSTEAD OF DIRECTLY SAVING!
+	// ────────────────────────────────────────────────────────────
+	const handleTriggerUnavailableModal = useCallback(
+		({ productId, availability, price, substituteProduct }) => {
+			// If already has substituteProduct passed through, save directly
+			if (substituteProduct) {
+				persistObservation({
+					productId,
+					price,
+					availability,
+					substituteProduct,
+				});
+				if (autoAdvance) {
+					const next = findNextProduct(productId, true);
+					if (next) handleSelectProduct(next);
+					else setSelectedProduct(null);
 				}
+				return;
+			}
+
+			// Otherwise: POP UP THE SUBSTITUTE DIALOG!
+			const targetProd =
+				products.find((p) => p.id === productId) || selectedProduct;
+			setSubstituteDescription("");
+			setSubstituteShelfPrice("");
+			setSubstituteModalError("");
+			setSubstituteModalState({
+				product: targetProd,
+				availability, // 'OUT_OF_STOCK' or 'NOT_FOUND'
+			});
+		},
+		[products, selectedProduct, autoAdvance, findNextProduct, handleSelectProduct, persistObservation],
+	);
+
+	// Confirm substitute from Modal
+	const handleConfirmSubstituteFromModal = async () => {
+		if (!substituteDescription.trim()) {
+			setSubstituteModalError("Please describe the substitute product found on shelf");
+			return;
+		}
+
+		const numPrice = parseFloat(substituteShelfPrice);
+		if (isNaN(numPrice) || numPrice <= 0) {
+			setSubstituteModalError("Please enter the price of the substitute product");
+			return;
+		}
+
+		const prodId = substituteModalState.product.id;
+		const avail = substituteModalState.availability;
+		const desc = substituteDescription.trim();
+
+		setSubstituteModalState(null);
+
+		await persistObservation({
+			productId: prodId,
+			price: numPrice,
+			availability: avail,
+			substituteProduct: desc,
+		});
+
+		if (autoAdvance) {
+			const next = findNextProduct(prodId, true);
+			if (next) {
+				handleSelectProduct(next);
 			} else {
 				setSelectedProduct(null);
+				toast.success("All assigned items completed!", { icon: "🎉" });
 				setTimeout(() => searchRef.current?.focusInput(), 60);
 			}
-		},
-		[autoAdvance, findNextProduct, handleSelectProduct, persistObservation],
-	);
+		} else {
+			setSelectedProduct(null);
+		}
+	};
+
+	// Confirm plain Out of Stock without substitute from Modal
+	const handleConfirmPlainUnavailable = async () => {
+		const prodId = substituteModalState.product.id;
+		const avail = substituteModalState.availability;
+
+		setSubstituteModalState(null);
+
+		await persistObservation({
+			productId: prodId,
+			price: null,
+			availability: avail,
+			substituteProduct: null,
+		});
+
+		if (autoAdvance) {
+			const next = findNextProduct(prodId, true);
+			if (next) {
+				handleSelectProduct(next);
+			} else {
+				setSelectedProduct(null);
+				toast.success("All assigned items completed!", { icon: "🎉" });
+				setTimeout(() => searchRef.current?.focusInput(), 60);
+			}
+		} else {
+			setSelectedProduct(null);
+		}
+	};
 
 	const store = audit.store;
 	const auditor = audit.auditor;
@@ -1149,25 +1197,6 @@ const performSave = useCallback(
 			: filterMode === "COMPLETED"
 				? completedProducts
 				: products;
-
-	if (products.length === 0) {
-		return (
-			<div className="mx-auto max-w-2xl space-y-4 px-4 pb-24 pt-4 sm:px-6">
-				<BackButton navigate={navigate} auditId={auditId} />
-				<ObservationEmptyState
-					title="No products assigned"
-					description="This audit has no products in its assignment."
-				/>
-			</div>
-		);
-	}
-
-	const pendingSyncCount = localObservations.length;
-	// Reflects real progress whether triggered by our own "Sync now" button
-	// or by the app shell's automatic reconnect flush.
-	const queueIsSyncing =
-		isSyncingQueue ||
-		localObservations.some((o) => o.sync?.status === "SYNCING");
 
 	return (
 		<div className="mx-auto max-w-2xl space-y-3 pb-24">
@@ -1196,11 +1225,6 @@ const performSave = useCallback(
 									{auditor.name}
 								</span>
 							)}
-							{isSaving && (
-								<span className="text-[10px] font-bold uppercase tracking-wider text-[#FE7914]">
-									Saving…
-								</span>
-							)}
 						</div>
 					</div>
 
@@ -1211,97 +1235,7 @@ const performSave = useCallback(
 			</div>
 
 			<div className="space-y-3 px-3 pt-3 sm:space-y-4 sm:px-4 sm:pt-4">
-				{/* Offline / Pending Sync Alert */}
-				{(!isOnline || pendingSyncCount > 0 || queueIsSyncing) && (
-					<div
-						className={`rounded-xl border px-3 py-2 text-[11px] ${
-							!isOnline
-								? "border-amber-200 bg-amber-50 text-amber-800"
-								: "border-slate-200 bg-slate-50 text-slate-600"
-						}`}
-					>
-						{!isOnline ? (
-							<p>
-								<span className="font-bold">Offline mode:</span>{" "}
-								{pendingSyncCount > 0
-									? `${pendingSyncCount} observation${pendingSyncCount === 1 ? "" : "s"} saved locally. `
-									: ""}
-								They will sync automatically when the connection returns.
-							</p>
-						) : queueIsSyncing ? (
-							<p>
-								<span className="font-bold">Syncing…</span> pushing{" "}
-								{pendingSyncCount || ""} offline observation
-								{pendingSyncCount === 1 ? "" : "s"} now.
-							</p>
-						) : (
-							<div className="flex items-center justify-between gap-2">
-								<p>
-									<span className="font-bold">{pendingSyncCount}</span>{" "}
-									observation
-									{pendingSyncCount === 1 ? "" : "s"} pending sync.
-								</p>
-								<button
-									type="button"
-									onClick={runQueueFlush}
-									className="shrink-0 rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-[10px] font-bold text-slate-700 hover:bg-slate-100"
-								>
-									Sync now
-								</button>
-							</div>
-						)}
-					</div>
-				)}
-
-				{/* Completion Banner */}
-				{showCompletionBanner && (
-					<div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
-						<div className="flex items-start gap-3">
-							<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#017C4D] text-white">
-								✓
-							</div>
-							<div className="min-w-0 flex-1">
-								<h3 className="text-sm font-bold text-[#017C4D]">
-									All products collected
-								</h3>
-								<p className="mt-0.5 text-[11px] text-emerald-700">
-									{observedCount} of {totalCount} observations recorded.
-								</p>
-							</div>
-							<button
-								type="button"
-								onClick={() => navigate(`/audits/${auditId}`)}
-								className="shrink-0 rounded-lg bg-[#017C4D] px-3 py-1.5 text-xs font-bold text-white hover:bg-[#015E3A]"
-							>
-								View audit
-							</button>
-						</div>
-					</div>
-				)}
-
-				{/* Sequential Resume Banner */}
-				{firstPendingProduct && observedCount > 0 && !selectedProduct && (
-					<div className="flex items-center justify-between gap-3 rounded-2xl border border-red-200/80 bg-red-50/50 p-3 shadow-2xs">
-						<div className="min-w-0 flex-1">
-							<span className="block text-[9px] font-bold uppercase tracking-wider text-[#A41821]">
-								Next Item to Audit ({resumeIndex} of {totalCount})
-							</span>
-							<p className="truncate text-xs font-bold text-slate-900">
-								{formatProductName(firstPendingProduct.name)}
-							</p>
-						</div>
-
-						<button
-							type="button"
-							onClick={() => handleSelectProduct(firstPendingProduct)}
-							className="flex-none cursor-pointer rounded-xl bg-[#A41821] px-3.5 py-2 text-xs font-bold text-white shadow-xs transition hover:bg-[#7F1219] active:scale-95"
-						>
-							Start Sequential Flow ➔
-						</button>
-					</div>
-				)}
-
-				{/* FULLY WIRED Rapid Price Input Modal */}
+				{/* Rapid Price Input */}
 				{selectedProduct && (
 					<RapidPriceInput
 						selectedProduct={selectedProduct}
@@ -1310,7 +1244,7 @@ const performSave = useCallback(
 						autoAdvance={autoAdvance}
 						onToggleAutoAdvance={() => setAutoAdvance((prev) => !prev)}
 						onSavePrice={handleSavePrice}
-						onSaveAvailability={handleSaveAvailability}
+						onSaveAvailability={handleTriggerUnavailableModal} // <-- INTERCEPTED HERE!
 						onNext={handleSkipNext}
 						onPrev={handleSkipPrev}
 						onCancel={handleCancel}
@@ -1318,7 +1252,7 @@ const performSave = useCallback(
 					/>
 				)}
 
-				{/* Search Bar with ref handle */}
+				{/* Search Bar */}
 				{!selectedProduct && (
 					<FastProductSearch
 						ref={searchRef}
@@ -1359,80 +1293,189 @@ const performSave = useCallback(
 						</div>
 
 						<div className="max-h-[55vh] divide-y divide-slate-100 overflow-y-auto">
-							{visibleProducts.map((product, pIdx) => {
-								const obs = observationsByProduct[product.id];
-								const isDone = Boolean(obs);
-								const isPendingSync =
-									obs?.sync?.status === "PENDING" ||
-									obs?.sync?.status === "SYNCING";
+						{visibleProducts.map((product, pIdx) => {
+	const obs = observationsByProduct[product.id];
+	const isDone = Boolean(obs);
+	const hasSubstitute = Boolean(obs?.substituteProduct);
+	const isUnavailable =
+		obs?.availability === "OUT_OF_STOCK" ||
+		obs?.availability === "NOT_FOUND";
 
-								return (
-									<button
-										key={product.id}
-										type="button"
-										onClick={() => handleSelectProduct(product)}
-										className="flex w-full items-center justify-between gap-3 rounded-lg p-2.5 text-left transition hover:bg-slate-50 active:bg-slate-100"
-									>
-										<div className="min-w-0 flex-1">
-											<div className="flex items-center gap-1.5">
-												<span className="font-mono text-xs font-semibold text-slate-400">
-													#{pIdx + 1}
-												</span>
-												<span className="block truncate text-sm font-bold text-slate-900">
-													{formatProductName(product.name)}
-												</span>
-											</div>
-											<div className="mt-0.5 truncate pl-5 font-mono text-[10px] text-slate-400">
-												{product.barcode || product.sku || product.id}
-											</div>
-										</div>
-										<div className="shrink-0 text-right">
-											{isDone ? (
-												<div className="flex items-center gap-1.5">
-													<ObservationAvailabilityBadge
-														availability={obs.availability}
-													/>
-													{obs.availability === "AVAILABLE" &&
-														obs.price !== null &&
-														obs.price !== undefined && (
-															<span className="font-mono text-xs font-black text-[#017C4D]">
-																{formatPrice(obs.price)}
-															</span>
-														)}
-													{isPendingSync && (
-														<span
-															className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#FE7914]"
-															title="Pending sync"
-														/>
-													)}
-												</div>
-											) : (
-												<span className="rounded-lg bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">
-													+ Price
-												</span>
-											)}
-										</div>
-									</button>
-								);
-							})}
+	return (
+		<button
+			key={product.id}
+			type="button"
+			onClick={() => handleSelectProduct(product)}
+			className="flex w-full items-center justify-between gap-3 rounded-lg p-2.5 text-left transition hover:bg-slate-50 active:bg-slate-100"
+		>
+			<div className="min-w-0 flex-1">
+				<div className="flex items-center gap-1.5">
+					<span className="font-mono text-xs font-semibold text-slate-400">
+						#{pIdx + 1}
+					</span>
+					{/* Original Product: struck through if substituted */}
+					<span
+						className={`block truncate text-sm font-bold ${
+							isUnavailable && hasSubstitute
+								? "text-slate-400 line-through decoration-slate-400"
+								: "text-slate-900"
+						}`}
+					>
+						{formatProductName(product.name)}
+					</span>
+				</div>
 
-							{visibleProducts.length === 0 && (
-								<div className="p-8 text-center">
-									<p className="text-xs text-slate-400">
-										{filterMode === "PENDING"
-											? "All products collected"
-											: "No products to show"}
-									</p>
-								</div>
-							)}
+				{/* Underneath Substituted Product Entry */}
+				{isUnavailable && hasSubstitute && (
+					<div className="flex items-center gap-1.5 pl-5 pt-0.5 font-sans">
+						<span className="text-[10px] font-bold text-[#FE7914]">↳ Sub:</span>
+						<span className="truncate rounded-md bg-amber-50 px-2 py-0.5 text-xs font-bold text-amber-900 border border-amber-200">
+							{obs.substituteProduct}
+						</span>
+					</div>
+				)}
+
+				<div className="mt-0.5 truncate pl-5 font-mono text-[10px] text-slate-400">
+					{product.barcode || product.sku || product.id}
+				</div>
+			</div>
+
+			<div className="shrink-0 text-right">
+				{isDone ? (
+					<div className="flex items-center gap-1.5">
+						<ObservationAvailabilityBadge
+							availability={obs.availability}
+						/>
+						{obs.price !== null && obs.price !== undefined && (
+							<div>
+								<span className="font-mono text-xs font-black text-[#017C4D]">
+									{formatPrice(obs.price)}
+								</span>
+								{hasSubstitute && (
+									<span className="block text-[8px] font-bold uppercase tracking-wider text-[#FE7914]">
+										Sub Price
+									</span>
+								)}
+							</div>
+						)}
+					</div>
+				) : (
+					<span className="rounded-lg bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">
+						+ Price
+					</span>
+				)}
+			</div>
+		</button>
+	);
+})}
 						</div>
 					</div>
 				)}
 			</div>
+
+			{/* ========================================================= */}
+			{/* DEDICATED SUBSTITUTE POPUP DIALOG (PORTAL MODAL)          */}
+			{/* ========================================================= */}
+			{substituteModalState && (
+				<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs animate-in fade-in">
+					<div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl border border-slate-100 space-y-4">
+						<div className="flex items-start justify-between border-b border-slate-100 pb-3">
+							<div>
+								<span className="rounded-md bg-amber-50 border border-amber-200 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-[#FE7914]">
+									{substituteModalState.availability === "OUT_OF_STOCK"
+										? "Out of Stock Action"
+										: "Not Carried Action"}
+								</span>
+								<h3 className="mt-1 text-base font-bold text-slate-900">
+									{formatProductName(substituteModalState.product.name)}
+								</h3>
+								<p className="text-xs text-slate-500 font-mono">
+									CODE: {substituteModalState.product.barcode || substituteModalState.product.id}
+								</p>
+							</div>
+							<button
+								type="button"
+								onClick={() => setSubstituteModalState(null)}
+								className="text-slate-400 hover:text-slate-600 cursor-pointer p-1"
+							>
+								✕
+							</button>
+						</div>
+
+						<div className="space-y-3">
+							<div>
+								<label className="block text-xs font-bold text-slate-800 mb-1">
+									Substitute Product Found on Shelf
+								</label>
+								<input
+									type="text"
+									autoFocus
+									placeholder={
+										substituteModalState.availability === "OUT_OF_STOCK"
+											? "e.g. Dove OOS, captured Lux 150g"
+											: "e.g. Not carried, captured local garlic 250g"
+									}
+									value={substituteDescription}
+									onChange={(e) => {
+										setSubstituteDescription(e.target.value);
+										setSubstituteModalError("");
+									}}
+									className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-xs text-slate-900 focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] outline-hidden font-medium"
+								/>
+							</div>
+
+							<div>
+								<label className="block text-xs font-bold text-slate-800 mb-1">
+									Substitute Shelf Price (ETB)
+								</label>
+								<div className="relative">
+									<input
+										type="number"
+										step="0.01"
+										placeholder="0.00"
+										value={substituteShelfPrice}
+										onChange={(e) => {
+											setSubstituteShelfPrice(e.target.value);
+											setSubstituteModalError("");
+										}}
+										className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 pr-14 text-sm font-bold font-mono text-slate-900 focus:border-[#A41821] outline-hidden"
+									/>
+									<span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-extrabold text-slate-400 font-mono">
+										ETB
+									</span>
+								</div>
+							</div>
+
+							{substituteModalError && (
+								<p className="text-xs font-semibold text-[#A41821]">{substituteModalError}</p>
+							)}
+
+							<div className="pt-2 flex flex-col gap-2">
+								<button
+									type="button"
+									onClick={handleConfirmSubstituteFromModal}
+									disabled={isSaving}
+									className="w-full rounded-xl bg-[#FE7914] hover:bg-[#D45F06] py-3 text-xs font-bold text-white shadow-xs transition cursor-pointer"
+								>
+									Save with Substitute (Enter ↵)
+								</button>
+
+								<button
+									type="button"
+									onClick={handleConfirmPlainUnavailable}
+									disabled={isSaving}
+									className="w-full rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 py-2.5 text-xs font-semibold text-slate-600 transition cursor-pointer"
+								>
+									No Substitute on Shelf (Record Plain {substituteModalState.availability.replace("_", " ")})
+								</button>
+							</div>
+						</div>
+					</div>
+				</div>
+			)}
 		</div>
 	);
 };
-
 
 const BackButton = ({ navigate, auditId }) => (
 	<div className="flex items-center gap-1.5">

@@ -35,7 +35,28 @@ const ASSIGNMENT_INCLUDE_RELATIONS = {
     },
   },
 };
-// Append to Backend/src/modules/assignment/assignment.service.js:
+/**
+ * Toggles or sets archive status for all assignments in a store dispatch cycle.
+ */
+export const archiveStoreDispatch = async ({ storeId, surveyPeriodId, archive = true }) => {
+  const nextStatus = archive ? "ARCHIVED" : "COMPLETED";
+
+  const updated = await prisma.surveyAssignment.updateMany({
+    where: {
+      storeId,
+      surveyPeriodId,
+    },
+    data: {
+      status: nextStatus,
+    },
+  });
+
+  return {
+    success: true,
+    message: `Store dispatch ${archive ? "archived" : "unarchived"} successfully (${updated.count} assignments updated).`,
+    count: updated.count,
+  };
+};
 
 /**
  * Creates batch assignments across multiple auditors for a single store in one transaction.
@@ -414,9 +435,6 @@ export const getMine = async (auditorId) => {
   return assignments.map(formatAssignmentResponse);
 };
 
-/**
- * Get all assignments with optional administrative filters and integer pagination safety.
- */
 export const getAll = async (query = {}) => {
   const {
     page: rawPage = 1,
@@ -425,13 +443,20 @@ export const getAll = async (query = {}) => {
     storeId,
     surveyPeriodId,
     status,
+    includeArchived,
   } = query;
 
   const where = {};
   if (auditorId) where.auditorId = auditorId;
   if (storeId) where.storeId = storeId;
   if (surveyPeriodId) where.surveyPeriodId = surveyPeriodId;
-  if (status) where.status = status;
+
+  // Filter archived out unless explicitly asked for
+  if (status) {
+    where.status = status;
+  } else if (includeArchived !== "true") {
+    where.status = { not: "ARCHIVED" };
+  }
 
   const page = Math.max(1, parseInt(rawPage, 10) || 1);
   const limit = Math.min(100, Math.max(1, parseInt(rawLimit, 10) || 50));

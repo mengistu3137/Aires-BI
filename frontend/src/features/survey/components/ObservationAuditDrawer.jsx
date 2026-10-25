@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { formatProductName } from "@/utils/formatters.js";
 
 export const ObservationAuditDrawer = ({
 	isOpen,
@@ -9,20 +10,41 @@ export const ObservationAuditDrawer = ({
 }) => {
 	const [editingProductId, setEditingProductId] = useState(null);
 	const [editedPrice, setEditedPrice] = useState("");
+	const [editedSubstitute, setEditedSubstitute] = useState("");
 
 	if (!isOpen) return null;
 
 	const observationEntries = Object.entries(observations);
 
-	const handleStartEdit = (productId, currentPrice) => {
+	const handleStartEdit = (productId, obs) => {
 		setEditingProductId(productId);
-		setEditedPrice(currentPrice ? String(currentPrice) : "");
+		setEditedPrice(
+			obs.price !== null && obs.price !== undefined ? String(obs.price) : "",
+		);
+		setEditedSubstitute(obs.substituteProduct || "");
 	};
 
-	const handleSaveEdit = (productId) => {
+	const handleSaveEdit = (productId, originalObs) => {
 		const num = parseFloat(editedPrice);
-		if (!isNaN(num) && num > 0) {
-			onEditPrice({ productId, price: num, availability: "AVAILABLE" });
+		const hasValidPrice = !isNaN(num) && num > 0;
+
+		if (originalObs.availability === "AVAILABLE") {
+			if (hasValidPrice) {
+				onEditPrice({
+					productId,
+					price: num,
+					availability: "AVAILABLE",
+					substituteProduct: null,
+				});
+			}
+		} else {
+			// OUT_OF_STOCK or NOT_FOUND with or without substitute
+			onEditPrice({
+				productId,
+				price: hasValidPrice ? num : null,
+				availability: originalObs.availability,
+				substituteProduct: editedSubstitute.trim() || null,
+			});
 		}
 		setEditingProductId(null);
 	};
@@ -50,7 +72,7 @@ export const ObservationAuditDrawer = ({
 				</div>
 
 				{/* Observation Items List */}
-				<div className="flex-1 overflow-y-auto divide-y divide-slate-100 py-2">
+				<div className="flex-1 overflow-y-auto divide-y divide-slate-100 py-2 pr-1">
 					{observationEntries.length === 0 ? (
 						<div className="p-8 text-center text-xs text-slate-400">
 							No prices or out-of-stock items recorded yet for this store.
@@ -61,59 +83,125 @@ export const ObservationAuditDrawer = ({
 								(p) => (p.productId || p.id) === productId,
 							);
 							const isEditing = editingProductId === productId;
+							const hasSubstitute = Boolean(obs.substituteProduct);
 
 							return (
 								<div
 									key={productId}
-									className="py-3 flex items-center justify-between gap-3 text-xs"
+									className="py-3 flex flex-col gap-2 text-xs"
 								>
-									<div className="min-w-0 flex-1">
-										<span className="font-bold text-slate-900 block truncate">
-											{product?.name || productId}
-										</span>
-										<span className="text-[11px] text-slate-400 font-mono">
-											Code: {product?.barcode || product?.sku || productId} •{" "}
-											{product?.category}
-										</span>
-									</div>
-
-									{isEditing ? (
-										<div className="flex items-center gap-1.5 flex-none">
-											<input
-												type="number"
-												step="0.01"
-												value={editedPrice}
-												onChange={(e) => setEditedPrice(e.target.value)}
-												className="w-20 rounded-lg border border-[#A41821] px-2 py-1 text-xs font-mono font-bold"
-												autoFocus
-											/>
-											<button
-												type="button"
-												onClick={() => handleSaveEdit(productId)}
-												className="rounded-lg bg-[#017C4D] px-2.5 py-1 text-[11px] font-bold text-white cursor-pointer"
-											>
-												✓
-											</button>
+									<div className="flex items-start justify-between gap-3">
+										<div className="min-w-0 flex-1">
+											<span className="font-bold text-slate-900 block truncate">
+												{formatProductName(product?.name || productId)}
+											</span>
+											<span className="text-[11px] text-slate-400 font-mono">
+												Code: {product?.barcode || product?.sku || productId} •{" "}
+												{product?.category}
+											</span>
 										</div>
-									) : (
-										<div className="flex items-center gap-3 flex-none text-right">
-											{obs.availability === "AVAILABLE" ? (
-												<span className="font-mono font-black text-sm text-[#017C4D]">
-													{Number(obs.price).toFixed(2)} ETB
-												</span>
-											) : (
-												<span className="rounded-md bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-[#FE7914] border border-amber-200">
-													{obs.availability.replace("_", " ")}
-												</span>
-											)}
 
+										{!isEditing && (
 											<button
 												type="button"
-												onClick={() => handleStartEdit(productId, obs.price)}
-												className="text-slate-400 hover:text-slate-700 underline text-[11px] cursor-pointer"
+												onClick={() => handleStartEdit(productId, obs)}
+												className="text-slate-400 hover:text-[#A41821] underline text-[11px] cursor-pointer flex-none font-semibold"
 											>
 												Edit
 											</button>
+										)}
+									</div>
+
+									{isEditing ? (
+										<div className="rounded-xl border border-slate-200 bg-slate-50 p-2.5 space-y-2">
+											<div className="flex items-center justify-between">
+												<span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+													Edit {obs.availability.replace("_", " ")}
+												</span>
+												<button
+													type="button"
+													onClick={() => setEditingProductId(null)}
+													className="text-[10px] text-slate-400 hover:text-slate-600"
+												>
+													Cancel
+												</button>
+											</div>
+
+											{obs.availability !== "AVAILABLE" && (
+												<div>
+													<label className="block text-[10px] font-bold text-slate-700 mb-0.5">
+														Substitute Product / Action Taken
+													</label>
+													<input
+														type="text"
+														placeholder="e.g. Dove OOS, captured Lux 150g"
+														value={editedSubstitute}
+														onChange={(e) =>
+															setEditedSubstitute(e.target.value)
+														}
+														className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800 focus:border-[#A41821] outline-hidden font-medium"
+													/>
+												</div>
+											)}
+
+											<div>
+												<label className="block text-[10px] font-bold text-slate-700 mb-0.5">
+													{obs.availability !== "AVAILABLE"
+														? "Substitute Price (ETB)"
+														: "Observed Price (ETB)"}
+												</label>
+												<input
+													type="number"
+													step="0.01"
+													placeholder="0.00"
+													value={editedPrice}
+													onChange={(e) => setEditedPrice(e.target.value)}
+													className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-mono font-bold text-slate-900 focus:border-[#A41821] outline-hidden"
+													autoFocus
+												/>
+											</div>
+
+											<div className="flex justify-end pt-1">
+												<button
+													type="button"
+													onClick={() => handleSaveEdit(productId, obs)}
+													className="rounded-lg bg-[#017C4D] hover:bg-[#01633D] px-3 py-1.5 text-xs font-bold text-white shadow-xs cursor-pointer"
+												>
+													Save Changes
+												</button>
+											</div>
+										</div>
+									) : (
+										<div className="flex items-center justify-between bg-slate-50/60 rounded-lg p-2 border border-slate-100">
+											<div className="flex items-center gap-2">
+												<span
+													className={`rounded-md px-2 py-0.5 text-[10px] font-bold border ${
+														obs.availability === "AVAILABLE"
+															? "bg-emerald-50 text-[#017C4D] border-emerald-200"
+															: "bg-orange-50 text-[#FE7914] border-orange-200"
+													}`}
+												>
+													{obs.availability.replace("_", " ")}
+												</span>
+
+												{hasSubstitute && (
+													<span className="text-[11px] font-medium text-slate-700 truncate max-w-[180px] sm:max-w-[240px]">
+														↳ {obs.substituteProduct}
+													</span>
+												)}
+											</div>
+
+											<div>
+												{obs.price !== null && obs.price !== undefined ? (
+													<span className="font-mono font-black text-xs text-slate-900">
+														{Number(obs.price).toFixed(2)} ETB
+													</span>
+												) : (
+													<span className="text-[10px] text-slate-400 font-mono">
+														No Price
+													</span>
+												)}
+											</div>
 										</div>
 									)}
 								</div>

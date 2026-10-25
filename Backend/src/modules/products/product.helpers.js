@@ -1,5 +1,4 @@
 export const formatProductWithActivePrice = (product) => {
-  // Sort historical prices descending by effectiveFrom
   const sortedPrices = (product.queensPrices || []).sort(
     (a, b) => new Date(b.effectiveFrom) - new Date(a.effectiveFrom)
   );
@@ -15,8 +14,8 @@ export const formatProductWithActivePrice = (product) => {
     barcode: product.barcode,
     category: product.category,
     unit: product.unit,
+    frequency: product.frequency || "WEEKLY", // <-- CRITICAL FIX: Expose frequency
     active: product.active,
-    // Expose both currentQueensPrice and queensPrice for test compatibility
     currentQueensPrice: priceValue,
     queensPrice: priceValue,
     priceHistoryCount: (product.queensPrices || []).length,
@@ -25,7 +24,6 @@ export const formatProductWithActivePrice = (product) => {
     updatedAt: product.updatedAt,
   };
 };
-
 export const buildProductFilter = (query) => {
   const filter = {};
 

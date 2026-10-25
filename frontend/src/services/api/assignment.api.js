@@ -1,6 +1,12 @@
 import { apiClient } from "@/services/client.js";
 
-
+export const archiveStoreDispatchRequest = async ({ storeId, surveyPeriodId, archive = true }) => {
+  const response = await apiClient.post(
+    `/assignments/store/${storeId}/period/${surveyPeriodId}/archive`,
+    { archive }
+  );
+  return response.data;
+};
 export const createBatchAssignmentRequest = async (payload) => {
   const response = await apiClient.post("/assignments/batch", payload);
   return response.data;

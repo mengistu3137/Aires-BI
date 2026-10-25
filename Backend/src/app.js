@@ -66,6 +66,17 @@ app.get("/health", (req, res) => {
 // ==========================================
 // REGISTER SYSTEM ROUTES
 // ==========================================
+
+// Serve public uploads from src/uploads where upload.js writes
+const uploadsPath = path.join(process.cwd(), "src", "uploads");
+app.use(
+  "/uploads",
+  express.static(uploadsPath, {
+    setHeaders: (res) => {
+      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    },
+  }),
+);
 app.use("/api/v1/reports", reportRoutes);
 app.use("/api/v1/ai", aiRoutes);
 
