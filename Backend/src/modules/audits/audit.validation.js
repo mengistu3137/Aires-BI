@@ -1,23 +1,42 @@
 import { z } from "zod";
 
 const coordinateLatitude = z
-  .number({ required_error: "Latitude is required and must be a number" })
-  .min(-90, "Latitude must be between -90 and 90")
-  .max(90, "Latitude must be between -90 and 90")
-  .refine((v) => !Number.isNaN(v) && Number.isFinite(v), "Invalid latitude");
+  .number()
+  .min(-90)
+  .max(90)
+  .nullable()
+  .optional();
 
 const coordinateLongitude = z
-  .number({ required_error: "Longitude is required and must be a number" })
-  .min(-180, "Longitude must be between -180 and 180")
-  .max(180, "Longitude must be between -180 and 180")
-  .refine((v) => !Number.isNaN(v) && Number.isFinite(v), "Invalid longitude");
+  .number()
+  .min(-180)
+  .max(180)
+  .nullable()
+  .optional();
 
 const accuracyMeters = z
-  .number({
-    required_error: "Accuracy in meters is required and must be a number",
-  })
-  .min(0, "Accuracy cannot be negative")
-  .refine((v) => !Number.isNaN(v) && Number.isFinite(v), "Invalid accuracy");
+  .number()
+  .min(0)
+  .nullable()
+  .optional();
+
+export const startAuditSchema = z.object({
+  latitude: coordinateLatitude,
+  longitude: coordinateLongitude,
+  accuracyMeters: accuracyMeters,
+  gpsBypassed: z.boolean().optional().default(false),
+});
+
+export const completeAuditSchema = z.object({
+  latitude: coordinateLatitude,
+  longitude: coordinateLongitude,
+  accuracyMeters: accuracyMeters,
+  gpsBypassed: z.boolean().optional().default(false),
+  notes: z.string().max(2000).optional(),
+});
+
+
+
 
 export const assignmentIdParamSchema = z.object({
   assignmentId: z
@@ -37,11 +56,6 @@ export const createAuditSchema = z.object({
   notes: z.string().max(1000, "Notes cannot exceed 1000 characters").optional(),
 });
 
-export const startAuditSchema = z.object({
-  latitude: coordinateLatitude,
-  longitude: coordinateLongitude,
-  accuracyMeters: accuracyMeters,
-});
 
 export const updateAuditSchema = z
   .object({
@@ -53,12 +67,7 @@ export const updateAuditSchema = z
   })
   .strict("Only notes can be updated through this endpoint");
 
-export const completeAuditSchema = z.object({
-  latitude: coordinateLatitude,
-  longitude: coordinateLongitude,
-  accuracyMeters: accuracyMeters,
-  notes: z.string().max(2000, "Notes cannot exceed 2000 characters").optional(),
-});
+
 
 export const cancelAuditSchema = z.object({
   reason: z

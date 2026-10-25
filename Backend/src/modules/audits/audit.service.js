@@ -68,6 +68,18 @@ const AUDIT_INCLUDE_RELATIONS = {
       status: true,
     },
   },
+  observations: {
+    select: {
+      id: true,
+      productId: true,
+      price: true,
+      availability: true,
+      substituteProduct: true,
+      evidencePhotoUrl: true,
+      capturedAt: true,
+      product: { select: { id: true, name: true } },
+    },
+  },
   _count: {
     select: {
       observations: true,
@@ -202,75 +214,44 @@ export const createAuditForAssignment = async ({
   return formatAuditResponse(createdAudit);
 };
 
-/**
- * Start an Audit visit with captured GPS coordinates.
- */
 export const startAudit = async ({
   auditId,
   user,
   latitude,
   longitude,
   accuracyMeters,
+  gpsBypassed = false,
 }) => {
   const audit = await prisma.audit.findUnique({
     where: { id: auditId },
-    include: {
-      store: true,
-      surveyPeriod: true,
-      assignment: true,
-    },
+    include: { store: true, surveyPeriod: true, assignment: true },
   });
 
-  if (!audit) {
-    throw new ApiError(404, "Audit record not found");
-  }
-
+  if (!audit) throw new ApiError(404, "Audit record not found");
   if (user.role === "FIELD_AUDITOR" && audit.auditorId !== user.id) {
-    throw new ApiError(
-      403,
-      "Access forbidden: You cannot start another auditor's visit",
-    );
+    throw new ApiError(403, "Access forbidden: You cannot start another auditor's visit");
   }
-
-  if (!canTransitionAuditStatus(audit.status, "IN_PROGRESS")) {
-    throw new ApiError(
-      409,
-      `Cannot start audit in current status [${audit.status}]. Valid transitions: NOT_STARTED -> IN_PROGRESS`,
-    );
-  }
-
-  if (audit.surveyPeriod.status === "CLOSED") {
-    throw new ApiError(400, "Survey period is closed. Cannot start audit");
-  }
-
-  if (!audit.store.active) {
-    throw new ApiError(400, "Target store is deactivated");
-  }
-
-  const parsedLat = Number(latitude);
-  const parsedLon = Number(longitude);
-  const parsedAccuracy =
-    accuracyMeters !== undefined && accuracyMeters !== null
-      ? Number(accuracyMeters)
-      : null;
 
   let distanceFromStoreMeters = null;
   let gpsValid = null;
 
-  if (audit.store.latitude !== null && audit.store.longitude !== null) {
-    const storeLat = Number(audit.store.latitude);
-    const storeLon = Number(audit.store.longitude);
+  const hasCoords =
+    latitude !== null &&
+    latitude !== undefined &&
+    longitude !== null &&
+    longitude !== undefined;
 
+  if (!gpsBypassed && hasCoords && audit.store.latitude && audit.store.longitude) {
     distanceFromStoreMeters = calculateDistanceMeters(
-      parsedLat,
-      parsedLon,
-      storeLat,
-      storeLon,
+      Number(latitude),
+      Number(longitude),
+      Number(audit.store.latitude),
+      Number(audit.store.longitude)
     );
 
     gpsValid = isWithinAuditRadius({
       distanceMeters: distanceFromStoreMeters,
-      accuracyMeters: parsedAccuracy,
+      accuracyMeters: accuracyMeters ? Number(accuracyMeters) : null,
     });
   }
 
@@ -280,14 +261,12 @@ export const startAudit = async ({
       data: {
         status: "IN_PROGRESS",
         startedAt: new Date(),
-        startLatitude: parsedLat,
-        startLongitude: parsedLon,
-        startAccuracyMeters: parsedAccuracy,
-        distanceFromStoreMeters:
-          distanceFromStoreMeters !== null
-            ? distanceFromStoreMeters
-            : undefined,
+        startLatitude: hasCoords ? Number(latitude) : null,
+        startLongitude: hasCoords ? Number(longitude) : null,
+        startAccuracyMeters: accuracyMeters ? Number(accuracyMeters) : null,
+        distanceFromStoreMeters,
         gpsValid,
+        gpsValid: gpsBypassed ? false : gpsValid,
       },
       include: AUDIT_INCLUDE_RELATIONS,
     }),
@@ -302,7 +281,6 @@ export const startAudit = async ({
 
   return formatAuditResponse(updatedAudit);
 };
-
 /**
  * Update permitted mutable fields (only notes) while IN_PROGRESS.
  */

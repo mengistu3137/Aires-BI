@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { formatProductName } from "@/utils/formatters.js";
+import { apiClient } from "@/services/client.js";
+import toast from "react-hot-toast";
 
 export const RapidPriceInput = ({
 	selectedProduct,
@@ -17,12 +19,59 @@ export const RapidPriceInput = ({
 	const [price, setPrice] = useState("");
 	const [substituteProduct, setSubstituteProduct] = useState("");
 	const [substitutePrice, setSubstitutePrice] = useState("");
-	// State controlling drawer: null | 'OUT_OF_STOCK' | 'NOT_FOUND'
 	const [unavailableMode, setUnavailableMode] = useState(null);
 	const [error, setError] = useState("");
 
+	// Photo State
+	const [evidencePhotoUrl, setEvidencePhotoUrl] = useState(null);
+	const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+	const [previewZoom, setPreviewZoom] = useState(false);
+
 	const inputRef = useRef(null);
 	const substituteInputRef = useRef(null);
+	const photoInputRef = useRef(null);
+
+	// Photo Upload Handler
+	const handlePhotoSelected = async (e) => {
+		const file = e.target.files?.[0];
+		if (!file) return;
+
+		if (file.size > 10 * 1024 * 1024) {
+			toast.error("Image file is too large. Maximum size is 10MB.");
+			return;
+		}
+
+		setIsUploadingPhoto(true);
+		const toastId = toast.loading("Uploading photo evidence...");
+
+		try {
+			const formData = new FormData();
+			formData.append("proof", file);
+
+			const res = await apiClient.post("/observations/upload-evidence", formData, {
+				headers: { "Content-Type": "multipart/form-data" },
+			});
+
+			const url = res.data?.data?.url;
+			setEvidencePhotoUrl(url);
+			toast.success("Photo attached successfully!", { id: toastId });
+		} catch (err) {
+			console.error("Photo upload failed:", err);
+			toast.error(err?.response?.data?.message || err?.message || "Failed to upload photo", {
+				id: toastId,
+			});
+		} finally {
+			setIsUploadingPhoto(false);
+			if (photoInputRef.current) photoInputRef.current.value = "";
+		}
+	};
+
+	const handleRemovePhoto = (e) => {
+		e.preventDefault();
+		e.stopPropagation();
+		setEvidencePhotoUrl(null);
+		toast("Photo removed", { icon: "🗑️" });
+	};
 
 	// Reset when product changes
 	useEffect(() => {
@@ -32,6 +81,8 @@ export const RapidPriceInput = ({
 			setSubstitutePrice("");
 			setUnavailableMode(null);
 			setError("");
+			setEvidencePhotoUrl(selectedProduct?._existingObservation?.evidencePhotoUrl || null);
+			setPreviewZoom(false);
 			const timer = setTimeout(() => {
 				if (inputRef.current) {
 					inputRef.current.focus();
@@ -69,6 +120,7 @@ export const RapidPriceInput = ({
 			productId: selectedProduct.id || selectedProduct.productId,
 			price: numeric,
 			availability: "AVAILABLE",
+			evidencePhotoUrl,
 		});
 	};
 
@@ -108,6 +160,7 @@ export const RapidPriceInput = ({
 			availability: unavailableMode,
 			price: numericSubPrice,
 			substituteProduct: substituteProduct.trim(),
+			evidencePhotoUrl,
 		});
 	};
 
@@ -121,12 +174,19 @@ export const RapidPriceInput = ({
 			availability: unavailableMode,
 			price: null,
 			substituteProduct: null,
+			evidencePhotoUrl,
 		});
 	};
 
+	const fullImageUrl = evidencePhotoUrl
+		? evidencePhotoUrl.startsWith("http")
+			? evidencePhotoUrl
+			: `${apiClient.defaults.baseURL.replace(/\/api\/v1$/, "")}${evidencePhotoUrl}`
+		: null;
+
 	return (
 		<div className="rounded-2xl border-2 border-[#A41821] bg-white p-4 shadow-xl space-y-3.5 animate-in fade-in zoom-in-95 duration-150">
-			{/* Product Title Header */}
+			{/* Product Header */}
 			<div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-2.5">
 				<div className="min-w-0 flex-1">
 					<div className="flex items-center gap-2">
@@ -182,8 +242,18 @@ export const RapidPriceInput = ({
 				</div>
 			</div>
 
+			{/* Hidden Native File & Camera Input */}
+			<input
+				type="file"
+				ref={photoInputRef}
+				onChange={handlePhotoSelected}
+				accept="image/jpeg,image/png,image/webp,image/heic"
+				capture="environment"
+				className="hidden"
+			/>
+
 			{/* ========================================================= */}
-			{/* DRAWER STATE: RECORD SUBSTITUTE (Triggered by Buttons)   */}
+			{/* DRAWER STATE: RECORD SUBSTITUTE                           */}
 			{/* ========================================================= */}
 			{unavailableMode ? (
 				<div className="rounded-xl border border-amber-300 bg-amber-50/80 p-3.5 space-y-3 animate-in fade-in slide-in-from-top-2">
@@ -217,7 +287,7 @@ export const RapidPriceInput = ({
 							placeholder={
 								unavailableMode === "OUT_OF_STOCK"
 									? "e.g. Dove OOS, captured Lux 150g as substitute"
-									: "e.g. Not carried, captured local garlic instead"
+									: "e.g. Not carried, captured local salt instead"
 							}
 							value={substituteProduct}
 							onChange={(e) => {
@@ -254,6 +324,51 @@ export const RapidPriceInput = ({
 						</div>
 					</div>
 
+					{/* Photo upload inside Substitute Drawer */}
+					<div className="rounded-xl border border-amber-200 bg-white p-2.5">
+						<div className="flex items-center justify-between">
+							<button
+								type="button"
+								disabled={isUploadingPhoto}
+								onClick={() => photoInputRef.current?.click()}
+								className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-700 hover:text-slate-900 cursor-pointer disabled:opacity-50"
+							>
+								<span className="text-base">📸</span>
+								<span>
+									{isUploadingPhoto
+										? "Uploading photo..."
+										: evidencePhotoUrl
+										? "Replace Photo Proof"
+										: "+ Snap Empty Shelf / Substitute Photo"}
+								</span>
+							</button>
+
+							{evidencePhotoUrl && (
+								<button
+									type="button"
+									onClick={handleRemovePhoto}
+									className="text-[10px] font-bold text-red-600 hover:underline cursor-pointer"
+								>
+									Remove
+								</button>
+							)}
+						</div>
+
+						{evidencePhotoUrl && (
+							<div className="mt-2 flex items-center gap-2">
+								<img
+									src={fullImageUrl}
+									alt="Proof Thumbnail"
+									onClick={() => setPreviewZoom(true)}
+									className="h-16 w-16 object-cover rounded-lg border border-slate-200 cursor-pointer hover:opacity-90 transition"
+								/>
+								<span className="text-[10px] text-slate-500 font-medium">
+									✓ Photo attached. Tap to zoom.
+								</span>
+							</div>
+						)}
+					</div>
+
 					{error && (
 						<p className="text-xs font-semibold text-[#A41821]">{error}</p>
 					)}
@@ -262,7 +377,7 @@ export const RapidPriceInput = ({
 						<button
 							type="button"
 							onClick={handleConfirmSubstitute}
-							disabled={isSaving}
+							disabled={isSaving || isUploadingPhoto}
 							className="w-full rounded-xl bg-[#FE7914] hover:bg-[#D45F06] py-2.5 text-xs font-bold text-white shadow-xs transition cursor-pointer disabled:opacity-50"
 						>
 							Save with Substitute (Enter ↵)
@@ -271,7 +386,7 @@ export const RapidPriceInput = ({
 						<button
 							type="button"
 							onClick={handleConfirmWithoutSubstitute}
-							disabled={isSaving}
+							disabled={isSaving || isUploadingPhoto}
 							className="w-full rounded-xl border border-slate-200 bg-white hover:bg-slate-50 py-2 text-[11px] font-semibold text-slate-600 transition cursor-pointer disabled:opacity-50"
 						>
 							No Substitute on Shelf (Confirm {unavailableMode.replace("_", " ")})
@@ -280,7 +395,7 @@ export const RapidPriceInput = ({
 				</div>
 			) : (
 				/* ========================================================= */
-				/* NORMAL STATE: ENTER PRICE & ACTION BUTTONS               */
+				/* NORMAL STATE                                              */
 				/* ========================================================= */
 				<div className="space-y-3">
 					<form onSubmit={handlePriceSubmit}>
@@ -323,9 +438,55 @@ export const RapidPriceInput = ({
 							)}
 						</div>
 
+						{/* Proof / Camera Attachment Button */}
+						<div className="mt-2.5 rounded-xl border border-slate-200 bg-slate-50/70 p-2.5">
+							<div className="flex items-center justify-between">
+								<button
+									type="button"
+									disabled={isUploadingPhoto}
+									onClick={() => photoInputRef.current?.click()}
+									className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-700 hover:text-slate-900 cursor-pointer disabled:opacity-50"
+								>
+									<span className="text-base">📸</span>
+									<span>
+										{isUploadingPhoto
+											? "Uploading photo..."
+											: evidencePhotoUrl
+											? "Replace Shelf Photo"
+											: "+ Snap Shelf / Receipt Photo"}
+									</span>
+								</button>
+
+								{evidencePhotoUrl && (
+									<button
+										type="button"
+										onClick={handleRemovePhoto}
+										className="text-[10px] font-bold text-red-600 hover:underline cursor-pointer"
+									>
+										Remove
+									</button>
+								)}
+							</div>
+
+							{evidencePhotoUrl && (
+								<div className="mt-2 flex items-center gap-2.5">
+									<img
+										src={fullImageUrl}
+										alt="Evidence Thumbnail"
+										onClick={() => setPreviewZoom(true)}
+										className="h-16 w-16 object-cover rounded-lg border border-slate-200 cursor-pointer hover:opacity-90 transition shadow-2xs"
+									/>
+									<div className="text-[11px] text-slate-500">
+										<span className="font-bold text-emerald-700 block">✓ Photo Attached</span>
+										<span className="text-[10px] text-slate-400">Tap thumbnail to zoom</span>
+									</div>
+								</div>
+							)}
+						</div>
+
 						<button
 							type="submit"
-							disabled={isSaving || !price}
+							disabled={isSaving || !price || isUploadingPhoto}
 							className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl bg-[#A41821] hover:bg-[#7F1219] py-3.5 text-sm font-bold text-white shadow-xs transition active:scale-[0.99] disabled:opacity-40 cursor-pointer"
 						>
 							<span>Save price observation</span>
@@ -335,7 +496,7 @@ export const RapidPriceInput = ({
 						</button>
 					</form>
 
-					{/* STOCK EXCEPTION BUTTONS (STRICTLY OUTSIDE FORM) */}
+					{/* STOCK EXCEPTION BUTTONS */}
 					<div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-100">
 						<button
 							type="button"
@@ -363,6 +524,29 @@ export const RapidPriceInput = ({
 							className="flex-1 rounded-xl border border-slate-200 bg-slate-100 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-200 transition cursor-pointer"
 						>
 							NOT CARRIED
+						</button>
+					</div>
+				</div>
+			)}
+
+			{/* Fullscreen Photo Lightbox Modal */}
+			{previewZoom && evidencePhotoUrl && (
+				<div
+					className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-4 cursor-pointer"
+					onClick={() => setPreviewZoom(false)}
+				>
+					<div className="relative max-h-[85vh] max-w-lg overflow-hidden rounded-2xl bg-black p-2">
+						<img
+							src={fullImageUrl}
+							alt="Evidence Zoom"
+							className="max-h-[80vh] w-auto object-contain mx-auto rounded-lg"
+						/>
+						<button
+							type="button"
+							onClick={() => setPreviewZoom(false)}
+							className="absolute top-4 right-4 rounded-full bg-black/60 p-2 text-white hover:bg-black"
+						>
+							✕
 						</button>
 					</div>
 				</div>

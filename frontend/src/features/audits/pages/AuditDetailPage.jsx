@@ -19,6 +19,15 @@ import { calculateAuditProgress } from "../utils/audit.utils.js";
 import { useAuth } from "@/hooks/useAuth.js";
 import { ObservationEmptyState } from "@/features/observations/components/ObservationEmptyState.jsx";
 
+// Resolve a possibly-relative asset URL to an absolute one.
+// Uses Vite's env var; falls back to relative path (works with Vite proxy).
+const resolveAssetUrl = (url) => {
+  if (!url) return "";
+  if (url.startsWith("http")) return url;
+  const base = import.meta.env.VITE_API_BASE_URL || "";
+  return `${base.replace(/\/api\/v1$/, "")}${url}`;
+};
+
 export const AuditDetailPage = () => {
   const { auditId } = useParams();
   const navigate = useNavigate();
@@ -33,6 +42,7 @@ export const AuditDetailPage = () => {
   const markReview = useMarkAuditReview();
 
   const [activeModal, setActiveModal] = useState(null);
+  const [selectedProofPreview, setSelectedProofPreview] = useState(null);
 
   // Notes-only forms (GPS is captured imperatively, not via form)
   const completeForm = useForm({
@@ -188,429 +198,510 @@ export const AuditDetailPage = () => {
   const canViewObservations = isManager || isAdmin;
 
   return (
-			<div className="space-y-4">
-				<AuditHeader audit={audit} onBack={() => navigate("/audits")} />
+    <div className="space-y-4">
+      <AuditHeader audit={audit} onBack={() => navigate("/audits")} />
 
-				{/* Action buttons */}
-				<div className="flex flex-wrap gap-2">
-					{canStart && (
-						<button
-							type="button"
-							onClick={() => setActiveModal("start")}
-							disabled={isCapturing}
-							className="inline-flex items-center gap-1.5 rounded-xl bg-[#017C4D] px-4 py-2.5 text-xs font-bold text-white transition hover:bg-[#015E3A] disabled:opacity-50"
-						>
-							Start visit
-						</button>
-					)}
+      {/* Action buttons */}
+      <div className="flex flex-wrap gap-2">
+        {canStart && (
+          <button
+            type="button"
+            onClick={() => setActiveModal("start")}
+            disabled={isCapturing}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-[#017C4D] px-4 py-2.5 text-xs font-bold text-white transition hover:bg-[#015E3A] disabled:opacity-50"
+          >
+            Start visit
+          </button>
+        )}
 
-					{canComplete && (
-						<button
-							type="button"
-							onClick={() => setActiveModal("complete")}
-							disabled={isCapturing}
-							className="inline-flex items-center gap-1.5 rounded-xl bg-[#017C4D] px-4 py-2.5 text-xs font-bold text-white transition hover:bg-[#015E3A] disabled:opacity-50"
-						>
-							Complete visit
-						</button>
-					)}
+        {canComplete && (
+          <button
+            type="button"
+            onClick={() => setActiveModal("complete")}
+            disabled={isCapturing}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-[#017C4D] px-4 py-2.5 text-xs font-bold text-white transition hover:bg-[#015E3A] disabled:opacity-50"
+          >
+            Complete visit
+          </button>
+        )}
 
-					{canManageObservations && (
-						<button
-							type="button"
-							onClick={() => navigate(`/audits/${audit.id}/observations`)}
-							className="inline-flex items-center gap-1.5 rounded-xl bg-[#A41821] px-4 py-2.5 text-xs font-bold text-white transition hover:bg-[#7F1219]"
-						>
-							Manage observations
-						</button>
-					)}
+        {canManageObservations && (
+          <button
+            type="button"
+            onClick={() => navigate(`/audits/${audit.id}/observations`)}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-[#A41821] px-4 py-2.5 text-xs font-bold text-white transition hover:bg-[#7F1219]"
+          >
+            Manage observations
+          </button>
+        )}
 
-					{canViewObservations &&
-						!canManageObservations &&
-						audit.observationsCount > 0 && (
-							<button
-								type="button"
-								onClick={() => navigate(`/audits/${audit.id}/observations`)}
-								className="inline-flex items-center gap-1.5 rounded-xl bg-[#A41821] px-4 py-2.5 text-xs font-bold text-white transition hover:bg-[#7F1219]"
-							>
-								View all observations
-							</button>
-						)}
+        {canViewObservations &&
+          !canManageObservations &&
+          audit.observationsCount > 0 && (
+            <button
+              type="button"
+              onClick={() => navigate(`/audits/${audit.id}/observations`)}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-[#A41821] px-4 py-2.5 text-xs font-bold text-white transition hover:bg-[#7F1219]"
+            >
+              View all observations
+            </button>
+          )}
 
-					{canEditNotes && (
-						<button
-							type="button"
-							onClick={() => setActiveModal("notes")}
-							className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50"
-						>
-							Edit notes
-						</button>
-					)}
+        {canEditNotes && (
+          <button
+            type="button"
+            onClick={() => setActiveModal("notes")}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50"
+          >
+            Edit notes
+          </button>
+        )}
 
-					{canReview && (
-						<button
-							type="button"
-							onClick={() => setActiveModal("review")}
-							className="inline-flex items-center gap-1.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs font-bold text-[#FE7914] transition hover:bg-amber-100"
-						>
-							Mark for review
-						</button>
-					)}
+        {canReview && (
+          <button
+            type="button"
+            onClick={() => setActiveModal("review")}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs font-bold text-[#FE7914] transition hover:bg-amber-100"
+          >
+            Mark for review
+          </button>
+        )}
 
-					{canCancel && (
-						<button
-							type="button"
-							onClick={() => setActiveModal("cancel")}
-							className="inline-flex items-center gap-1.5 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-xs font-bold text-[#A41821] transition hover:bg-red-100"
-						>
-							Cancel
-						</button>
-					)}
-				</div>
+        {canCancel && (
+          <button
+            type="button"
+            onClick={() => setActiveModal("cancel")}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-xs font-bold text-[#A41821] transition hover:bg-red-100"
+          >
+            Cancel
+          </button>
+        )}
+      </div>
 
-				{/* Progress + observations summary */}
-				<div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-					<div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs lg:col-span-1">
-						<h2 className="text-xs font-bold text-slate-500">
-							Collection progress
-						</h2>
-						<div className="mt-4 flex flex-col items-center">
-							<AuditProgressRing
-								progress={progress}
-								size={100}
-								strokeWidth={8}
-							/>
-							<p className="mt-3 text-xs font-medium text-slate-500">
-								{audit.observationsCount || 0} observations recorded
-							</p>
-						</div>
-					</div>
+      {/* Progress + observations summary */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs lg:col-span-1">
+          <h2 className="text-xs font-bold text-slate-500">
+            Collection progress
+          </h2>
+          <div className="mt-4 flex flex-col items-center">
+            <AuditProgressRing
+              progress={progress}
+              size={100}
+              strokeWidth={8}
+            />
+            <p className="mt-3 text-xs font-medium text-slate-500">
+              {audit.observationsCount || 0} observations recorded
+            </p>
+          </div>
+        </div>
 
-					<div className="lg:col-span-2">
-						<div className="mb-3 flex items-center justify-between">
-							<h2 className="text-xs font-bold text-slate-500">
-								Price observations
-							</h2>
-							{audit.observationsCount > 0 && (
-								<button
-									type="button"
-									onClick={() => navigate(`/audits/${audit.id}/observations`)}
-									className="text-xs font-semibold text-[#A41821] hover:underline"
-								>
-									{canManageObservations
-										? "Manage observations"
-										: "View all observations"}
-								</button>
-							)}
-						</div>
+        <div className="lg:col-span-2">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-xs font-bold text-slate-500">
+              Price observations
+            </h2>
+            {audit.observationsCount > 0 && (
+              <button
+                type="button"
+                onClick={() => navigate(`/audits/${audit.id}/observations`)}
+                className="text-xs font-semibold text-[#A41821] hover:underline"
+              >
+                {canManageObservations
+                  ? "Manage observations"
+                  : "View all observations"}
+              </button>
+            )}
+          </div>
 
-						{audit.observationsCount === 0 ? (
-							<ObservationEmptyState
-								title="No observations recorded yet"
-								description={
-									canManageObservations
-										? "Start by selecting a product from the assignment."
-										: "The assigned auditor has not recorded any observations yet."
-								}
-								action={
-									canManageObservations ? (
-										<button
-											type="button"
-											onClick={() =>
-												navigate(`/audits/${audit.id}/observations`)
-											}
-											className="rounded-xl bg-[#A41821] px-4 py-2 text-xs font-bold text-white transition hover:bg-[#7F1219]"
-										>
-											Start observations
-										</button>
-									) : null
-								}
-							/>
-						) : (
-							<button
-								type="button"
-								onClick={() => navigate(`/audits/${audit.id}/observations`)}
-								className="w-full rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-xs transition hover:border-slate-300"
-							>
-								<p className="text-sm font-semibold text-slate-800">
-									{audit.observationsCount} observation
-									{audit.observationsCount === 1 ? "" : "s"} recorded
-								</p>
-								<p className="mt-1 text-xs text-slate-500">
-									{canManageObservations
-										? "Tap to continue collecting or review"
-										: "Tap to view the observation details"}
-								</p>
-							</button>
-						)}
-					</div>
-				</div>
+          {audit.observationsCount === 0 ? (
+            <ObservationEmptyState
+              title="No observations recorded yet"
+              description={
+                canManageObservations
+                  ? "Start by selecting a product from the assignment."
+                  : "The assigned auditor has not recorded any observations yet."
+              }
+              action={
+                canManageObservations ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      navigate(`/audits/${audit.id}/observations`)
+                    }
+                    className="rounded-xl bg-[#A41821] px-4 py-2 text-xs font-bold text-white transition hover:bg-[#7F1219]"
+                  >
+                    Start observations
+                  </button>
+                ) : null
+              }
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => navigate(`/audits/${audit.id}/observations`)}
+              className="w-full rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-xs transition hover:border-slate-300"
+            >
+              <p className="text-sm font-semibold text-slate-800">
+                {audit.observationsCount} observation
+                {audit.observationsCount === 1 ? "" : "s"} recorded
+              </p>
+              <p className="mt-1 text-xs text-slate-500">
+                {canManageObservations
+                  ? "Tap to continue collecting or review"
+                  : "Tap to view the observation details"}
+              </p>
+            </button>
+          )}
+        </div>
+      </div>
 
-				{/* Location section — start & end GPS */}
-				{(audit.gps?.start || audit.gps?.end) && (
-					<div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
-						<div className="flex items-start justify-between gap-3">
-							<h2 className="text-xs font-bold text-slate-500">
-								Location verification
-							</h2>
-							{audit.gps?.gpsValid === true && (
-								<span className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[#017C4D]">
-									<span className="h-1.5 w-1.5 rounded-full bg-[#017C4D]" />
-									Location verified
-								</span>
-							)}
-							{audit.gps?.gpsValid === false && (
-								<span className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[#FE7914]">
-									<span className="h-1.5 w-1.5 rounded-full bg-[#FE7914]" />
-									Outside radius
-								</span>
-							)}
-						</div>
+      {/* Location section — start & end GPS */}
+      {(audit.gps?.start || audit.gps?.end) && (
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
+          <div className="flex items-start justify-between gap-3">
+            <h2 className="text-xs font-bold text-slate-500">
+              Location verification
+            </h2>
+            {audit.gps?.gpsValid === true && (
+              <span className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[#017C4D]">
+                <span className="h-1.5 w-1.5 rounded-full bg-[#017C4D]" />
+                Location verified
+              </span>
+            )}
+            {audit.gps?.gpsValid === false && (
+              <span className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[#FE7914]">
+                <span className="h-1.5 w-1.5 rounded-full bg-[#FE7914]" />
+                Outside radius
+              </span>
+            )}
+          </div>
 
-						<div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-							{audit.gps?.start ? (
-								<LocationBlock
-									label="Started at"
-									coords={audit.gps.start}
-									timestamp={audit.startedAt}
-								/>
-							) : (
-								<EmptyLocationBlock label="Started at" />
-							)}
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {audit.gps?.start ? (
+              <LocationBlock
+                label="Started at"
+                coords={audit.gps.start}
+                timestamp={audit.startedAt}
+              />
+            ) : (
+              <EmptyLocationBlock label="Started at" />
+            )}
 
-							{audit.gps?.end ? (
-								<LocationBlock
-									label="Completed at"
-									coords={audit.gps.end}
-									timestamp={audit.completedAt}
-								/>
-							) : (
-								<EmptyLocationBlock label="Completed at" />
-							)}
-						</div>
+            {audit.gps?.end ? (
+              <LocationBlock
+                label="Completed at"
+                coords={audit.gps.end}
+                timestamp={audit.completedAt}
+              />
+            ) : (
+              <EmptyLocationBlock label="Completed at" />
+            )}
+          </div>
 
-						{audit.gps?.distanceFromStoreMeters !== null &&
-							audit.gps?.distanceFromStoreMeters !== undefined && (
-								<p className="mt-3 text-xs text-slate-500">
-									Distance from store:{" "}
-									<span className="font-semibold text-slate-700">
-										{Math.round(audit.gps.distanceFromStoreMeters)} m
-									</span>
-								</p>
-							)}
-					</div>
-				)}
+          {audit.gps?.distanceFromStoreMeters !== null &&
+            audit.gps?.distanceFromStoreMeters !== undefined && (
+              <p className="mt-3 text-xs text-slate-500">
+                Distance from store:{" "}
+                <span className="font-semibold text-slate-700">
+                  {Math.round(audit.gps.distanceFromStoreMeters)} m
+                </span>
+              </p>
+            )}
+        </div>
+      )}
 
-				{/* ──────────────────────────────────────────────────────── */}
-				{/* Modals */}
-				{/* ──────────────────────────────────────────────────────── */}
+      {/* ──────────────────────────────────────────────────────── */}
+      {/* Reused Evidence Photo Proof Gallery */}
+      {/* ──────────────────────────────────────────────────────── */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
+        <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+          <div>
+            <h2 className="text-xs font-black uppercase tracking-wider text-slate-800">
+              Visit Proof Gallery ({audit.evidencePhotos?.length || 0})
+            </h2>
+            <p className="text-[11px] text-slate-500">
+              Shelf items, substitute products, and physical receipts captured during this visit
+            </p>
+          </div>
+        </div>
 
-				{/* Start visit */}
-				{activeModal === "start" && (
-					<Modal title="Start audit visit" onClose={() => setActiveModal(null)}>
-						<p className="text-xs text-slate-600">
-							We'll capture your GPS location to verify you're at the store.
-						</p>
-						{isCapturing && (
-							<div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
-								<div className="h-4 w-4 animate-spin rounded-full border-2 border-[#A41821] border-t-transparent" />
-								Capturing location...
-							</div>
-						)}
-						<div className="mt-4 flex justify-end gap-2">
-							<button
-								type="button"
-								onClick={() => setActiveModal(null)}
-								className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
-							>
-								Cancel
-							</button>
-							<button
-								type="button"
-								onClick={handleStart}
-								disabled={isCapturing || startAudit.isPending}
-								className="rounded-xl bg-[#017C4D] px-4 py-2 text-xs font-bold text-white hover:bg-[#015E3A] disabled:opacity-50"
-							>
-								{startAudit.isPending ? "Starting..." : "Start visit"}
-							</button>
-						</div>
-					</Modal>
-				)}
+        {(!audit.evidencePhotos || audit.evidencePhotos.length === 0) ? (
+          <div className="py-6 text-center text-xs text-slate-400">
+            No evidence photos attached to observations during this visit.
+          </div>
+        ) : (
+          <div className="mt-3 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+            {audit.evidencePhotos.map((proof) => (
+              <div
+                key={proof.id}
+                onClick={() => setSelectedProofPreview(proof)}
+                className="group relative cursor-pointer overflow-hidden rounded-xl border border-slate-200 bg-slate-50 aspect-4/3 transition hover:shadow-md"
+              >
+                <img
+                  src={resolveAssetUrl(proof.url)}
+                  alt={proof.productName}
+                  className="h-full w-full object-cover transition duration-200 group-hover:scale-105"
+                  loading="lazy"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex flex-col justify-end p-2 text-white">
+                  <span className="truncate text-xs font-bold leading-tight">
+                    {proof.productName}
+                  </span>
+                  <span className="text-[10px] text-slate-300 font-mono">
+                    {proof.price ? `${proof.price.toFixed(2)} ETB` : proof.availability.replace("_", " ")}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
-				{/* Complete visit */}
-				{activeModal === "complete" && (
-					<Modal
-						title="Complete audit visit"
-						onClose={() => setActiveModal(null)}
-					>
-						<p className="text-xs text-slate-600">
-							We'll capture your end GPS location to verify the visit.
-						</p>
+      {/* ──────────────────────────────────────────────────────── */}
+      {/* Modals */}
+      {/* ──────────────────────────────────────────────────────── */}
 
-						<form
-							onSubmit={(e) => {
-								e.preventDefault();
-								handleComplete();
-							}}
-							className="mt-3"
-						>
-							<label className="text-xs font-semibold text-slate-600">
-								Completion notes (optional)
-							</label>
-							<textarea
-								rows={2}
-								{...completeForm.register("notes")}
-								className="mt-1.5 w-full resize-none rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2 text-xs focus:border-[#A41821] focus:bg-white focus:ring-1 focus:ring-[#A41821] outline-hidden"
-							/>
+      {/* Start visit */}
+      {activeModal === "start" && (
+        <Modal title="Start audit visit" onClose={() => setActiveModal(null)}>
+          <p className="text-xs text-slate-600">
+            We'll capture your GPS location to verify you're at the store.
+          </p>
+          {isCapturing && (
+            <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
+              <div className="h-4 w-4 animate-spin rounded-full border-2 border-[#A41821] border-t-transparent" />
+              Capturing location...
+            </div>
+          )}
+          <div className="mt-4 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setActiveModal(null)}
+              className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleStart}
+              disabled={isCapturing || startAudit.isPending}
+              className="rounded-xl bg-[#017C4D] px-4 py-2 text-xs font-bold text-white hover:bg-[#015E3A] disabled:opacity-50"
+            >
+              {startAudit.isPending ? "Starting..." : "Start visit"}
+            </button>
+          </div>
+        </Modal>
+      )}
 
-							{isCapturing && (
-								<div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
-									<div className="h-4 w-4 animate-spin rounded-full border-2 border-[#A41821] border-t-transparent" />
-									Capturing end location...
-								</div>
-							)}
+      {/* Complete visit */}
+      {activeModal === "complete" && (
+        <Modal
+          title="Complete audit visit"
+          onClose={() => setActiveModal(null)}
+        >
+          <p className="text-xs text-slate-600">
+            We'll capture your end GPS location to verify the visit.
+          </p>
 
-							<div className="mt-4 flex justify-end gap-2">
-								<button
-									type="button"
-									onClick={() => setActiveModal(null)}
-									disabled={isCapturing || completeAudit.isPending}
-									className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
-								>
-									Cancel
-								</button>
-								<button
-									type="submit"
-									disabled={isCapturing || completeAudit.isPending}
-									className="rounded-xl bg-[#017C4D] px-4 py-2 text-xs font-bold text-white hover:bg-[#015E3A] disabled:opacity-50"
-								>
-									{completeAudit.isPending
-										? "Completing..."
-										: isCapturing
-											? "Capturing..."
-											: "Complete visit"}
-								</button>
-							</div>
-						</form>
-					</Modal>
-				)}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleComplete();
+            }}
+            className="mt-3"
+          >
+            <label className="text-xs font-semibold text-slate-600">
+              Completion notes (optional)
+            </label>
+            <textarea
+              rows={2}
+              {...completeForm.register("notes")}
+              className="mt-1.5 w-full resize-none rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2 text-xs focus:border-[#A41821] focus:bg-white focus:ring-1 focus:ring-[#A41821] outline-hidden"
+            />
 
-				{/* Cancel */}
-				{activeModal === "cancel" && (
-					<Modal title="Cancel audit" onClose={() => setActiveModal(null)}>
-						<form
-							onSubmit={cancelForm.handleSubmit(handleCancel)}
-							className="mt-2"
-						>
-							<label className="text-xs font-semibold text-slate-600">
-								Reason for cancellation *
-							</label>
-							<textarea
-								rows={3}
-								{...cancelForm.register("reason")}
-								placeholder="Explain why this audit is being cancelled..."
-								className="mt-1.5 w-full resize-none rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2 text-xs focus:border-[#A41821] focus:bg-white focus:ring-1 focus:ring-[#A41821] outline-hidden"
-							/>
-							{cancelForm.formState.errors.reason && (
-								<p className="mt-1 text-xs font-medium text-[#A41821]">
-									{cancelForm.formState.errors.reason.message}
-								</p>
-							)}
-							<div className="mt-4 flex justify-end gap-2">
-								<button
-									type="button"
-									onClick={() => setActiveModal(null)}
-									className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
-								>
-									Keep audit
-								</button>
-								<button
-									type="submit"
-									disabled={cancelAudit.isPending}
-									className="rounded-xl bg-[#A41821] px-4 py-2 text-xs font-bold text-white hover:bg-[#7F1219] disabled:opacity-50"
-								>
-									{cancelAudit.isPending ? "Cancelling..." : "Confirm cancel"}
-								</button>
-							</div>
-						</form>
-					</Modal>
-				)}
+            {isCapturing && (
+              <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
+                <div className="h-4 w-4 animate-spin rounded-full border-2 border-[#A41821] border-t-transparent" />
+                Capturing end location...
+              </div>
+            )}
 
-				{/* Mark for review */}
-				{activeModal === "review" && (
-					<Modal title="Mark for review" onClose={() => setActiveModal(null)}>
-						<form
-							onSubmit={reviewForm.handleSubmit(handleReview)}
-							className="mt-2"
-						>
-							<label className="text-xs font-semibold text-slate-600">
-								Review note *
-							</label>
-							<textarea
-								rows={3}
-								{...reviewForm.register("reviewNote")}
-								placeholder="Explain why this audit needs review..."
-								className="mt-1.5 w-full resize-none rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2 text-xs focus:border-[#A41821] focus:bg-white focus:ring-1 focus:ring-[#A41821] outline-hidden"
-							/>
-							{reviewForm.formState.errors.reviewNote && (
-								<p className="mt-1 text-xs font-medium text-[#A41821]">
-									{reviewForm.formState.errors.reviewNote.message}
-								</p>
-							)}
-							<div className="mt-4 flex justify-end gap-2">
-								<button
-									type="button"
-									onClick={() => setActiveModal(null)}
-									className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
-								>
-									Cancel
-								</button>
-								<button
-									type="submit"
-									disabled={markReview.isPending}
-									className="rounded-xl bg-[#FE7914] px-4 py-2 text-xs font-bold text-white hover:bg-[#D45F06] disabled:opacity-50"
-								>
-									{markReview.isPending ? "Submitting..." : "Mark for review"}
-								</button>
-							</div>
-						</form>
-					</Modal>
-				)}
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setActiveModal(null)}
+                disabled={isCapturing || completeAudit.isPending}
+                className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={isCapturing || completeAudit.isPending}
+                className="rounded-xl bg-[#017C4D] px-4 py-2 text-xs font-bold text-white hover:bg-[#015E3A] disabled:opacity-50"
+              >
+                {completeAudit.isPending
+                  ? "Completing..."
+                  : isCapturing
+                    ? "Capturing..."
+                    : "Complete visit"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
 
-				{/* Edit notes */}
-				{activeModal === "notes" && (
-					<Modal title="Edit audit notes" onClose={() => setActiveModal(null)}>
-						<form
-							onSubmit={notesForm.handleSubmit(handleSaveNotes)}
-							className="mt-2"
-						>
-							<textarea
-								rows={4}
-								{...notesForm.register("notes")}
-								placeholder="Audit notes..."
-								className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2 text-xs focus:border-[#A41821] focus:bg-white focus:ring-1 focus:ring-[#A41821] outline-hidden"
-							/>
-							<div className="mt-4 flex justify-end gap-2">
-								<button
-									type="button"
-									onClick={() => setActiveModal(null)}
-									className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
-								>
-									Cancel
-								</button>
-								<button
-									type="submit"
-									disabled={updateAudit.isPending}
-									className="rounded-xl bg-[#A41821] px-4 py-2 text-xs font-bold text-white hover:bg-[#7F1219] disabled:opacity-50"
-								>
-									{updateAudit.isPending ? "Saving..." : "Save notes"}
-								</button>
-							</div>
-						</form>
-					</Modal>
-				)}
-			</div>
-		);
+      {/* Cancel */}
+      {activeModal === "cancel" && (
+        <Modal title="Cancel audit" onClose={() => setActiveModal(null)}>
+          <form
+            onSubmit={cancelForm.handleSubmit(handleCancel)}
+            className="mt-2"
+          >
+            <label className="text-xs font-semibold text-slate-600">
+              Reason for cancellation *
+            </label>
+            <textarea
+              rows={3}
+              {...cancelForm.register("reason")}
+              placeholder="Explain why this audit is being cancelled..."
+              className="mt-1.5 w-full resize-none rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2 text-xs focus:border-[#A41821] focus:bg-white focus:ring-1 focus:ring-[#A41821] outline-hidden"
+            />
+            {cancelForm.formState.errors.reason && (
+              <p className="mt-1 text-xs font-medium text-[#A41821]">
+                {cancelForm.formState.errors.reason.message}
+              </p>
+            )}
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setActiveModal(null)}
+                className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+              >
+                Keep audit
+              </button>
+              <button
+                type="submit"
+                disabled={cancelAudit.isPending}
+                className="rounded-xl bg-[#A41821] px-4 py-2 text-xs font-bold text-white hover:bg-[#7F1219] disabled:opacity-50"
+              >
+                {cancelAudit.isPending ? "Cancelling..." : "Confirm cancel"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* Mark for review */}
+      {activeModal === "review" && (
+        <Modal title="Mark for review" onClose={() => setActiveModal(null)}>
+          <form
+            onSubmit={reviewForm.handleSubmit(handleReview)}
+            className="mt-2"
+          >
+            <label className="text-xs font-semibold text-slate-600">
+              Review note *
+            </label>
+            <textarea
+              rows={3}
+              {...reviewForm.register("reviewNote")}
+              placeholder="Explain why this audit needs review..."
+              className="mt-1.5 w-full resize-none rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2 text-xs focus:border-[#A41821] focus:bg-white focus:ring-1 focus:ring-[#A41821] outline-hidden"
+            />
+            {reviewForm.formState.errors.reviewNote && (
+              <p className="mt-1 text-xs font-medium text-[#A41821]">
+                {reviewForm.formState.errors.reviewNote.message}
+              </p>
+            )}
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setActiveModal(null)}
+                className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={markReview.isPending}
+                className="rounded-xl bg-[#FE7914] px-4 py-2 text-xs font-bold text-white hover:bg-[#D45F06] disabled:opacity-50"
+              >
+                {markReview.isPending ? "Submitting..." : "Mark for review"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* Edit notes */}
+      {activeModal === "notes" && (
+        <Modal title="Edit audit notes" onClose={() => setActiveModal(null)}>
+          <form
+            onSubmit={notesForm.handleSubmit(handleSaveNotes)}
+            className="mt-2"
+          >
+            <textarea
+              rows={4}
+              {...notesForm.register("notes")}
+              placeholder="Audit notes..."
+              className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2 text-xs focus:border-[#A41821] focus:bg-white focus:ring-1 focus:ring-[#A41821] outline-hidden"
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setActiveModal(null)}
+                className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={updateAudit.isPending}
+                className="rounded-xl bg-[#A41821] px-4 py-2 text-xs font-bold text-white hover:bg-[#7F1219] disabled:opacity-50"
+              >
+                {updateAudit.isPending ? "Saving..." : "Save notes"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* Lightbox Preview */}
+      {selectedProofPreview && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-xs p-4 cursor-pointer"
+          onClick={() => setSelectedProofPreview(null)}
+        >
+          <div
+            className="relative max-h-[90vh] max-w-2xl overflow-hidden rounded-2xl bg-black p-2"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <img
+              src={resolveAssetUrl(selectedProofPreview.url)}
+              alt={selectedProofPreview.productName}
+              className="max-h-[80vh] w-auto object-contain mx-auto"
+            />
+            <div className="flex items-center justify-between p-3 text-white text-xs border-t border-white/10 mt-2">
+              <div>
+                <p className="font-bold">{selectedProofPreview.productName}</p>
+                <p className="text-[10px] text-slate-400 font-mono">
+                  Captured {new Date(selectedProofPreview.capturedAt).toLocaleString()}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedProofPreview(null)}
+                className="rounded-lg bg-white/20 px-3 py-1 font-bold hover:bg-white/30"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 };
 
 // ────────────────────────────────────────────────────────────

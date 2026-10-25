@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { formatProductName } from "@/utils/formatters.js";
+import { apiClient } from "@/services/client.js";
 import { generateClientObservationId } from "../utils/observation.utils.js";
 import { enqueueObservation, syncObservation } from "../offline/observationQueue.js";
 
@@ -15,6 +16,7 @@ export const ObservationForm = ({
   const queryClient = useQueryClient();
   const inputRef = useRef(null);
   const substituteInputRef = useRef(null);
+  const photoInputRef = useRef(null);
 
   const [price, setPrice] = useState(
     existingObservation?.price !== null && existingObservation?.price !== undefined
@@ -31,6 +33,13 @@ export const ObservationForm = ({
       ? existingObservation.availability
       : null
   );
+
+  // Proof / Evidence Photo State
+  const [evidencePhotoUrl, setEvidencePhotoUrl] = useState(
+    existingObservation?.evidencePhotoUrl || null
+  );
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const [previewZoom, setPreviewZoom] = useState(false);
 
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -62,6 +71,48 @@ export const ObservationForm = ({
     queryClient.invalidateQueries({ queryKey: ["dashboard"] });
   };
 
+  // Photo Upload Handler
+  const handlePhotoSelected = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error("Image file is too large. Maximum size is 10MB.");
+      return;
+    }
+
+    setIsUploadingPhoto(true);
+    const toastId = toast.loading("Uploading photo evidence...");
+
+    try {
+      const formData = new FormData();
+      formData.append("proof", file);
+
+      const res = await apiClient.post("/observations/upload-evidence", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+
+      const url = res.data?.data?.url;
+      setEvidencePhotoUrl(url);
+      toast.success("Photo attached successfully!", { id: toastId });
+    } catch (err) {
+      console.error("Photo upload failed:", err);
+      toast.error(err?.response?.data?.message || err?.message || "Failed to upload photo", {
+        id: toastId,
+      });
+    } finally {
+      setIsUploadingPhoto(false);
+      if (photoInputRef.current) photoInputRef.current.value = "";
+    }
+  };
+
+  const handleRemovePhoto = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setEvidencePhotoUrl(null);
+    toast("Photo removed", { icon: "🗑️" });
+  };
+
   const persist = async ({ availability, price: priceValue, substitute = null }) => {
     if (isSubmitting) return;
     setIsSubmitting(true);
@@ -77,10 +128,10 @@ export const ObservationForm = ({
         availability,
         price: priceValue,
         substituteProduct: substitute?.trim() || null,
+        evidencePhotoUrl: evidencePhotoUrl || null,
         observedUnit: existingObservation?.observedUnit || null,
         packageSize: existingObservation?.packageSize || null,
         capturedAt,
-        evidencePhotoUrl: existingObservation?.evidencePhotoUrl || null,
         notes: existingObservation?.notes || null,
       };
 
@@ -173,16 +224,19 @@ export const ObservationForm = ({
     });
   };
 
+  const fullImageUrl = evidencePhotoUrl
+    ? evidencePhotoUrl.startsWith("http")
+      ? evidencePhotoUrl
+      : `${apiClient.defaults.baseURL.replace(/\/api\/v1$/, "")}${evidencePhotoUrl}`
+    : null;
+
   return (
-    <form
-      onSubmit={handlePriceSubmit}
-      className="rounded-2xl border-2 border-[#A41821] bg-white p-4 shadow-lg space-y-3"
-    >
+    <div className="rounded-2xl border-2 border-[#A41821] bg-white p-4 shadow-lg space-y-3">
       {/* Product Title Header */}
       <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-3">
         <div className="min-w-0 flex-1">
           <span className="text-[10px] font-black uppercase tracking-wider text-[#A41821]">
-            Active Item
+            Active Item 
           </span>
           <h3 className="mt-0.5 text-base font-bold leading-snug text-slate-900">
             {formatProductName(product.name)}
@@ -190,7 +244,7 @@ export const ObservationForm = ({
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 font-mono text-[11px] text-slate-500">
             <span>CODE: {product.barcode || product.sku || product.id}</span>
             <span>•</span>
-            <span>UNIT: {product.unit || "kg"}</span>
+            <span>UNIT: {product.unit || "pcs"}</span>
           </div>
         </div>
         <button
@@ -204,10 +258,20 @@ export const ObservationForm = ({
         </button>
       </div>
 
-      {/* Shelf Price Input (used for either benchmark or substitute) */}
+      {/* Hidden Native File & Camera Input */}
+      <input
+        type="file"
+        ref={photoInputRef}
+        onChange={handlePhotoSelected}
+        accept="image/jpeg,image/png,image/webp,image/heic"
+        capture="environment"
+        className="hidden"
+      />
+
+      {/* Shelf Price Input */}
       <div>
         <label className="mb-1 block text-xs font-bold text-slate-700">
-          {unavailableMode ? "Substitute Shelf Price (ETB)" : "Observed Shelf Price"}
+          {unavailableMode ? "Substitute Shelf Price (ETB)" : "Observed shelf price"}
         </label>
         <div className="relative">
           <input
@@ -236,7 +300,54 @@ export const ObservationForm = ({
         {error && <p className="mt-1 text-xs font-semibold text-[#A41821]">{error}</p>}
       </div>
 
-      {/* POPUP / DRAWER: Appears when clicking OUT OF STOCK or NOT CARRIED */}
+      {/* Camera & Proof Photo Attachment Box */}
+      <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-2.5">
+        <div className="flex items-center justify-between">
+          <button
+            type="button"
+            disabled={isUploadingPhoto}
+            onClick={() => photoInputRef.current?.click()}
+            className="inline-flex items-center gap-2 text-xs font-bold text-slate-700 hover:text-slate-900 cursor-pointer disabled:opacity-50"
+          >
+            <span className="text-base">📸</span>
+            <span>
+              {isUploadingPhoto
+                ? "Uploading photo..."
+                : evidencePhotoUrl
+                ? "Replace Shelf Photo"
+                : "+ Snap Shelf / Receipt Photo"}
+            </span>
+          </button>
+
+          {evidencePhotoUrl && (
+            <button
+              type="button"
+              onClick={handleRemovePhoto}
+              className="text-[10px] font-bold text-red-600 hover:underline cursor-pointer"
+            >
+              Remove
+            </button>
+          )}
+        </div>
+
+        {/* Thumbnail Preview */}
+        {evidencePhotoUrl && (
+          <div className="mt-2 flex items-center gap-2.5">
+            <img
+              src={fullImageUrl}
+              alt="Shelf Evidence"
+              onClick={() => setPreviewZoom(true)}
+              className="h-14 w-14 object-cover rounded-lg border border-slate-200 cursor-pointer hover:opacity-90 transition shadow-2xs"
+            />
+            <div className="text-[11px] text-slate-500">
+              <span className="font-bold text-emerald-700 block">✓ Photo Attached</span>
+              <span className="text-[10px] text-slate-400">Tap thumbnail to zoom</span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* DRAWER STATE: Appears when clicking OUT OF STOCK or NOT CARRIED */}
       {unavailableMode ? (
         <div className="rounded-xl border border-amber-300 bg-amber-50/80 p-3 space-y-2.5 animate-in fade-in slide-in-from-top-2">
           <div className="flex items-center justify-between">
@@ -259,15 +370,15 @@ export const ObservationForm = ({
 
           <div>
             <label className="block text-xs font-bold text-slate-800 mb-1">
-              Substitute Product / Action Taken
+              Substitute Product / Action Taken *
             </label>
             <input
               ref={substituteInputRef}
               type="text"
               placeholder={
                 unavailableMode === "OUT_OF_STOCK"
-                  ? "e.g. Garlic OOS, captured imported garlic 250g"
-                  : "e.g. Not carried, captured local garlic instead"
+                  ? "e.g. Dove OOS, captured Lux 150g as substitute"
+                  : "e.g. Not carried, captured local salt instead"
               }
               value={substituteProduct}
               onChange={(e) => {
@@ -282,7 +393,7 @@ export const ObservationForm = ({
             <button
               type="button"
               onClick={handleSaveWithSubstitute}
-              disabled={isSubmitting}
+              disabled={isSubmitting || isUploadingPhoto}
               className="w-full rounded-xl bg-[#FE7914] hover:bg-[#D45F06] py-2.5 text-xs font-bold text-white shadow-xs transition cursor-pointer disabled:opacity-50"
             >
               Save with Substitute ({unavailableMode.replace("_", " ")})
@@ -291,7 +402,7 @@ export const ObservationForm = ({
             <button
               type="button"
               onClick={handleSaveWithoutSubstitute}
-              disabled={isSubmitting}
+              disabled={isSubmitting || isUploadingPhoto}
               className="w-full rounded-xl border border-slate-200 bg-white hover:bg-slate-50 py-2 text-[11px] font-semibold text-slate-600 transition cursor-pointer disabled:opacity-50"
             >
               No Substitute on Shelf (Confirm {unavailableMode.replace("_", " ")})
@@ -299,10 +410,12 @@ export const ObservationForm = ({
           </div>
         </div>
       ) : (
+        /* NORMAL STATE: Save Price & Stock Buttons */
         <>
           <button
-            type="submit"
-            disabled={isSubmitting || !price}
+            type="button"
+            onClick={handlePriceSubmit}
+            disabled={isSubmitting || !price || isUploadingPhoto}
             className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#A41821] py-3.5 text-sm font-bold text-white shadow-xs transition hover:bg-[#7F1219] active:scale-[0.99] disabled:opacity-40 cursor-pointer"
           >
             <span>Save price observation</span>
@@ -311,7 +424,6 @@ export const ObservationForm = ({
             </kbd>
           </button>
 
-          {/* Clicking these buttons now opens the drawer immediately */}
           <div className="mt-2 flex items-center justify-between gap-2">
             <button
               type="button"
@@ -320,7 +432,7 @@ export const ObservationForm = ({
                 setError("");
               }}
               disabled={isSubmitting}
-              className="flex-1 rounded-xl border border-amber-200 bg-amber-50/60 py-2 text-xs font-bold text-[#FE7914] hover:bg-amber-100/60 transition cursor-pointer disabled:opacity-50"
+              className="flex-1 rounded-xl border border-amber-200 bg-amber-50/60 py-2.5 text-xs font-bold text-[#FE7914] hover:bg-amber-100/60 transition cursor-pointer disabled:opacity-50"
             >
               OUT OF STOCK
             </button>
@@ -331,7 +443,7 @@ export const ObservationForm = ({
                 setError("");
               }}
               disabled={isSubmitting}
-              className="flex-1 rounded-xl border border-slate-200 bg-slate-100 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200 transition cursor-pointer disabled:opacity-50"
+              className="flex-1 rounded-xl border border-slate-200 bg-slate-100 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-200 transition cursor-pointer disabled:opacity-50"
             >
               NOT CARRIED
             </button>
@@ -339,9 +451,32 @@ export const ObservationForm = ({
         </>
       )}
 
+      {/* Fullscreen Photo Lightbox Modal */}
+      {previewZoom && evidencePhotoUrl && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-4 cursor-pointer"
+          onClick={() => setPreviewZoom(false)}
+        >
+          <div className="relative max-h-[85vh] max-w-lg overflow-hidden rounded-2xl bg-black p-2">
+            <img
+              src={fullImageUrl}
+              alt="Evidence Zoom"
+              className="max-h-[80vh] w-auto object-contain mx-auto rounded-lg"
+            />
+            <button
+              type="button"
+              onClick={() => setPreviewZoom(false)}
+              className="absolute top-4 right-4 rounded-full bg-black/60 p-2 text-white hover:bg-black"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
       <p className="mt-2 text-center text-[10px] text-slate-400">
         Enter to save • Esc to cancel
       </p>
-    </form>
+    </div>
   );
 };
