@@ -493,74 +493,154 @@ export const getQueensPriceById = async (id) => {
 /**
  * Lists benchmark prices across products with optional filtering.
  */
+/**
+ * Lists benchmark prices across all catalog products (SSOT).
+ * Evaluates active benchmarks and supports track frequency filtering (DAILY, WEEKLY, MONTHLY, BI_YEARLY).
+ */
 export const listQueensPrices = async (query = {}) => {
   const {
     page: rawPage = 1,
     limit: rawLimit = 20,
     productId,
     search,
+    frequency,
     current,
-    from,
-    to,
+    
   } = query;
 
   const page = Math.max(1, parseInt(rawPage, 10) || 1);
   const limit = Math.min(100, Math.max(1, parseInt(rawLimit, 10) || 20));
+  const skip = (page - 1) * limit;
 
-  const where = {};
+  const now = new Date();
+  const isCurrentOnly = current === true || current === "true";
+
+  // Build filter criteria against Product Catalog (SSOT)
+  const productWhere = {
+    active: true,
+  };
 
   if (productId) {
-    where.productId = productId;
+    productWhere.id = productId;
   }
 
-  // Cross-page search across Product Name, SKU, Barcode, and Category
+  if (frequency && frequency !== "ALL") {
+    productWhere.frequency = frequency;
+  }
+
   if (search && search.trim()) {
     const term = search.trim();
-    where.product = {
-      OR: [
-        { name: { contains: term, mode: "insensitive" } },
-        { sku: { contains: term, mode: "insensitive" } },
-        { barcode: { contains: term, mode: "insensitive" } },
-        { category: { contains: term, mode: "insensitive" } },
-      ],
+    productWhere.OR = [
+      { name: { contains: term, mode: "insensitive" } },
+      { sku: { contains: term, mode: "insensitive" } },
+      { barcode: { contains: term, mode: "insensitive" } },
+      { category: { contains: term, mode: "insensitive" } },
+    ];
+  }
+
+  if (isCurrentOnly) {
+    productWhere.queensPrices = {
+      some: {
+        effectiveFrom: { lte: now },
+        OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
+      },
     };
   }
 
-  const now = new Date();
-  const isCurrentFilter = current === true || current === "true";
-
-  if (isCurrentFilter) {
-    where.effectiveFrom = { lte: now };
-    where.OR = [{ effectiveTo: null }, { effectiveTo: { gt: now } }];
-  } else if (from || to) {
-    where.effectiveFrom = {};
-    if (from) where.effectiveFrom.gte = new Date(from);
-    if (to) {
-      const toDate = new Date(to);
-      if (typeof to === "string" && /^\d{4}-\d{2}-\d{2}$/.test(to)) {
-        toDate.setUTCHours(23, 59, 59, 999);
-      }
-      where.effectiveFrom.lte = toDate;
-    }
-  }
-
-  const skip = (page - 1) * limit;
-
-  const [total, records] = await prisma.$transaction([
-    prisma.queensPrice.count({ where }),
-    prisma.queensPrice.findMany({
-      where,
+  const [total, products] = await prisma.$transaction([
+    prisma.product.count({ where: productWhere }),
+    prisma.product.findMany({
+      where: productWhere,
       skip,
       take: limit,
-      orderBy: { effectiveFrom: "desc" },
-      include: QUEENS_PRICE_INCLUDE_RELATIONS,
+      orderBy: [
+        { frequency: "asc" },
+        { name: "asc" },
+      ],
+      include: {
+        queensPrices: {
+          orderBy: { effectiveFrom: "desc" },
+          take: 5,
+        },
+        _count: {
+          select: { queensPrices: true },
+        },
+      },
     }),
   ]);
 
   const totalPages = Math.ceil(total / limit) || 1;
 
+  const formattedRecords = products.map((product) => {
+    // Find active benchmark: effectiveFrom <= now and (effectiveTo is null or > now)
+    const activePrice = product.queensPrices.find((qp) => {
+      const fromDate = new Date(qp.effectiveFrom);
+      const toDate = qp.effectiveTo ? new Date(qp.effectiveTo) : null;
+      return fromDate <= now && (!toDate || toDate > now);
+    });
+
+    const latestPrice = activePrice || product.queensPrices[0] || null;
+
+    if (latestPrice) {
+      let status = "CURRENT";
+      if (!activePrice) {
+        status =
+          new Date(latestPrice.effectiveFrom) > now ? "SCHEDULED" : "EXPIRED";
+      }
+
+      return {
+        id: latestPrice.id,
+        productId: product.id,
+        price: Number(latestPrice.price),
+        effectiveFrom: latestPrice.effectiveFrom.toISOString(),
+        effectiveTo: latestPrice.effectiveTo
+          ? latestPrice.effectiveTo.toISOString()
+          : null,
+        source: latestPrice.source || "Manual Entry",
+        notes: latestPrice.notes || null,
+        status,
+        revisionCount: product._count?.queensPrices || 1,
+        hasBenchmark: true,
+        product: {
+          id: product.id,
+          name: product.name,
+          sku: product.sku,
+          barcode: product.barcode,
+          category: product.category,
+          unit: product.unit,
+          frequency: product.frequency,
+          active: product.active,
+        },
+      };
+    }
+
+    // Product currently has no Queens benchmark set
+    return {
+      id: null,
+      productId: product.id,
+      price: null,
+      effectiveFrom: null,
+      effectiveTo: null,
+      source: "—",
+      notes: null,
+      status: "NO_BENCHMARK",
+      revisionCount: 0,
+      hasBenchmark: false,
+      product: {
+        id: product.id,
+        name: product.name,
+        sku: product.sku,
+        barcode: product.barcode,
+        category: product.category,
+        unit: product.unit,
+        frequency: product.frequency,
+        active: product.active,
+      },
+    };
+  });
+
   return {
-    data: records.map(formatQueensPriceResponse),
+    data: formattedRecords,
     meta: {
       page,
       limit,
