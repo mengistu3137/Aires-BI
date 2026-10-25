@@ -179,4 +179,5 @@ export const assignmentController = {
   updateStoreAllocations,
   update,
   remove,
+  archiveStoreDispatch,
 };

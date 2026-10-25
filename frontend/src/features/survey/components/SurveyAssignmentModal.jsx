@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useStores } from "../hooks/useStores.js";
 import {
 	useCreateBatchAssignment,
@@ -15,7 +15,7 @@ import toast from "react-hot-toast";
  * Computes equal slices across total items for N auditors
  */
 const calculateEqualSlices = (totalItems, count) => {
-	if (totalItems === 0 || count <= 0) return [];
+	if (totalItems <= 0 || count <= 0) return [];
 	const base = Math.floor(totalItems / count);
 	const remainder = totalItems % count;
 
@@ -42,6 +42,29 @@ const calculateEqualSlices = (totalItems, count) => {
 };
 
 /**
+ * Synchronizes allocation ranges and item counts with the active product pool
+ */
+const syncAllocationsWithCount = (currentAllocations, activeCount) => {
+	if (!currentAllocations || currentAllocations.length === 0) return [];
+	if (activeCount <= 0) {
+		return currentAllocations.map((a) => ({
+			...a,
+			fromNumber: 0,
+			toNumber: 0,
+			count: 0,
+		}));
+	}
+
+	const slices = calculateEqualSlices(activeCount, currentAllocations.length);
+	return currentAllocations.map((item, idx) => ({
+		...item,
+		fromNumber: slices[idx]?.fromNumber || 1,
+		toNumber: slices[idx]?.toNumber || activeCount,
+		count: slices[idx]?.count || activeCount,
+	}));
+};
+
+/**
  * Robust track resolution matching the imported database frequency
  */
 const getProductTrack = (p) => {
@@ -55,7 +78,6 @@ const getProductTrack = (p) => {
 		return freq;
 	}
 
-	// Fallback to category text if legacy item lacks frequency
 	const cat = String(p.category || "").toLowerCase();
 	if (cat.includes("fresh")) return "DAILY";
 	if (cat.includes("ultra")) return "WEEKLY";
@@ -104,7 +126,7 @@ export const SurveyAssignmentModal = ({
 	const [isEditMode, setIsEditMode] = useState(false);
 	const [isLoadingExisting, setIsLoadingExisting] = useState(false);
 
-	// 4 TRACK POOLS
+	// 4 Track Pools
 	const dailyFreshProducts = useMemo(
 		() => products.filter((p) => getProductTrack(p) === "DAILY"),
 		[products],
@@ -169,6 +191,7 @@ export const SurveyAssignmentModal = ({
 					? weeklyUltraProducts.map((p) => p.id)
 					: products.map((p) => p.id);
 			setSelectedProductIds(defaults);
+			setAllocations((prev) => syncAllocationsWithCount(prev, defaults.length));
 		}
 	}, [
 		isOpen,
@@ -195,23 +218,24 @@ export const SurveyAssignmentModal = ({
 					const allAssignedIds = Array.from(
 						new Set(existing.flatMap((asn) => asn.productIds || [])),
 					);
+
 					if (allAssignedIds.length > 0) {
 						setSelectedProductIds(allAssignedIds);
 					}
 
+					// Map relative sequential ranges (1 to count) rather than catalog indices
+					let currentStart = 1;
 					const mapped = existing.map((asn) => {
-						const firstIdx = products.findIndex(
-							(p) => p.id === asn.productIds[0],
-						);
-						const lastIdx = products.findIndex(
-							(p) => p.id === asn.productIds[asn.productIds.length - 1],
-						);
+						const count = asn.productIds?.length || 0;
+						const fromNumber = currentStart;
+						const toNumber = Math.max(fromNumber, currentStart + count - 1);
+						currentStart = toNumber + 1;
 
 						return {
 							auditorId: asn.auditorId,
-							fromNumber: firstIdx !== -1 ? firstIdx + 1 : 1,
-							toNumber: lastIdx !== -1 ? lastIdx + 1 : asn.productIds.length,
-							count: asn.productIds.length,
+							fromNumber: count > 0 ? fromNumber : 1,
+							toNumber: count > 0 ? toNumber : 1,
+							count,
 							observedCount: asn.observedCount || 0,
 							assignmentId: asn.assignmentId,
 							status: asn.status || "NOT_STARTED",
@@ -221,34 +245,22 @@ export const SurveyAssignmentModal = ({
 				} else {
 					setIsEditMode(false);
 					setAllocations((prevAllocations) => {
-						if (prevAllocations.length > 0) {
-							return prevAllocations.map((a) => ({
-								...a,
-								observedCount: 0,
-								status: "NOT_STARTED",
-							}));
-						}
+						const activeAuditorList =
+							prevAllocations.length > 0
+								? prevAllocations
+								: auditors.slice(0, Math.min(1, auditors.length)).map((a) => ({
+										auditorId: a.id,
+										observedCount: 0,
+										status: "NOT_STARTED",
+									}));
 
-						const defaultCount = Math.min(1, auditors.length);
-						const initialAuditorIds = auditors
-							.slice(0, defaultCount)
-							.map((a) => a.id);
 						const activeCount = selectedProductIds.length || products.length;
-						const slices = calculateEqualSlices(activeCount, defaultCount);
-
-						return initialAuditorIds.map((id, idx) => ({
-							auditorId: id,
-							fromNumber: slices[idx]?.fromNumber || 1,
-							toNumber: slices[idx]?.toNumber || activeCount,
-							count: slices[idx]?.count || activeCount,
-							observedCount: 0,
-							status: "NOT_STARTED",
-						}));
+						return syncAllocationsWithCount(activeAuditorList, activeCount);
 					});
 				}
 			})
 			.catch(() => {
-				setIsEditMode(false);
+				if (isMounted) setIsEditMode(false);
 			})
 			.finally(() => {
 				if (isMounted) setIsLoadingExisting(false);
@@ -259,107 +271,92 @@ export const SurveyAssignmentModal = ({
 		};
 	}, [isOpen, storeId, surveyPeriodId]);
 
-	const handleToggleProduct = (productId) => {
-		setSelectedProductIds((prev) =>
-			prev.includes(productId)
+	// Product selection handlers with immediate auditor range synchronization
+	const handleToggleProduct = useCallback((productId) => {
+		setSelectedProductIds((prev) => {
+			const next = prev.includes(productId)
 				? prev.filter((id) => id !== productId)
-				: [...prev, productId],
-		);
-	};
-
-	const handleSelectAllGlobal = () => {
-		if (selectedProductIds.length === products.length) {
-			setSelectedProductIds([]);
-		} else {
-			setSelectedProductIds(products.map((p) => p.id));
-		}
-	};
-
-	const handleToggleCategory = (trackProducts) => {
-		const trackIds = trackProducts.map((p) => p.id);
-		const allSelected = trackIds.every((id) => selectedProductIds.includes(id));
-
-		if (allSelected) {
-			setSelectedProductIds((prev) =>
-				prev.filter((id) => !trackIds.includes(id)),
+				: [...prev, productId];
+			setAllocations((prevAlloc) =>
+				syncAllocationsWithCount(prevAlloc, next.length),
 			);
-			toast.success(`Deselected ${trackIds.length} items`);
-		} else {
-			setSelectedProductIds((prev) =>
-				Array.from(new Set([...prev, ...trackIds])),
-			);
-			toast.success(`Selected all ${trackIds.length} items`);
-		}
-	};
+			return next;
+		});
+	}, []);
 
-	const handleRebalanceEqually = () => {
+	const handleSelectAllGlobal = useCallback(() => {
+		setSelectedProductIds((prev) => {
+			const next =
+				prev.length === products.length ? [] : products.map((p) => p.id);
+			setAllocations((prevAlloc) =>
+				syncAllocationsWithCount(prevAlloc, next.length),
+			);
+			return next;
+		});
+	}, [products]);
+
+	const handleToggleCategory = useCallback(
+		(trackProducts) => {
+			const trackIds = trackProducts.map((p) => p.id);
+			const allSelected = trackIds.every((id) =>
+				selectedProductIds.includes(id),
+			);
+
+			let next;
+			if (allSelected) {
+				next = selectedProductIds.filter((id) => !trackIds.includes(id));
+				toast.success(`Deselected ${trackIds.length} items`);
+			} else {
+				next = Array.from(new Set([...selectedProductIds, ...trackIds]));
+				toast.success(`Selected all ${trackIds.length} items`);
+			}
+
+			setSelectedProductIds(next);
+			setAllocations((prevAlloc) =>
+				syncAllocationsWithCount(prevAlloc, next.length),
+			);
+		},
+		[selectedProductIds],
+	);
+
+	const handleRebalanceEqually = useCallback(() => {
 		if (allocations.length === 0 || selectedProductIds.length === 0) return;
-		const slices = calculateEqualSlices(
-			selectedProductIds.length,
-			allocations.length,
-		);
-
 		setAllocations((prev) =>
-			prev.map((item, idx) => ({
-				...item,
-				fromNumber: slices[idx]?.fromNumber || 1,
-				toNumber: slices[idx]?.toNumber || selectedProductIds.length,
-				count: slices[idx]?.count || selectedProductIds.length,
-			})),
+			syncAllocationsWithCount(prev, selectedProductIds.length),
 		);
 		toast.success("Re-balanced ranges across active selected items");
-	};
+	}, [allocations.length, selectedProductIds.length]);
 
-	const handleToggleAuditor = (auditorIdToToggle) => {
-		const exists = allocations.find((a) => a.auditorId === auditorIdToToggle);
+	const handleToggleAuditor = useCallback(
+		(auditorIdToToggle) => {
+			const exists = allocations.find((a) => a.auditorId === auditorIdToToggle);
+			let updated;
 
-		if (exists) {
-			const updated = allocations.filter(
-				(a) => a.auditorId !== auditorIdToToggle,
-			);
-			const slices = calculateEqualSlices(
-				selectedProductIds.length,
-				updated.length,
-			);
-
-			setAllocations(
-				updated.map((item, idx) => ({
-					...item,
-					fromNumber: slices[idx]?.fromNumber || 1,
-					toNumber: slices[idx]?.toNumber || selectedProductIds.length,
-					count: slices[idx]?.count || selectedProductIds.length,
-				})),
-			);
-		} else {
-			const updated = [
-				...allocations,
-				{
-					auditorId: auditorIdToToggle,
-					fromNumber: 1,
-					toNumber: selectedProductIds.length,
-					count: selectedProductIds.length,
-					observedCount: 0,
-					status: "NOT_STARTED",
-				},
-			];
-			const slices = calculateEqualSlices(
-				selectedProductIds.length,
-				updated.length,
-			);
+			if (exists) {
+				updated = allocations.filter((a) => a.auditorId !== auditorIdToToggle);
+			} else {
+				updated = [
+					...allocations,
+					{
+						auditorId: auditorIdToToggle,
+						fromNumber: 1,
+						toNumber: selectedProductIds.length,
+						count: selectedProductIds.length,
+						observedCount: 0,
+						status: "NOT_STARTED",
+					},
+				];
+			}
 
 			setAllocations(
-				updated.map((item, idx) => ({
-					...item,
-					fromNumber: slices[idx]?.fromNumber || 1,
-					toNumber: slices[idx]?.toNumber || selectedProductIds.length,
-					count: slices[idx]?.count || selectedProductIds.length,
-				})),
+				syncAllocationsWithCount(updated, selectedProductIds.length),
 			);
-		}
-	};
+		},
+		[allocations, selectedProductIds.length],
+	);
 
-	const handleRangeChange = (auditorIdToEdit, field, val) => {
-		const parsed = parseInt(val, 10);
+	const handleRangeChange = useCallback((auditorIdToEdit, field, val) => {
+		const parsed = parseInt(val, 10) || 0;
 		setAllocations((prev) =>
 			prev.map((a) => {
 				if (a.auditorId !== auditorIdToEdit) return a;
@@ -372,7 +369,7 @@ export const SurveyAssignmentModal = ({
 				};
 			}),
 		);
-	};
+	}, []);
 
 	// Active Tab items
 	const currentTabPool = useMemo(() => {
@@ -425,6 +422,14 @@ export const SurveyAssignmentModal = ({
 		);
 
 		const formattedAllocations = allocations.map((alloc) => {
+			// Single auditor automatically gets the entire active pool
+			if (allocations.length === 1) {
+				return {
+					auditorId: alloc.auditorId,
+					productIds: activeProductsPool.map((p) => p.id),
+				};
+			}
+
 			const from = Math.max(1, alloc.fromNumber || 1);
 			const to = Math.min(
 				activeProductsPool.length,
@@ -461,7 +466,7 @@ export const SurveyAssignmentModal = ({
 			}
 			onClose();
 		} catch {
-			// Handled by mutation hook toast
+			// Error toasts handled by mutation hooks
 		}
 	};
 
@@ -540,12 +545,12 @@ export const SurveyAssignmentModal = ({
 
 					{selectedStore && (
 						<p className="font-mono text-[11px] text-slate-400">
-							GPS Anchor: Lat {Number(selectedStore.latitude).toFixed(5)}, Lon{" "}
+							GPS anchor: Lat {Number(selectedStore.latitude).toFixed(5)}, Lon{" "}
 							{Number(selectedStore.longitude).toFixed(5)}
 						</p>
 					)}
 
-					{/* 2. 4-TRACK PRODUCT SELECTION TABS (Strict Aires Brand Theme) */}
+					{/* 2. 4-Track Product Selection Tabs */}
 					<div className="space-y-2.5 rounded-2xl border border-slate-200 bg-white p-3.5 shadow-2xs">
 						<div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
 							<span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
@@ -682,7 +687,6 @@ export const SurveyAssignmentModal = ({
 									const isChecked = selectedProductIds.includes(p.id);
 									const track = getProductTrack(p);
 
-									// Strict brand palette styles (no non-brand colors)
 									const badgeStyles = {
 										DAILY: "bg-emerald-50 text-[#017C4D] border-emerald-200",
 										WEEKLY: "bg-red-50 text-[#A41821] border-red-200",
@@ -730,7 +734,7 @@ export const SurveyAssignmentModal = ({
 						</div>
 					</div>
 
-					{/* 3. AUDITOR ALLOCATIONS SECTION */}
+					{/* 3. Auditor Allocations Section */}
 					<div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/70 p-3">
 						<div className="flex items-center justify-between gap-2">
 							<span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
@@ -863,8 +867,8 @@ export const SurveyAssignmentModal = ({
 							{createBatch.isPending || updateAllocations.isPending
 								? "Processing Dispatch..."
 								: isEditMode
-									? "Save Store Dispatch"
-									: `Dispatch ${selectedProductIds.length} Items to ${allocations.length} Auditors`}
+									? `Save Store Dispatch (${selectedProductIds.length} Items)`
+									: `Dispatch ${selectedProductIds.length} Items to ${allocations.length} Auditor${allocations.length > 1 ? "s" : ""}`}
 						</button>
 					</div>
 				</form>

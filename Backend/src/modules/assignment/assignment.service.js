@@ -895,4 +895,5 @@ export const assignmentService = {
   getStoreAllocations,
   updateStoreAllocations,
   getStoreProgress,
+  archiveStoreDispatch
 };
