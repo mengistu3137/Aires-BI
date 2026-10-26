@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth.js";
 import {
@@ -11,6 +11,7 @@ import { Can } from "@/components/Can.jsx";
 import { SurveyAssignmentModal } from "../components/SurveyAssignmentModal.jsx";
 import { PeriodManagementModal } from "../components/PeriodManagementModal.jsx";
 import { ConfirmDeleteAssignmentModal } from "../components/ConfirmDeleteAssignmentModal.jsx";
+import { apiClient } from "@/services/client.js";
 import toast from "react-hot-toast";
 
 const STATUS_FILTERS = [
@@ -21,7 +22,24 @@ const STATUS_FILTERS = [
 	{ value: "ARCHIVED", label: "Archived" },
 ];
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 50;
+
+// Resolve backend asset URL pointing authoritatively to the backend host
+const resolveAssetUrl = (url) => {
+	if (!url) return "";
+	if (url.startsWith("http://") || url.startsWith("https://")) return url;
+
+	const apiBase =
+		apiClient.defaults.baseURL ||
+		import.meta.env.VITE_API_URL ||
+		import.meta.env.VITE_API_BASE_URL ||
+		"https://biapi.airescommunications.com/api/v1";
+
+	const hostOrigin = apiBase.replace(/\/api(\/v1)?\/?$/, "");
+	const normalizedPath = url.startsWith("/") ? url : `/${url}`;
+
+	return `${hostOrigin}${normalizedPath}`;
+};
 
 const formatAssignedDate = (dateString) => {
 	if (!dateString) return "—";
@@ -36,7 +54,7 @@ const formatAssignedDate = (dateString) => {
 
 export const SurveyProgress = () => {
 	const navigate = useNavigate();
-	const { isAuditor } = useAuth();
+	const {isAdmin,isAuditor } = useAuth();
 	const [searchParams, setSearchParams] = useSearchParams();
 
 	const page = Math.max(1, Number(searchParams.get("page") || 1));
@@ -57,15 +75,13 @@ export const SurveyProgress = () => {
 		setSearchParams(nextParams, { replace: true });
 	};
 
-	const { data, isLoading, isError, error, refetch, isFetching } =
-		useAssignments({
-			page,
-			limit: PAGE_SIZE,
-			status: statusFromUrl || undefined,
-		});
+	const { data, isLoading, isError, refetch } = useAssignments({
+		page,
+		limit: PAGE_SIZE,
+		status: statusFromUrl || undefined,
+	});
 
 	const assignments = data?.assignments || [];
-	const meta = data?.meta || { page: 1, totalPages: 1, total: 0 };
 
 	const deleteAssignment = useDeleteAssignment();
 	const archiveDispatch = useArchiveStoreDispatch();
@@ -78,9 +94,14 @@ export const SurveyProgress = () => {
 	const [deleteCandidate, setDeleteCandidate] = useState(null);
 	const [searchTerm, setSearchTerm] = useState("");
 
+	// Proof Gallery Grid & Fullscreen Carousel Lightbox State
+	const [activeProofGallery, setActiveProofGallery] = useState(null);
+	const [carouselPhotos, setCarouselPhotos] = useState(null);
+	const [carouselIndex, setCarouselIndex] = useState(0);
+
 	const statusFilter = statusFromUrl;
 
-	// Group assignments by Store + SurveyPeriod
+	// Group assignments by Store + SurveyPeriod and extract ALL attached evidence photos
 	const storeDispatches = useMemo(() => {
 		const groups = new Map();
 
@@ -99,6 +120,7 @@ export const SurveyProgress = () => {
 					assignments: [],
 					allProductIdsSet: new Set(),
 					totalObservationsCount: 0,
+					evidencePhotos: [],
 					assignedAt: asn.assignedAt,
 				});
 			}
@@ -114,12 +136,41 @@ export const SurveyProgress = () => {
 			}
 
 			let asnObsCount = Number(asn.observedCount ?? asn.observationsCount ?? 0);
-			if (!asnObsCount && Array.isArray(asn.audits)) {
+
+			if (Array.isArray(asn.audits)) {
 				asn.audits.forEach((aud) => {
-					asnObsCount +=
-						aud._count?.observations ||
-						aud.observationsCount ||
-						(Array.isArray(aud.observations) ? aud.observations.length : 0);
+					// Fallback observation counter
+					if (!asnObsCount) {
+						asnObsCount +=
+							aud._count?.observations ||
+							aud.observationsCount ||
+							(Array.isArray(aud.observations) ? aud.observations.length : 0);
+					}
+
+					// Always extract observation proof photos into the dispatch gallery
+					if (Array.isArray(aud.observations)) {
+						aud.observations.forEach((obs) => {
+							if (obs.evidencePhotoUrl) {
+								const urls = String(obs.evidencePhotoUrl)
+									.split(",")
+									.map((u) => u.trim())
+									.filter(Boolean);
+
+								urls.forEach((u, uIdx) => {
+									group.evidencePhotos.push({
+										id: `${obs.id}_${uIdx}`,
+										url: u,
+										productName: obs.product?.name || "Observed Product",
+										price: obs.price ? Number(obs.price) : null,
+										availability: obs.availability || "AVAILABLE",
+										capturedAt: obs.capturedAt,
+										auditorName: asn.auditor?.name || "Field Auditor",
+										storeName: asn.store?.name || "Store",
+									});
+								});
+							}
+						});
+					}
 				});
 			} else if (!asnObsCount && asn._count?.observations) {
 				asnObsCount += asn._count.observations;
@@ -159,10 +210,10 @@ export const SurveyProgress = () => {
 			const overallStatus = isArchived
 				? "ARCHIVED"
 				: allCompleted
-				? "COMPLETED"
-				: anyInProgress || observed > 0
-				? "IN_PROGRESS"
-				: "NOT_STARTED";
+					? "COMPLETED"
+					: anyInProgress || observed > 0
+						? "IN_PROGRESS"
+						: "NOT_STARTED";
 
 			return {
 				...g,
@@ -175,11 +226,20 @@ export const SurveyProgress = () => {
 		});
 	}, [assignments]);
 
+	// Filter dispatches by Active vs. Status vs. Search term
 	const filteredStoreDispatches = useMemo(() => {
 		let list = storeDispatches;
 
-		if (statusFilter) {
-			list = list.filter((d) => d.overallStatus === statusFilter);
+		if (statusFilter === "") {
+			// Active Dispatches: show all non-archived dispatches
+			list = list.filter((d) => !d.isArchived);
+		} else if (statusFilter === "ARCHIVED") {
+			// Archived: show only archived dispatches
+			list = list.filter((d) => d.isArchived || d.overallStatus === "ARCHIVED");
+		} else if (statusFilter) {
+			list = list.filter(
+				(d) => d.overallStatus === statusFilter && !d.isArchived,
+			);
 		}
 
 		if (searchTerm.trim()) {
@@ -204,15 +264,16 @@ export const SurveyProgress = () => {
 
 	const counts = useMemo(
 		() => ({
-			all: storeDispatches.length,
+			all: storeDispatches.filter((d) => !d.isArchived).length,
 			notStarted: storeDispatches.filter(
-				(d) => d.overallStatus === "NOT_STARTED",
+				(d) => d.overallStatus === "NOT_STARTED" && !d.isArchived,
 			).length,
 			inProgress: storeDispatches.filter(
-				(d) => d.overallStatus === "IN_PROGRESS",
+				(d) => d.overallStatus === "IN_PROGRESS" && !d.isArchived,
 			).length,
-			completed: storeDispatches.filter((d) => d.overallStatus === "COMPLETED")
-				.length,
+			completed: storeDispatches.filter(
+				(d) => d.overallStatus === "COMPLETED" && !d.isArchived,
+			).length,
 		}),
 		[storeDispatches],
 	);
@@ -237,8 +298,8 @@ export const SurveyProgress = () => {
 				archive: !dispatch.isArchived,
 			});
 			refetch();
-		} catch (err) {
-			// Handled by mutation toast
+		} catch {
+			// Handled by toast
 		}
 	};
 
@@ -246,6 +307,12 @@ export const SurveyProgress = () => {
 		setSelectedStoreId(storeId);
 		setEditingAssignment(null);
 		setIsAssignmentModalOpen(true);
+	};
+
+	// Open Carousel Lightbox at specific photo index
+	const handleOpenCarousel = (photos, startIndex = 0) => {
+		setCarouselPhotos(photos);
+		setCarouselIndex(startIndex);
 	};
 
 	return (
@@ -259,27 +326,29 @@ export const SurveyProgress = () => {
 					<p className="mt-0.5 text-xs text-slate-500">
 						{isAuditor
 							? "Your assigned store audits and target product checklists"
-							: "Monitor store dispatch completion and allocate tasks across field auditors"}
+							: "Monitor store dispatch completion, view proof galleries, and allocate tasks"}
 					</p>
 				</div>
 
-				<Can role={["ADMIN", "MANAGER"]}>
-					<div className="flex items-center gap-2">
-						<button
-							type="button"
-							onClick={() => setIsPeriodModalOpen(true)}
-							className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-xs font-bold text-slate-700 shadow-xs transition hover:bg-slate-50 active:scale-95"
-						>
-							Manage Cycles
-						</button>
-						<button
-							type="button"
-							onClick={() => handleOpenDispatchModal(null)}
-							className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-[#A41821] px-4 py-2.5 text-xs font-bold text-white shadow-xs transition hover:bg-[#7F1219] active:scale-95"
-						>
-							+ Dispatch Store Survey
-						</button>
-					</div>
+				<Can role={["ADMIN", "MANAGER", "SUPER_ADMIN"]}>
+					{isAdmin && (
+						<div className="flex items-center gap-2">
+							<button
+								type="button"
+								onClick={() => setIsPeriodModalOpen(true)}
+								className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-xs font-bold text-slate-700 shadow-xs transition hover:bg-slate-50 active:scale-95"
+							>
+								Manage Cycles
+							</button>
+							<button
+								type="button"
+								onClick={() => handleOpenDispatchModal(null)}
+								className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-[#A41821] px-4 py-2.5 text-xs font-bold text-white shadow-xs transition hover:bg-[#7F1219] active:scale-95"
+							>
+								+ Dispatch Store Survey
+							</button>
+						</div>
+					)}
 				</Can>
 			</div>
 
@@ -328,7 +397,7 @@ export const SurveyProgress = () => {
 										: "text-slate-500 hover:text-slate-800"
 								}`}
 							>
-								Store Dispatches (Overall)
+								Store Dispatches ({filteredStoreDispatches.length})
 							</button>
 							<button
 								type="button"
@@ -345,7 +414,6 @@ export const SurveyProgress = () => {
 					)}
 				</div>
 
-				{/* Status Filters with Archive Tab */}
 				<div className="flex flex-wrap gap-2">
 					{STATUS_FILTERS.map((f) => (
 						<button
@@ -387,12 +455,14 @@ export const SurveyProgress = () => {
 									<StoreDispatchCard
 										key={dispatch.id}
 										dispatch={dispatch}
+										isAdmin={isAdmin}
 										onManage={() => handleOpenDispatchModal(dispatch.storeId)}
 										onArchive={() => handleArchiveDispatch(dispatch)}
 										isArchiving={archiveDispatch.isPending}
 										onViewAudits={() =>
 											navigate(`/audits?storeId=${dispatch.storeId}`)
 										}
+										onOpenProofGallery={() => setActiveProofGallery(dispatch)}
 									/>
 								))}
 							</div>
@@ -412,6 +482,7 @@ export const SurveyProgress = () => {
 										setIsAssignmentModalOpen(true);
 									}}
 									onDelete={() => setDeleteCandidate(assignment)}
+									onOpenProof={(photos) => handleOpenCarousel(photos, 0)}
 								/>
 							))}
 						</div>
@@ -444,16 +515,48 @@ export const SurveyProgress = () => {
 				isPending={deleteAssignment.isPending}
 				assignment={deleteCandidate}
 			/>
+
+			{/* Dispatch Proof Image View Gallery Modal (Grid View) */}
+			{activeProofGallery && (
+				<ProofGalleryModal
+					dispatch={activeProofGallery}
+					onClose={() => setActiveProofGallery(null)}
+					onSelectProofIndex={(idx) => {
+						const photos = activeProofGallery.evidencePhotos || [];
+						setActiveProofGallery(null); // Switch from grid to fullscreen carousel
+						handleOpenCarousel(photos, idx);
+					}}
+				/>
+			)}
+
+			{/* Fullscreen Carousel Lightbox Modal (Swipe + Arrow Keys + Touch Supported) */}
+			{carouselPhotos && carouselPhotos.length > 0 && (
+				<LightboxModal
+					photos={carouselPhotos}
+					currentIndex={carouselIndex}
+					onIndexChange={setCarouselIndex}
+					onClose={() => setCarouselPhotos(null)}
+					resolveUrl={resolveAssetUrl}
+				/>
+			)}
 		</div>
 	);
 };
 
-/* Overall Store Dispatch Card with Archive Button */
-const StoreDispatchCard = ({ dispatch, onManage, onArchive, isArchiving, onViewAudits }) => {
+/* Overall Store Dispatch Card with Proof Gallery Preview */
+const StoreDispatchCard = ({
+	dispatch,
+	onManage,
+	onArchive,
+	isArchiving,
+	onViewAudits,
+	onOpenProofGallery,
+}) => {
 	const store = dispatch.store || {};
 	const cycle = dispatch.surveyPeriod || {};
 	const isDone = dispatch.overallStatus === "COMPLETED";
 	const isArchived = dispatch.isArchived;
+	const photos = dispatch.evidencePhotos || [];
 
 	const statusAccent =
 		{
@@ -465,20 +568,25 @@ const StoreDispatchCard = ({ dispatch, onManage, onArchive, isArchiving, onViewA
 		}[dispatch.overallStatus] || "bg-slate-300";
 
 	return (
-		<div className={`flex flex-col overflow-hidden rounded-2xl border bg-white shadow-xs transition hover:shadow-sm ${
-			isArchived ? "border-slate-300 opacity-75" : "border-slate-200 hover:border-slate-300"
-		}`}>
+		<div
+			className={`flex flex-col overflow-hidden rounded-2xl border bg-white shadow-xs transition hover:shadow-sm ${
+				isArchived
+					? "border-slate-300 opacity-75"
+					: "border-slate-200 hover:border-slate-300"
+			}`}
+		>
 			<div className={`h-1.5 w-full ${statusAccent}`} />
 
 			<div className="flex flex-1 flex-col p-4 space-y-3.5">
-				{/* Header: Store Name + Status Badge */}
+				{/* Header */}
 				<div className="flex items-start justify-between gap-2">
 					<div className="min-w-0 flex-1">
 						<h3 className="truncate text-base font-black text-slate-900">
 							{store.name || "Unknown Store"}
 						</h3>
 						<p className="mt-0.5 truncate text-[11px] text-slate-500 font-medium">
-							{store.area || store.address || "Addis Ababa"} • Cycle {cycle.id || ""}
+							{store.area || store.address || "Addis Ababa"} • Cycle{" "}
+							{cycle.name || cycle.id || ""}
 						</p>
 					</div>
 					<StatusBadge status={dispatch.overallStatus} />
@@ -514,25 +622,40 @@ const StoreDispatchCard = ({ dispatch, onManage, onArchive, isArchiving, onViewA
 					</div>
 				</div>
 
-				{/* Team on Duty */}
-				<div>
-					<span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1.5">
-						Team on Duty ({dispatch.assignments.length} Auditors)
-					</span>
-					<div className="flex flex-wrap gap-1.5">
-						{dispatch.assignments.map((asn) => (
-							<span
-								key={asn.id}
-								className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 shadow-2xs"
-							>
-								<span className="h-1.5 w-1.5 rounded-full bg-[#017C4D]" />
-								{asn.auditor?.name} ({asn.items?.length || 0})
-							</span>
-						))}
+				{/* Team on Duty & Proof Count */}
+				<div className="flex items-center justify-between gap-2">
+					<div>
+						<span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+							Team ({dispatch.assignments.length})
+						</span>
+						<div className="flex flex-wrap gap-1">
+							{dispatch.assignments.map((asn) => (
+								<span
+									key={asn.id}
+									className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 shadow-2xs"
+								>
+									<span className="h-1.5 w-1.5 rounded-full bg-[#017C4D]" />
+									{asn.auditor?.name?.split(" ")[0]} ({asn.items?.length || 0})
+								</span>
+							))}
+						</div>
 					</div>
+
+					{/* Proof Gallery Button */}
+					{photos.length > 0 && (
+						<button
+							type="button"
+							onClick={onOpenProofGallery}
+							className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50/80 px-2.5 py-1 text-xs font-bold text-blue-700 transition hover:bg-blue-100"
+							title="View uploaded receipts and evidence photos"
+						>
+							<span>📷</span>
+							<span>Proof ({photos.length})</span>
+						</button>
+					)}
 				</div>
 
-				{/* Card Footer: View Visits, Manage Dispatch & ARCHIVE BUTTON */}
+				{/* Card Footer */}
 				<div className="mt-auto flex items-center justify-between border-t border-slate-100 pt-3 text-xs font-semibold gap-2">
 					<button
 						type="button"
@@ -543,24 +666,306 @@ const StoreDispatchCard = ({ dispatch, onManage, onArchive, isArchiving, onViewA
 					</button>
 
 					<div className="flex items-center gap-2">
-						<button
-							type="button"
-							onClick={onManage}
-							className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 transition cursor-pointer"
-						>
-							Manage
-						</button>
+						{photos.length > 0 && (
+							<button
+								type="button"
+								onClick={onOpenProofGallery}
+								className="text-blue-700 hover:underline font-bold text-xs cursor-pointer"
+							>
+								Photos ({photos.length})
+							</button>
+						)}
 
-						{/* ARCHIVE / UNARCHIVE BUTTON */}
-						<button
-							type="button"
-							disabled={isArchiving}
-							onClick={onArchive}
-							className="rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition cursor-pointer disabled:opacity-50"
-							title={isArchived ? "Restore to active dispatches" : "Archive and hide from active dispatches"}
-						>
-							{isArchived ? "Unarchive" : "Archive"}
-						</button>
+						{/* Management buttons hidden for Queens Admin */}
+						{isAdmin && (
+							<>
+								<button
+									type="button"
+									onClick={onManage}
+									className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 transition cursor-pointer"
+								>
+									Manage
+								</button>
+
+								<button
+									type="button"
+									disabled={isArchiving}
+									onClick={onArchive}
+									className="rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition cursor-pointer disabled:opacity-50"
+								>
+									{isArchived ? "Unarchive" : "Archive"}
+								</button>
+							</>
+						)}
+					</div>
+				</div>
+			</div>
+		</div>
+	);
+};
+
+/* Proof Gallery Modal for a Dispatch (Grid view of all photos) */
+const ProofGalleryModal = ({ dispatch, onClose, onSelectProofIndex }) => {
+	const photos = dispatch.evidencePhotos || [];
+
+	return (
+		<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in">
+			<div className="w-full max-w-3xl rounded-2xl border border-slate-100 bg-white p-5 shadow-2xl flex flex-col max-h-[85vh]">
+				{/* Header */}
+				<div className="flex items-center justify-between border-b border-slate-100 pb-3 flex-none">
+					<div>
+						<h2 className="text-base font-black text-slate-900">
+							Dispatch Proof Gallery ({photos.length})
+						</h2>
+						<p className="text-xs text-slate-500 font-medium">
+							{dispatch.store?.name} • Receipts, shelf items, and substitute
+							proofs
+						</p>
+					</div>
+					<button
+						type="button"
+						onClick={onClose}
+						className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 cursor-pointer"
+					>
+						✕
+					</button>
+				</div>
+
+				{/* Photos Grid */}
+				<div className="flex-1 overflow-y-auto py-3">
+					{photos.length === 0 ? (
+						<div className="py-12 text-center text-xs text-slate-400">
+							No proof photos captured yet for this store dispatch.
+						</div>
+					) : (
+						<div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+							{photos.map((proof, idx) => (
+								<div
+									key={proof.id}
+									onClick={() => onSelectProofIndex(idx)}
+									className="group relative cursor-pointer overflow-hidden rounded-xl border border-slate-200 bg-slate-50 aspect-4/3 transition hover:shadow-md"
+								>
+									<img
+										src={resolveAssetUrl(proof.url)}
+										alt={proof.productName}
+										className="h-full w-full object-cover transition duration-200 group-hover:scale-105"
+										loading="lazy"
+										onError={(e) => {
+											if (!e.currentTarget.dataset.triedFallback) {
+												e.currentTarget.dataset.triedFallback = "true";
+												e.currentTarget.src = proof.url.startsWith("/")
+													? proof.url
+													: `/${proof.url}`;
+											}
+										}}
+									/>
+									<div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex flex-col justify-end p-2 text-white">
+										<span className="truncate text-xs font-bold leading-tight">
+											{proof.productName}
+										</span>
+										<span className="text-[10px] text-slate-300 font-mono">
+											{proof.price
+												? `${Number(proof.price).toFixed(2)} ETB`
+												: proof.availability}
+										</span>
+									</div>
+								</div>
+							))}
+						</div>
+					)}
+				</div>
+
+				{/* Footer */}
+				<div className="border-t border-slate-100 pt-3 flex justify-end flex-none">
+					<button
+						type="button"
+						onClick={onClose}
+						className="rounded-xl bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 cursor-pointer"
+					>
+						Close Gallery
+					</button>
+				</div>
+			</div>
+		</div>
+	);
+};
+
+/* Fullscreen Carousel Lightbox Modal with Swipe, Keyboard, and Touch Support */
+const LightboxModal = ({
+	photos = [],
+	currentIndex = 0,
+	onIndexChange,
+	onClose,
+	resolveUrl,
+}) => {
+	const [touchStartX, setTouchStartX] = useState(null);
+	const current = photos[currentIndex];
+	const total = photos.length;
+
+	const handleNext = useCallback(() => {
+		onIndexChange((prev) => (prev < total - 1 ? prev + 1 : 0));
+	}, [onIndexChange, total]);
+
+	const handlePrev = useCallback(() => {
+		onIndexChange((prev) => (prev > 0 ? prev - 1 : total - 1));
+	}, [onIndexChange, total]);
+
+	// Keyboard arrow & Escape navigation
+	useEffect(() => {
+		const handleKeyDown = (e) => {
+			if (e.key === "ArrowRight") handleNext();
+			else if (e.key === "ArrowLeft") handlePrev();
+			else if (e.key === "Escape") onClose();
+		};
+		window.addEventListener("keydown", handleKeyDown);
+		return () => window.removeEventListener("keydown", handleKeyDown);
+	}, [handleNext, handlePrev, onClose]);
+
+	// Prevent background scroll while lightbox is open
+	useEffect(() => {
+		document.body.style.overflow = "hidden";
+		return () => {
+			document.body.style.overflow = "unset";
+		};
+	}, []);
+
+	// Touch swipe gestures
+	const onTouchStart = (e) => {
+		setTouchStartX(e.touches[0].clientX);
+	};
+
+	const onTouchEnd = (e) => {
+		if (touchStartX === null) return;
+		const touchEndX = e.changedTouches[0].clientX;
+		const deltaX = touchStartX - touchEndX;
+
+		if (deltaX > 50) {
+			handleNext(); // Swiped left -> Next photo
+		} else if (deltaX < -50) {
+			handlePrev(); // Swiped right -> Previous photo
+		}
+		setTouchStartX(null);
+	};
+
+	if (!current) return null;
+
+	return (
+		<div
+			className="fixed inset-0 z-60 flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-2 sm:p-4 select-none animate-in fade-in duration-150"
+			onClick={onClose}
+		>
+			<div
+				className="relative max-h-[92vh] w-full max-w-3xl overflow-hidden rounded-2xl bg-black shadow-2xl flex flex-col"
+				onClick={(e) => e.stopPropagation()}
+				onTouchStart={onTouchStart}
+				onTouchEnd={onTouchEnd}
+			>
+				{/* Top Floating Header */}
+				<div className="flex items-center justify-between p-3.5 bg-gradient-to-b from-black/80 to-transparent z-10 text-white">
+					<div className="flex items-center gap-2">
+						<span className="rounded-md bg-white/20 px-2 py-0.5 font-mono text-[11px] font-bold">
+							{currentIndex + 1} / {total}
+						</span>
+						<span className="text-xs font-bold truncate max-w-[200px] sm:max-w-md">
+							{current.productName}
+						</span>
+					</div>
+
+					<button
+						type="button"
+						onClick={onClose}
+						className="rounded-full bg-white/20 hover:bg-white/30 p-1.5 text-white cursor-pointer transition"
+						title="Close (Esc)"
+					>
+						✕
+					</button>
+				</div>
+
+				{/* Center Main Image Canvas */}
+				<div className="relative flex-1 flex items-center justify-center min-h-[50vh] max-h-[72vh] p-2 bg-black">
+					<img
+						key={current.url}
+						src={resolveUrl(current.url)}
+						alt={current.productName}
+						className="max-h-[70vh] w-auto max-w-full object-contain mx-auto transition duration-150 animate-in fade-in"
+						onError={(e) => {
+							if (!e.currentTarget.dataset.triedFallback) {
+								e.currentTarget.dataset.triedFallback = "true";
+								e.currentTarget.src = current.url.startsWith("/")
+									? current.url
+									: `/${current.url}`;
+							}
+						}}
+					/>
+
+					{/* Desktop Left/Right Navigation Chevrons */}
+					{total > 1 && (
+						<>
+							<button
+								type="button"
+								onClick={(e) => {
+									e.stopPropagation();
+									handlePrev();
+								}}
+								className="absolute left-3 top-1/2 -translate-y-1/2 rounded-full bg-black/60 hover:bg-white hover:text-black text-white p-2.5 transition cursor-pointer shadow-lg z-20 hidden sm:flex items-center justify-center"
+								title="Previous photo (Left Arrow)"
+							>
+								◀
+							</button>
+
+							<button
+								type="button"
+								onClick={(e) => {
+									e.stopPropagation();
+									handleNext();
+								}}
+								className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-black/60 hover:bg-white hover:text-black text-white p-2.5 transition cursor-pointer shadow-lg z-20 hidden sm:flex items-center justify-center"
+								title="Next photo (Right Arrow)"
+							>
+								▶
+							</button>
+						</>
+					)}
+				</div>
+
+				{/* Bottom Metadata & Mobile Navigation Bar */}
+				<div className="p-3 bg-black/90 border-t border-white/10 text-white flex flex-col sm:flex-row items-center justify-between gap-2 text-xs">
+					<div className="text-center sm:text-left">
+						<span className="font-mono text-emerald-400 font-bold text-sm block">
+							{current.price
+								? `${Number(current.price).toFixed(2)} ETB`
+								: current.availability}
+						</span>
+						<p className="text-[10px] text-slate-400 font-mono">
+							Auditor: {current.auditorName || "Field Auditor"} • Captured{" "}
+							{current.capturedAt
+								? new Date(current.capturedAt).toLocaleString()
+								: "Recently"}
+						</p>
+					</div>
+
+					{/* Mobile Step Buttons */}
+					{total > 1 && (
+						<div className="flex items-center gap-2 sm:hidden w-full justify-between pt-1">
+							<button
+								type="button"
+								onClick={handlePrev}
+								className="flex-1 rounded-lg bg-white/15 py-1.5 font-bold text-white text-xs"
+							>
+								◀ Prev
+							</button>
+							<button
+								type="button"
+								onClick={handleNext}
+								className="flex-1 rounded-lg bg-white/15 py-1.5 font-bold text-white text-xs"
+							>
+								Next ▶
+							</button>
+						</div>
+					)}
+
+					<div className="hidden sm:block text-[10px] text-slate-400 font-mono">
+						Swipe or use ← / → arrow keys
 					</div>
 				</div>
 			</div>
@@ -574,6 +979,7 @@ const AssignmentCard = ({
 	onViewAudits,
 	onEdit,
 	onDelete,
+	onOpenProof,
 }) => {
 	const store = assignment.store || {};
 	const auditor = assignment.auditor || {};
@@ -585,6 +991,38 @@ const AssignmentCard = ({
 
 	const productCount =
 		assignment.totalItemsCount ?? assignment.items?.length ?? 0;
+
+	// Extract photos from assignment audits
+	const assignmentPhotos = useMemo(() => {
+		const photos = [];
+		if (Array.isArray(assignment.audits)) {
+			assignment.audits.forEach((aud) => {
+				if (Array.isArray(aud.observations)) {
+					aud.observations.forEach((obs) => {
+						if (obs.evidencePhotoUrl) {
+							const urls = String(obs.evidencePhotoUrl)
+								.split(",")
+								.map((u) => u.trim())
+								.filter(Boolean);
+							urls.forEach((u, uIdx) => {
+								photos.push({
+									id: `${obs.id}_${uIdx}`,
+									url: u,
+									productName: obs.product?.name || "Product",
+									price: obs.price ? Number(obs.price) : null,
+									availability: obs.availability || "AVAILABLE",
+									capturedAt: obs.capturedAt,
+									auditorName: assignment.auditor?.name || "Field Auditor",
+									storeName: assignment.store?.name || "Store",
+								});
+							});
+						}
+					});
+				}
+			});
+		}
+		return photos;
+	}, [assignment]);
 
 	const statusAccent =
 		{
@@ -633,6 +1071,18 @@ const AssignmentCard = ({
 						</span>
 						products
 					</span>
+
+					{assignmentPhotos.length > 0 && (
+						<button
+							type="button"
+							onClick={() => onOpenProof(assignmentPhotos)}
+							className="inline-flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 py-0.5 font-bold text-blue-700 hover:bg-blue-100 cursor-pointer"
+						>
+							<span>📷</span>
+							<span>Proof ({assignmentPhotos.length})</span>
+						</button>
+					)}
+
 					{assignment.assignedAt && (
 						<span className="text-slate-400">
 							Assigned {formatAssignedDate(assignment.assignedAt)}
@@ -646,7 +1096,7 @@ const AssignmentCard = ({
 						onClick={onViewAudits}
 						className="inline-flex cursor-pointer items-center gap-1 text-xs font-semibold text-slate-700 hover:text-slate-900 hover:underline"
 					>
-						View audits →
+						View Audits →
 					</button>
 
 					{!isAuditor && (

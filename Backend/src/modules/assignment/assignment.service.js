@@ -31,7 +31,22 @@ const ASSIGNMENT_INCLUDE_RELATIONS = {
       startedAt: true,
       completedAt: true,
       createdAt: true,
+      gpsValid: true,
+      startLatitude: true,
+      startLongitude: true,
       _count: { select: { observations: true } },
+      observations: {
+        where: { evidencePhotoUrl: { not: null } },
+        select: {
+          id: true,
+          evidencePhotoUrl: true,
+          price: true,
+          availability: true,
+          substituteProduct: true,
+          capturedAt: true,
+          product: { select: { id: true, name: true } },
+        },
+      },
     },
   },
 };

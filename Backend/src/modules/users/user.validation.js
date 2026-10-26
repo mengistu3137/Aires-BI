@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const ROLES = ["ADMIN", "MANAGER", "FIELD_AUDITOR"];
+export const ROLES = ["SUPER_ADMIN", "ADMIN", "MANAGER", "FIELD_AUDITOR"];
 
 export const createUserSchema = z
   .object({
@@ -62,11 +62,6 @@ export const updateUserSchema = z.object({
   active: z.boolean().optional(),
 });
 
-/**
- * Query filters for GET /users. Includes page/limit so the validate
- * middleware keeps them; both are coerced to numbers because query
- * strings always arrive as strings.
- */
 export const userQuerySchema = z
   .object({
     role: z.enum(ROLES).optional(),

@@ -45,7 +45,7 @@ export const RapidPriceInput = ({
 		};
 	}, [stagedPhotos]);
 
-	// STAGE 1: Add one or more photos to local staged gallery (Instant 0ms local preview, NO network upload yet)
+	// STAGE 1: Add one or more photos to local staged gallery (Instant 0ms local preview)
 	const handlePhotosSelected = (e) => {
 		const files = Array.from(e.target.files || []);
 		if (files.length === 0) return;
@@ -63,7 +63,7 @@ export const RapidPriceInput = ({
 			previewUrl: URL.createObjectURL(file),
 		}));
 
-		setStagedPhotos((prev) => [...prev, ...newStaged].slice(0, 5)); // Limit up to 5 photos
+		setStagedPhotos((prev) => [...prev, ...newStaged].slice(0, 5));
 		toast.success(`Attached ${newStaged.length} photo(s) to gallery`);
 		if (photoInputRef.current) photoInputRef.current.value = "";
 	};
@@ -75,7 +75,8 @@ export const RapidPriceInput = ({
 		} else {
 			setStagedPhotos((prev) => {
 				const item = prev[index];
-				if (item?.previewUrl.startsWith("blob:")) URL.revokeObjectURL(item.previewUrl);
+				if (item?.previewUrl.startsWith("blob:"))
+					URL.revokeObjectURL(item.previewUrl);
 				return prev.filter((_, idx) => idx !== index);
 			});
 		}
@@ -88,7 +89,9 @@ export const RapidPriceInput = ({
 		}
 
 		setIsUploadingPhotos(true);
-		const toastId = toast.loading(`Uploading ${stagedPhotos.length} proof photo(s)...`);
+		const toastId = toast.loading(
+			`Uploading ${stagedPhotos.length} proof photo(s)...`,
+		);
 
 		try {
 			const formData = new FormData();
@@ -96,20 +99,36 @@ export const RapidPriceInput = ({
 				formData.append("proofs", p.file);
 			});
 
-			const res = await apiClient.post("/observations/upload-evidence", formData, {
-				headers: { "Content-Type": "multipart/form-data" },
-			});
+			const res = await apiClient.post(
+				"/observations/upload-evidence",
+				formData,
+				{
+					headers: { "Content-Type": "multipart/form-data" },
+				},
+			);
 
 			const newUrls = res.data?.data?.urls || [];
 			const combined = [...serverPhotos, ...newUrls];
+
+			// Clean up local blob object URLs and clear staged photos to eliminate duplicates
+			stagedPhotos.forEach((p) => {
+				if (p.previewUrl.startsWith("blob:")) URL.revokeObjectURL(p.previewUrl);
+			});
+			setStagedPhotos([]);
 			setServerPhotos(combined);
+
 			toast.success("All proof photos uploaded!", { id: toastId });
 			return combined.join(",");
 		} catch (err) {
 			console.error("Multi-photo upload failed:", err);
-			toast.error(err?.response?.data?.message || err?.message || "Failed to upload photo proofs", {
-				id: toastId,
-			});
+			toast.error(
+				err?.response?.data?.message ||
+					err?.message ||
+					"Failed to upload photo proofs",
+				{
+					id: toastId,
+				},
+			);
 			throw err;
 		} finally {
 			setIsUploadingPhotos(false);
@@ -125,8 +144,8 @@ export const RapidPriceInput = ({
 			setUnavailableMode(null);
 			setError("");
 
-			// Parse existing comma-separated photos if any
-			const existingRaw = selectedProduct?._existingObservation?.evidencePhotoUrl || "";
+			const existingRaw =
+				selectedProduct?._existingObservation?.evidencePhotoUrl || "";
 			const existingList = existingRaw
 				.split(",")
 				.map((u) => u.trim())
@@ -220,14 +239,16 @@ export const RapidPriceInput = ({
 				availability: unavailableMode,
 				price: numericSubPrice,
 				substituteProduct: substituteProduct.trim(),
+				isExplicitWithoutSubstitute: false,
 				evidencePhotoUrl,
 			});
+			setUnavailableMode(null);
 		} catch {
 			// Toast handled in uploadStagedPhotos
 		}
 	};
 
-	// Save plain out of stock without substitute
+	// Save plain out of stock without substitute (Explicit intent flag prevents duplicate modal)
 	const handleConfirmWithoutSubstitute = async (e) => {
 		e.preventDefault();
 		e.stopPropagation();
@@ -239,8 +260,10 @@ export const RapidPriceInput = ({
 				availability: unavailableMode,
 				price: null,
 				substituteProduct: null,
+				isExplicitWithoutSubstitute: true, // ← Signals parent not to pop up modal
 				evidencePhotoUrl,
 			});
+			setUnavailableMode(null);
 		} catch {
 			// Toast handled in uploadStagedPhotos
 		}
@@ -249,7 +272,9 @@ export const RapidPriceInput = ({
 	// Combined list of previews: server URLs + local staged blobs
 	const allPreviews = [
 		...serverPhotos.map((url) => ({
-			url: url.startsWith("http") ? url : `${apiClient.defaults.baseURL.replace(/\/api\/v1$/, "")}${url}`,
+			url: url.startsWith("http")
+				? url
+				: `${apiClient.defaults.baseURL.replace(/\/api\/v1$/, "")}${url}`,
 			isServer: true,
 		})),
 		...stagedPhotos.map((p) => ({
@@ -277,7 +302,10 @@ export const RapidPriceInput = ({
 					</h3>
 					<div className="flex items-center gap-2 text-xs text-slate-500 font-mono mt-0.5">
 						<span>
-							CODE: {selectedProduct.barcode || selectedProduct.sku || selectedProduct.id}
+							CODE:{" "}
+							{selectedProduct.barcode ||
+								selectedProduct.sku ||
+								selectedProduct.id}
 						</span>
 						<span>•</span>
 						<span>UNIT: {selectedProduct.unit || "pcs"}</span>
@@ -314,7 +342,7 @@ export const RapidPriceInput = ({
 				</div>
 			</div>
 
-			{/* Hidden Native File & Camera Input (Allows multiple image selection) */}
+			{/* Hidden Native File & Camera Input */}
 			<input
 				type="file"
 				ref={photoInputRef}
@@ -429,8 +457,13 @@ export const RapidPriceInput = ({
 										/>
 										<button
 											type="button"
-											onClick={() => handleRemovePhoto(p.isServer ? idx : idx - serverPhotos.length, p.isServer)}
-											className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-red-600 text-white text-[10px] font-bold flex items-center justify-center hover:bg-red-700 shadow-xs"
+											onClick={() =>
+												handleRemovePhoto(
+													p.isServer ? idx : idx - serverPhotos.length,
+													p.isServer,
+												)
+											}
+											className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-red-600 text-white text-[10px] font-bold flex items-center justify-center hover:bg-red-700 shadow-xs cursor-pointer"
 											title="Remove photo"
 										>
 											✕
@@ -441,7 +474,9 @@ export const RapidPriceInput = ({
 						)}
 					</div>
 
-					{error && <p className="text-xs font-semibold text-[#A41821]">{error}</p>}
+					{error && (
+						<p className="text-xs font-semibold text-[#A41821]">{error}</p>
+					)}
 
 					<div className="pt-1 flex flex-col gap-2">
 						<button
@@ -450,7 +485,9 @@ export const RapidPriceInput = ({
 							disabled={isSaving || isUploadingPhotos}
 							className="w-full rounded-xl bg-[#FE7914] hover:bg-[#D45F06] py-2.5 text-xs font-bold text-white shadow-xs transition cursor-pointer disabled:opacity-50"
 						>
-							{isUploadingPhotos ? "Uploading Photos..." : "Save with Substitute (Enter ↵)"}
+							{isUploadingPhotos
+								? "Uploading Photos..."
+								: "Save with Substitute (Enter ↵)"}
 						</button>
 
 						<button
@@ -459,7 +496,8 @@ export const RapidPriceInput = ({
 							disabled={isSaving || isUploadingPhotos}
 							className="w-full rounded-xl border border-slate-200 bg-white hover:bg-slate-50 py-2 text-[11px] font-semibold text-slate-600 transition cursor-pointer disabled:opacity-50"
 						>
-							No Substitute on Shelf (Confirm {unavailableMode.replace("_", " ")})
+							No Substitute on Shelf (Confirm{" "}
+							{unavailableMode.replace("_", " ")})
 						</button>
 					</div>
 				</div>
@@ -475,7 +513,10 @@ export const RapidPriceInput = ({
 									Observed shelf price
 								</label>
 								<span className="text-[10px] text-slate-400">
-									Press <kbd className="font-mono font-bold text-slate-600 bg-slate-100 px-1 py-0.5 rounded">Enter ↵</kbd>
+									Press{" "}
+									<kbd className="font-mono font-bold text-slate-600 bg-slate-100 px-1 py-0.5 rounded">
+										Enter ↵
+									</kbd>
 								</span>
 							</div>
 
@@ -503,10 +544,14 @@ export const RapidPriceInput = ({
 									ETB
 								</span>
 							</div>
-							{error && <p className="text-xs font-semibold text-[#A41821] mt-1">{error}</p>}
+							{error && (
+								<p className="text-xs font-semibold text-[#A41821] mt-1">
+									{error}
+								</p>
+							)}
 						</div>
 
-						{/* Proof Gallery Attachment Box (Multiple photos supported) */}
+						{/* Proof Gallery Attachment Box */}
 						<div className="mt-2.5 rounded-xl border border-slate-200 bg-slate-50/70 p-2.5 space-y-2">
 							<div className="flex items-center justify-between">
 								<button
@@ -542,8 +587,13 @@ export const RapidPriceInput = ({
 											/>
 											<button
 												type="button"
-												onClick={() => handleRemovePhoto(p.isServer ? idx : idx - serverPhotos.length, p.isServer)}
-												className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-red-600 text-white text-[10px] font-bold flex items-center justify-center hover:bg-red-700 shadow-xs"
+												onClick={() =>
+													handleRemovePhoto(
+														p.isServer ? idx : idx - serverPhotos.length,
+														p.isServer,
+													)
+												}
+												className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-red-600 text-white text-[10px] font-bold flex items-center justify-center hover:bg-red-700 shadow-xs cursor-pointer"
 												title="Remove photo"
 											>
 												✕
@@ -559,7 +609,11 @@ export const RapidPriceInput = ({
 							disabled={isSaving || !price || isUploadingPhotos}
 							className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl bg-[#A41821] hover:bg-[#7F1219] py-3.5 text-sm font-bold text-white shadow-xs transition active:scale-[0.99] disabled:opacity-40 cursor-pointer"
 						>
-							<span>{isUploadingPhotos ? "Uploading Photos..." : "Save price observation"}</span>
+							<span>
+								{isUploadingPhotos
+									? "Uploading Photos..."
+									: "Save price observation"}
+							</span>
 							<kbd className="rounded-md bg-white/20 px-2 py-0.5 text-xs font-mono font-bold">
 								↵ Enter
 							</kbd>

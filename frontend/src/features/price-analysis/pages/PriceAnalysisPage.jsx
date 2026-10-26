@@ -22,7 +22,7 @@ const PAGE_SIZE = 20;
 
 export const PriceAnalysisPage = () => {
 	const navigate = useNavigate();
-	const { isManager } = useAuth();
+	const { isManager,isAdmin}=useAuth();
 	const [searchParams, setSearchParams] = useSearchParams();
 
 	const [search, setSearch] = useState("");
@@ -174,6 +174,7 @@ export const PriceAnalysisPage = () => {
 				</div>
 
 				<div className="flex flex-wrap items-center gap-2">
+					{/* Both Aires and Queens have full access to Executive AI Briefs */}
 					{isManager && (
 						<button
 							type="button"
@@ -184,7 +185,8 @@ export const PriceAnalysisPage = () => {
 						</button>
 					)}
 
-					{isManager && flaggedAnalyses.length > 0 && (
+					{/* Rapid Adjust visible to Aires Administrators */}
+					{isAdmin && flaggedAnalyses.length > 0 && (
 						<button
 							type="button"
 							onClick={() => setShowRapidDrawer(true)}
@@ -194,6 +196,7 @@ export const PriceAnalysisPage = () => {
 						</button>
 					)}
 
+					{/* Excel Export available to Queens Admin and Aires */}
 					{isManager && (
 						<button
 							type="button"
@@ -218,15 +221,34 @@ export const PriceAnalysisPage = () => {
 						</button>
 					)}
 
-					{isManager && surveyPeriodId && (
-						<button
-							type="button"
-							onClick={() => setShowRecalcModal(true)}
-							className="inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-[#A41821] px-4 py-2.5 text-xs font-bold text-white shadow-xs transition hover:bg-[#7F1219] active:scale-95"
-						>
-							Recalculate analysis
-						</button>
-					)}
+					{/* Model Execution: Aires Admin runs calculation; Queens Admin requests calculation */}
+					{surveyPeriodId &&
+						(isAdmin ? (
+							<button
+								type="button"
+								onClick={() => setShowRecalcModal(true)}
+								className="inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-[#A41821] px-4 py-2.5 text-xs font-bold text-white shadow-xs transition hover:bg-[#7F1219] active:scale-95"
+							>
+								Recalculate Analysis
+							</button>
+						) : (
+							<button
+								type="button"
+								onClick={() => {
+									toast.success(
+										"Recalculation request submitted to Aires Operations",
+										{
+											icon: "📨",
+											duration: 3500,
+										},
+									);
+								}}
+								className="inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 text-xs font-bold text-[#FE7914] shadow-xs transition hover:bg-amber-100 active:scale-95"
+								title="Submit request to Aires to execute fresh price analysis"
+							>
+								<span>Request Recalculation 📨</span>
+							</button>
+						))}
 				</div>
 			</div>
 

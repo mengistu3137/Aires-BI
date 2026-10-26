@@ -1,5 +1,22 @@
 import React, { useState } from "react";
 import { formatProductName } from "@/utils/formatters.js";
+import { apiClient } from "@/services/client.js";
+
+const resolveAssetUrl = (url) => {
+	if (!url) return "";
+	if (url.startsWith("http://") || url.startsWith("https://")) return url;
+
+	const apiBase =
+		apiClient.defaults.baseURL ||
+		import.meta.env.VITE_API_URL ||
+		import.meta.env.VITE_API_BASE_URL ||
+		"https://biapi.airescommunications.com/api/v1";
+
+	const hostOrigin = apiBase.replace(/\/api(\/v1)?\/?$/, "");
+	const normalizedPath = url.startsWith("/") ? url : `/${url}`;
+
+	return `${hostOrigin}${normalizedPath}`;
+};
 
 export const ObservationAuditDrawer = ({
 	isOpen,
@@ -11,6 +28,7 @@ export const ObservationAuditDrawer = ({
 	const [editingProductId, setEditingProductId] = useState(null);
 	const [editedPrice, setEditedPrice] = useState("");
 	const [editedSubstitute, setEditedSubstitute] = useState("");
+	const [previewPhotoUrl, setPreviewPhotoUrl] = useState(null);
 
 	if (!isOpen) return null;
 
@@ -38,7 +56,6 @@ export const ObservationAuditDrawer = ({
 				});
 			}
 		} else {
-			// OUT_OF_STOCK or NOT_FOUND with or without substitute
 			onEditPrice({
 				productId,
 				price: hasValidPrice ? num : null,
@@ -84,6 +101,7 @@ export const ObservationAuditDrawer = ({
 							);
 							const isEditing = editingProductId === productId;
 							const hasSubstitute = Boolean(obs.substituteProduct);
+							const hasPhoto = Boolean(obs.evidencePhotoUrl);
 
 							return (
 								<div
@@ -121,7 +139,7 @@ export const ObservationAuditDrawer = ({
 												<button
 													type="button"
 													onClick={() => setEditingProductId(null)}
-													className="text-[10px] text-slate-400 hover:text-slate-600"
+													className="text-[10px] text-slate-400 hover:text-slate-600 cursor-pointer"
 												>
 													Cancel
 												</button>
@@ -172,10 +190,10 @@ export const ObservationAuditDrawer = ({
 											</div>
 										</div>
 									) : (
-										<div className="flex items-center justify-between bg-slate-50/60 rounded-lg p-2 border border-slate-100">
-											<div className="flex items-center gap-2">
+										<div className="flex items-center justify-between bg-slate-50/60 rounded-lg p-2 border border-slate-100 gap-2">
+											<div className="flex items-center gap-2 min-w-0 flex-1">
 												<span
-													className={`rounded-md px-2 py-0.5 text-[10px] font-bold border ${
+													className={`rounded-md px-2 py-0.5 text-[10px] font-bold border flex-none ${
 														obs.availability === "AVAILABLE"
 															? "bg-emerald-50 text-[#017C4D] border-emerald-200"
 															: "bg-orange-50 text-[#FE7914] border-orange-200"
@@ -185,13 +203,26 @@ export const ObservationAuditDrawer = ({
 												</span>
 
 												{hasSubstitute && (
-													<span className="text-[11px] font-medium text-slate-700 truncate max-w-[180px] sm:max-w-[240px]">
+													<span className="text-[11px] font-medium text-slate-700 truncate">
 														↳ {obs.substituteProduct}
 													</span>
 												)}
 											</div>
 
-											<div>
+											<div className="flex items-center gap-2 flex-none">
+												{hasPhoto && (
+													<button
+														type="button"
+														onClick={() =>
+															setPreviewPhotoUrl(obs.evidencePhotoUrl)
+														}
+														className="inline-flex items-center gap-1 rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] font-bold text-blue-700 hover:bg-blue-100 cursor-pointer"
+													>
+														<span>📷</span>
+														<span>Proof</span>
+													</button>
+												)}
+
 												{obs.price !== null && obs.price !== undefined ? (
 													<span className="font-mono font-black text-xs text-slate-900">
 														{Number(obs.price).toFixed(2)} ETB
@@ -221,6 +252,34 @@ export const ObservationAuditDrawer = ({
 					</button>
 				</div>
 			</div>
+
+			{/* Mini Lightbox Preview */}
+			{previewPhotoUrl && (
+				<div
+					className="fixed inset-0 z-60 flex items-center justify-center bg-slate-900/80 p-4 cursor-pointer"
+					onClick={() => setPreviewPhotoUrl(null)}
+				>
+					<div
+						className="relative max-h-[85vh] max-w-lg rounded-2xl bg-black p-2"
+						onClick={(e) => e.stopPropagation()}
+					>
+						<img
+							src={resolveAssetUrl(previewPhotoUrl)}
+							alt="Observation proof"
+							className="max-h-[75vh] w-auto object-contain mx-auto rounded-lg"
+						/>
+						<div className="flex justify-end pt-2">
+							<button
+								type="button"
+								onClick={() => setPreviewPhotoUrl(null)}
+								className="rounded-lg bg-white/20 px-3 py-1 text-xs font-bold text-white hover:bg-white/30"
+							>
+								Close
+							</button>
+						</div>
+					</div>
+				</div>
+			)}
 		</div>
 	);
 };

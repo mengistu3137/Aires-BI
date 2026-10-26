@@ -304,8 +304,6 @@ export const Survey = () => {
 		setSelectedProduct(assignedProducts[prevIdx]);
 	};
 
-	// `advance: false` is used when editing from the audit drawer, so an edit
-	// does not pop the price modal open on the next product.
 	const handleSaveObservation = async (payload, { advance = true } = {}) => {
 		if (!activeAudit?.id) {
 			toast.error("Audit session is not ready yet. Please wait...");
@@ -330,6 +328,7 @@ export const Survey = () => {
 					availability: payload.availability,
 					price: finalPrice,
 					substituteProduct: payload.substituteProduct?.trim() || null,
+					evidencePhotoUrl: payload.evidencePhotoUrl || null, // ← Propagate uploaded proof URL
 					capturedAt: new Date().toISOString(),
 				},
 			});
@@ -375,7 +374,6 @@ export const Survey = () => {
 			setIsSaving(false);
 		}
 	};
-
 	const visibleProducts = useMemo(() => {
 		if (filterMode === "PENDING") {
 			return assignedProducts.filter(

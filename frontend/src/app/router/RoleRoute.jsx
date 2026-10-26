@@ -1,18 +1,20 @@
-import React from 'react'
-import { Navigate, Outlet } from 'react-router-dom'
-import { useAuthStore } from '@/stores/auth/auth.store.js'
+import React from "react";
+import { Navigate, Outlet } from "react-router-dom";
+import { useAuthStore } from "@/stores/auth/auth.store.js";
 
 export const RoleRoute = ({ allowedRoles = [] }) => {
-  const { user } = useAuthStore()
+	const { user } = useAuthStore();
 
-  if (!user) {
-    return <Navigate to="/login" replace />
-  }
+	if (!user) {
+		return <Navigate to="/login" replace />;
+	}
 
-  const hasRole = allowedRoles.includes(user.role)
-  if (!hasRole) {
-    return <Navigate to="/unauthorized" replace />
-  }
+	// Aires Super Admin has universal access across all routes
+	const hasRole =
+		user.role === "SUPER_ADMIN" || allowedRoles.includes(user.role);
+	if (!hasRole) {
+		return <Navigate to="/unauthorized" replace />;
+	}
 
-  return <Outlet />
-}
+	return <Outlet />;
+};
