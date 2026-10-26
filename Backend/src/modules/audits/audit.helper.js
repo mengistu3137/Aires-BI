@@ -67,24 +67,27 @@ export const canTransitionAuditStatus = (currentStatus, targetStatus) => {
   if (!allowed) return false;
   return allowed.includes(targetStatus);
 };
-
-/**
- * Formats Decimal and relations into a uniform JSON response DTO.
- * Ensures passwordHash is never returned and Decimals are cleanly serialized.
- */
 export const formatAuditResponse = (audit) => {
   if (!audit) return null;
 
   const evidencePhotos = (audit.observations || [])
     .filter((o) => o.evidencePhotoUrl)
-    .map((o) => ({
-      id: o.id,
-      url: o.evidencePhotoUrl,
-      productName: o.product?.name || "Product",
-      availability: o.availability,
-      price: o.price ? Number(o.price) : null,
-      capturedAt: o.capturedAt,
-    }));
+    .flatMap((o) => {
+      const urls = String(o.evidencePhotoUrl)
+        .split(",")
+        .map((u) => u.trim())
+        .filter(Boolean);
+
+      return urls.map((url, idx) => ({
+        id: `${o.id}_${idx}`,
+        observationId: o.id,
+        url,
+        productName: o.product?.name || "Product",
+        availability: o.availability,
+        price: o.price ? Number(o.price) : null,
+        capturedAt: o.capturedAt,
+      }));
+    });
 
   return {
     id: audit.id,

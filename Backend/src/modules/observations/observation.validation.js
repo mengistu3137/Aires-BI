@@ -52,8 +52,7 @@ export const createObservationSchema = z
       .or(z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z?$/)),
     evidencePhotoUrl: z
       .string()
-      .url("evidencePhotoUrl must be a valid URL")
-      .max(1000)
+      .max(2000, "evidencePhotoUrl cannot exceed 2000 characters")
       .nullable()
       .optional(),
     notes: z
@@ -82,8 +81,7 @@ export const updateObservationSchema = z
     packageSize: z.string().trim().max(50).nullable().optional(),
     evidencePhotoUrl: z
       .string()
-      .url("evidencePhotoUrl must be a valid URL")
-      .max(1000)
+      .max(2000, "evidencePhotoUrl cannot exceed 2000 characters")
       .nullable()
       .optional(),
     notes: z.string().trim().max(1000).nullable().optional(),
@@ -91,8 +89,6 @@ export const updateObservationSchema = z
   .strict(
     "Modifying protected system fields (auditId, productId, auditorId, syncStatus) is forbidden",
   );
-
-
 
 export const rejectObservationSchema = z.object({
   reviewNote: z
@@ -116,7 +112,7 @@ export const requestReviewObservationSchema = z.object({
 
 export const listObservationsQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
-  limit: z.coerce.number().int().positive().max(500).default(20), // ← Raised from 100 to 500
+  limit: z.coerce.number().int().positive().max(500).default(20),
   productId: z.string().trim().optional(),
   availability: z.enum(["AVAILABLE", "OUT_OF_STOCK", "NOT_FOUND"]).optional(),
   reviewStatus: z

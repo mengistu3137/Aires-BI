@@ -895,141 +895,161 @@ const CollectionView = ({ audit, observations, auditId }) => {
 		setSelectedProduct(null);
 		setTimeout(() => searchRef.current?.focusInput(), 60);
 	}, []);
+const performSave = useCallback(
+	async ({
+		productId,
+		price,
+		availability,
+		substituteProduct,
+		evidencePhotoUrl,
+	}) => {
+		const existing = observationsByProductRef.current[productId];
+		const currentProducts = productsRef.current;
+		const online = navigator.onLine;
 
-	const performSave = useCallback(
-		async ({ productId, price, availability, substituteProduct }) => {
-			const existing = observationsByProductRef.current[productId];
-			const currentProducts = productsRef.current;
-			const online = navigator.onLine;
+		const productName = formatProductName(
+			currentProducts.find((p) => p.id === productId)?.name || "Item",
+		);
 
-			const productName = formatProductName(
-				currentProducts.find((p) => p.id === productId)?.name || "Item",
-			);
+		const isExistingServerRow = existing && existing.id && !existing.__local;
+		const hasSub = Boolean(substituteProduct?.trim());
+		const finalPrice = availability === "AVAILABLE" || hasSub ? price : null;
 
-			const isExistingServerRow = existing && existing.id && !existing.__local;
-			const hasSub = Boolean(substituteProduct?.trim());
-			const finalPrice =
-				availability === "AVAILABLE" || hasSub ? price : null;
+		// CRITICAL FIX: If evidencePhotoUrl is explicitly passed (even as null when removed),
+		// do NOT fall back to existing.evidencePhotoUrl.
+		const finalEvidencePhotoUrl =
+			evidencePhotoUrl !== undefined
+				? evidencePhotoUrl
+				: (existing?.evidencePhotoUrl ?? null);
 
-			if (isExistingServerRow && online) {
-				const optimistic = {
-					...existing,
-					availability,
-					price: finalPrice,
-					substituteProduct: substituteProduct?.trim() || null,
-					capturedAt: new Date().toISOString(),
-					sync: { ...(existing.sync || {}), status: "SYNCED" },
-				};
-				upsertObservationInCache(optimistic);
-
-				try {
-					const response = await updateObservation.mutateAsync({
-						observationId: existing.id,
-						payload: {
-							price: finalPrice,
-							availability,
-							substituteProduct: substituteProduct?.trim() || null,
-						},
-					});
-					if (response?.data) {
-						upsertObservationInCache(response.data);
-					}
-					toast.success(
-						availability === "AVAILABLE"
-							? `${productName}: ${Number(price).toFixed(2)} ETB`
-							: hasSub
-							? `${productName} (${availability.replace("_", " ")}): Substitute logged`
-							: `${productName}: ${availability.replace("_", " ")}`,
-						{ id: "observation-toast", duration: 1500 },
-					);
-					invalidateDependentQueries();
-					return;
-				} catch (err) {
-					upsertObservationInCache(existing);
-					toast.error(
-						err?.response?.data?.message || "Unable to update observation",
-					);
-					return;
-				}
-			}
-
-			const clientObservationId = buildClientObservationId(auditId, productId);
-			const isUpdate = Boolean(
-				existing && (existing.id || existing.serverObservationId),
-			);
-
-			const payload = {
-				clientObservationId,
-				auditId,
-				productId,
+		if (isExistingServerRow && online) {
+			const optimistic = {
+				...existing,
 				availability,
 				price: finalPrice,
 				substituteProduct: substituteProduct?.trim() || null,
-				observedUnit: existing?.observedUnit || null,
-				packageSize: existing?.packageSize || null,
+				evidencePhotoUrl: finalEvidencePhotoUrl,
 				capturedAt: new Date().toISOString(),
-				evidencePhotoUrl: existing?.evidencePhotoUrl || null,
-				notes: existing?.notes || null,
-				operation: isUpdate ? "UPDATE" : "CREATE",
-				serverObservationId: isUpdate
-					? existing.serverObservationId || existing.id
-					: null,
+				sync: { ...(existing.sync || {}), status: "SYNCED" },
 			};
-
-			const optimisticObservation = {
-				id: payload.serverObservationId || clientObservationId,
-				clientObservationId,
-				auditId,
-				productId,
-				availability: payload.availability,
-				price: payload.price,
-				substituteProduct: payload.substituteProduct,
-				capturedAt: payload.capturedAt,
-				sync: { status: "PENDING", attempts: 0 },
-				review: { status: existing?.review?.status || "PENDING" },
-				product: currentProducts.find((p) => p.id === productId) || undefined,
-				__local: true,
-			};
-			upsertObservationInCache(optimisticObservation);
+			upsertObservationInCache(optimistic);
 
 			try {
-				const queued = await enqueueObservation(payload);
-
-				if (!online) {
-					toast.success(`${productName} saved offline — will sync when online`, {
-						id: "observation-toast",
-						duration: 1800,
-					});
-					return;
+				const response = await updateObservation.mutateAsync({
+					observationId: existing.id,
+					payload: {
+						price: finalPrice,
+						availability,
+						substituteProduct: substituteProduct?.trim() || null,
+						evidencePhotoUrl: finalEvidencePhotoUrl,
+					},
+				});
+				if (response?.data) {
+					upsertObservationInCache(response.data);
 				}
-
-				const result = await syncObservation(queued);
-				if (result.success && result.data) {
-					upsertObservationInCache(result.data);
-					invalidateDependentQueries();
-					toast.success(
-						availability === "AVAILABLE"
-							? `${productName}: ${Number(price).toFixed(2)} ETB`
-							: hasSub
+				toast.success(
+					availability === "AVAILABLE"
+						? `${productName}: ${Number(price).toFixed(2)} ETB`
+						: hasSub
 							? `${productName} (${availability.replace("_", " ")}): Substitute logged`
 							: `${productName}: ${availability.replace("_", " ")}`,
-						{ id: "observation-toast", duration: 1500 },
-					);
-				}
+					{ id: "observation-toast", duration: 1500 },
+				);
+				invalidateDependentQueries();
+				return;
 			} catch (err) {
-				toast.error("Unable to save observation locally");
+				upsertObservationInCache(existing);
+				toast.error(
+					err?.response?.data?.message || "Unable to update observation",
+				);
+				return;
 			}
-		},
-		[
+		}
+
+		const clientObservationId = buildClientObservationId(auditId, productId);
+		const isUpdate = Boolean(
+			existing && (existing.id || existing.serverObservationId),
+		);
+
+		const payload = {
+			clientObservationId,
 			auditId,
-			updateObservation,
-			upsertObservationInCache,
-			invalidateDependentQueries,
-		],
-	);
+			productId,
+			availability,
+			price: finalPrice,
+			substituteProduct: substituteProduct?.trim() || null,
+			observedUnit: existing?.observedUnit || null,
+			packageSize: existing?.packageSize || null,
+			capturedAt: new Date().toISOString(),
+			evidencePhotoUrl: finalEvidencePhotoUrl,
+			notes: existing?.notes || null,
+			operation: isUpdate ? "UPDATE" : "CREATE",
+			serverObservationId: isUpdate
+				? existing.serverObservationId || existing.id
+				: null,
+		};
+
+		const optimisticObservation = {
+			id: payload.serverObservationId || clientObservationId,
+			clientObservationId,
+			auditId,
+			productId,
+			availability: payload.availability,
+			price: payload.price,
+			substituteProduct: payload.substituteProduct,
+			evidencePhotoUrl: payload.evidencePhotoUrl,
+			capturedAt: payload.capturedAt,
+			sync: { status: "PENDING", attempts: 0 },
+			review: { status: existing?.review?.status || "PENDING" },
+			product: currentProducts.find((p) => p.id === productId) || undefined,
+			__local: true,
+		};
+		upsertObservationInCache(optimisticObservation);
+
+		try {
+			const queued = await enqueueObservation(payload);
+
+			if (!online) {
+				toast.success(`${productName} saved offline — will sync when online`, {
+					id: "observation-toast",
+					duration: 1800,
+				});
+				return;
+			}
+
+			const result = await syncObservation(queued);
+			if (result.success && result.data) {
+				upsertObservationInCache(result.data);
+				invalidateDependentQueries();
+				toast.success(
+					availability === "AVAILABLE"
+						? `${productName}: ${Number(price).toFixed(2)} ETB`
+						: hasSub
+							? `${productName} (${availability.replace("_", " ")}): Substitute logged`
+							: `${productName}: ${availability.replace("_", " ")}`,
+					{ id: "observation-toast", duration: 1500 },
+				);
+			}
+		} catch {
+			toast.error("Unable to save observation locally");
+		}
+	},
+	[
+		auditId,
+		updateObservation,
+		upsertObservationInCache,
+		invalidateDependentQueries,
+	],
+);
 
 	const persistObservation = useCallback(
-		({ productId, price, availability, substituteProduct }) => {
+		({
+			productId,
+			price,
+			availability,
+			substituteProduct,
+			evidencePhotoUrl,
+		}) => {
 			if (inFlightProductsRef.current.has(productId)) {
 				toast("Already saving…", { id: "obs-in-flight", duration: 800 });
 				return Promise.resolve();
@@ -1040,7 +1060,13 @@ const CollectionView = ({ audit, observations, auditId }) => {
 			const run = saveChainRef.current
 				.catch(() => {})
 				.then(() =>
-					performSave({ productId, price, availability, substituteProduct }),
+					performSave({
+						productId,
+						price,
+						availability,
+						substituteProduct,
+						evidencePhotoUrl,
+					}),
 				)
 				.catch(() => {});
 
@@ -1060,8 +1086,13 @@ const CollectionView = ({ audit, observations, auditId }) => {
 	);
 
 	const handleSavePrice = useCallback(
-		async ({ productId, price, availability }) => {
-			await persistObservation({ productId, price, availability });
+		async ({ productId, price, availability, evidencePhotoUrl }) => {
+			await persistObservation({
+				productId,
+				price,
+				availability,
+				evidencePhotoUrl,
+			});
 
 			if (autoAdvance) {
 				const next = findNextProduct(productId, true);
@@ -1079,42 +1110,58 @@ const CollectionView = ({ audit, observations, auditId }) => {
 		},
 		[autoAdvance, findNextProduct, handleSelectProduct, persistObservation],
 	);
-
-	// ────────────────────────────────────────────────────────────
-	// INTERCEPT: When surveyor clicks OUT OF STOCK or NOT CARRIED,
-	// OPEN THE SUBSTITUTE MODAL INSTEAD OF DIRECTLY SAVING!
-	// ────────────────────────────────────────────────────────────
-	const handleTriggerUnavailableModal = useCallback(
-		({ productId, availability, price, substituteProduct }) => {
-			// If already has substituteProduct passed through, save directly
-			if (substituteProduct) {
-				persistObservation({
-					productId,
-					price,
-					availability,
-					substituteProduct,
-				});
-				if (autoAdvance) {
-					const next = findNextProduct(productId, true);
-					if (next) handleSelectProduct(next);
-					else setSelectedProduct(null);
-				}
-				return;
-			}
-
-			// Otherwise: POP UP THE SUBSTITUTE DIALOG!
-			const targetProd =
-				products.find((p) => p.id === productId) || selectedProduct;
-			setSubstituteDescription("");
-			setSubstituteShelfPrice("");
-			setSubstituteModalError("");
-			setSubstituteModalState({
-				product: targetProd,
-				availability, // 'OUT_OF_STOCK' or 'NOT_FOUND'
+const handleTriggerUnavailableModal = useCallback(
+	({
+		productId,
+		availability,
+		price,
+		substituteProduct,
+		isExplicitWithoutSubstitute,
+		evidencePhotoUrl,
+	}) => {
+		// If already confirmed with substitute OR explicitly confirmed without substitute in RapidPriceInput, SAVE DIRECTLY!
+		if (substituteProduct || isExplicitWithoutSubstitute) {
+			persistObservation({
+				productId,
+				price: substituteProduct ? price : null,
+				availability,
+				substituteProduct: substituteProduct || null,
+				evidencePhotoUrl,
 			});
-		},
-		[products, selectedProduct, autoAdvance, findNextProduct, handleSelectProduct, persistObservation],
-	);
+
+			if (autoAdvance) {
+				const next = findNextProduct(productId, true);
+				if (next) handleSelectProduct(next);
+				else setSelectedProduct(null);
+			} else {
+				setSelectedProduct(null);
+			}
+			return;
+		}
+
+		// Only open popup modal if triggered from an external action without an inline drawer
+		const targetProd =
+			products.find((p) => p.id === productId) || selectedProduct;
+		setSubstituteDescription("");
+		setSubstituteShelfPrice("");
+		setSubstituteModalError("");
+		setSubstituteModalState({
+			product: targetProd,
+			availability,
+			evidencePhotoUrl,
+		});
+	},
+	[
+		products,
+		selectedProduct,
+		autoAdvance,
+		findNextProduct,
+		handleSelectProduct,
+		persistObservation,
+	],
+);
+
+
 
 	// Confirm substitute from Modal
 	const handleConfirmSubstituteFromModal = async () => {

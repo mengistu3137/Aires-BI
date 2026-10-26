@@ -25,6 +25,7 @@ import assignmentRoutes from "./modules/assignment/assignment.routes.js";
 import dashboardRoutes from "./modules/dashboard/dashboard.routes.js";
 import reportRoutes from "./modules/report/report.routes.js";
 import aiRoutes from "./modules/ai/ai.routes.js";
+import { fileURLToPath } from "url";
 const app = express();
 
 // Security and utility middleware
@@ -42,12 +43,31 @@ if (process.env.NODE_ENV === "development") {
   app.use(morgan("dev"));
 }
 
-// Serve public uploads if photos/signatures are captured
+
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Authoritative uploads path: serves files written to src/uploads by upload.js
+const uploadsDirectory = path.join(__dirname, "uploads");
+
 app.use(
   "/uploads",
-  express.static(path.join(process.cwd(), "uploads"), {
+  express.static(uploadsDirectory, {
     setHeaders: (res) => {
       res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+      res.setHeader("Access-Control-Allow-Origin", "*");
+    },
+  }),
+);
+
+// Fallback for deployments started from project root
+app.use(
+  "/uploads",
+  express.static(path.join(process.cwd(), "src", "uploads"), {
+    setHeaders: (res) => {
+      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+      res.setHeader("Access-Control-Allow-Origin", "*");
     },
   }),
 );
@@ -63,20 +83,7 @@ app.get("/health", (req, res) => {
   });
 });
 
-// ==========================================
-// REGISTER SYSTEM ROUTES
-// ==========================================
 
-// Serve public uploads from src/uploads where upload.js writes
-const uploadsPath = path.join(process.cwd(), "src", "uploads");
-app.use(
-  "/uploads",
-  express.static(uploadsPath, {
-    setHeaders: (res) => {
-      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-    },
-  }),
-);
 app.use("/api/v1/reports", reportRoutes);
 app.use("/api/v1/ai", aiRoutes);
 

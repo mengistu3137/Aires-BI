@@ -3,7 +3,7 @@ import { persist } from "zustand/middleware";
 
 export const useAuthStore = create(
   persist(
-    (set) => ({
+    (set, get) => ({
       user: null,
       accessToken: null,
       isAuthenticated: false,
@@ -11,6 +11,10 @@ export const useAuthStore = create(
 
       // Active auditor context for field assignments
       activeAssignmentId: null,
+
+      // Impersonation state
+      impersonatorSession: null,
+      isImpersonating: false,
 
       setAuth: ({ user, token }) => {
         if (!user || !token) {
@@ -28,20 +32,41 @@ export const useAuthStore = create(
         });
       },
 
-      setUser: (user) =>
+      // Super Admin switches into target user session
+      impersonate: ({ targetUser, token, impersonator }) => {
+        const state = get();
         set({
-          user,
-        }),
-
-      setAccessToken: (token) =>
-        set({
+          impersonatorSession: state.impersonatorSession || {
+            user: state.user,
+            token: state.accessToken,
+            impersonator,
+          },
+          user: targetUser,
           accessToken: token,
-        }),
+          isAuthenticated: true,
+          isImpersonating: true,
+          activeAssignmentId: null,
+        });
+      },
 
-      setActiveAssignmentId: (activeAssignmentId) =>
+      // Restores the original Super Admin session
+      stopImpersonation: () => {
+        const state = get();
+        if (!state.impersonatorSession) return;
+
         set({
-          activeAssignmentId,
-        }),
+          user: state.impersonatorSession.user,
+          accessToken: state.impersonatorSession.token,
+          impersonatorSession: null,
+          isImpersonating: false,
+          isAuthenticated: true,
+          activeAssignmentId: null,
+        });
+      },
+
+      setUser: (user) => set({ user }),
+      setAccessToken: (accessToken) => set({ accessToken }),
+      setActiveAssignmentId: (activeAssignmentId) => set({ activeAssignmentId }),
 
       updateUser: (updates) =>
         set((state) => ({
@@ -54,12 +79,11 @@ export const useAuthStore = create(
           accessToken: null,
           isAuthenticated: false,
           activeAssignmentId: null,
+          impersonatorSession: null,
+          isImpersonating: false,
         }),
 
-      setInitialized: (isInitialized) =>
-        set({
-          isInitialized,
-        }),
+      setInitialized: (isInitialized) => set({ isInitialized }),
     }),
     {
       name: "aires-bi-auth",
@@ -68,6 +92,8 @@ export const useAuthStore = create(
         accessToken: state.accessToken,
         isAuthenticated: state.isAuthenticated,
         activeAssignmentId: state.activeAssignmentId,
+        impersonatorSession: state.impersonatorSession,
+        isImpersonating: state.isImpersonating,
       }),
       onRehydrateStorage: () => (state) => {
         state?.setInitialized(true);

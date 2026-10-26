@@ -22,10 +22,8 @@ export const authenticate = async (req, res, next) => {
       );
     }
 
-    // Verify token
     const decoded = verifyToken(token);
 
-    // Query active user without legacy flat array fields
     const user = await prisma.user.findUnique({
       where: { id: decoded.id },
       select: {
@@ -50,7 +48,6 @@ export const authenticate = async (req, res, next) => {
       );
     }
 
-    // Attach user to request
     req.user = user;
     next();
   } catch (error) {
@@ -59,11 +56,16 @@ export const authenticate = async (req, res, next) => {
 };
 
 /**
- * Restrict routes to specific user roles
- * Usage: restrictTo("ADMIN", "MANAGER")
+ * Restrict routes to specific user roles.
+ * Aires SUPER_ADMIN automatically inherits universal authorization across all endpoints.
  */
 export const restrictTo = (...roles) => {
   return (req, res, next) => {
+    // Universal access bypass for Aires Super Admin
+    if (req.user?.role === "SUPER_ADMIN") {
+      return next();
+    }
+
     if (!roles.includes(req.user.role)) {
       return next(
         new ApiError(

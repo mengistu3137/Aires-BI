@@ -236,12 +236,13 @@ export const startAudit = async ({
   let gpsValid = null;
 
   const hasCoords =
+    !gpsBypassed &&
     latitude !== null &&
     latitude !== undefined &&
     longitude !== null &&
     longitude !== undefined;
 
-  if (!gpsBypassed && hasCoords && audit.store.latitude && audit.store.longitude) {
+  if (hasCoords && audit.store.latitude && audit.store.longitude) {
     distanceFromStoreMeters = calculateDistanceMeters(
       Number(latitude),
       Number(longitude),
@@ -263,10 +264,14 @@ export const startAudit = async ({
         startedAt: new Date(),
         startLatitude: hasCoords ? Number(latitude) : null,
         startLongitude: hasCoords ? Number(longitude) : null,
-        startAccuracyMeters: accuracyMeters ? Number(accuracyMeters) : null,
-        distanceFromStoreMeters,
-        gpsValid,
+        startAccuracyMeters: hasCoords && accuracyMeters ? Number(accuracyMeters) : null,
+        distanceFromStoreMeters: hasCoords ? distanceFromStoreMeters : null,
         gpsValid: gpsBypassed ? false : gpsValid,
+        notes: gpsBypassed
+          ? audit.notes
+            ? `${audit.notes}\n[Verification: Verified via photo proof (GPS bypassed)]`
+            : "[Verification: Verified via photo proof (GPS bypassed)]"
+          : audit.notes,
       },
       include: AUDIT_INCLUDE_RELATIONS,
     }),
@@ -280,6 +285,107 @@ export const startAudit = async ({
   ]);
 
   return formatAuditResponse(updatedAudit);
+};
+
+export const completeAudit = async ({
+  auditId,
+  user,
+  latitude,
+  longitude,
+  accuracyMeters,
+  gpsBypassed = false,
+  notes,
+}) => {
+  const audit = await prisma.audit.findUnique({
+    where: { id: auditId },
+    include: {
+      store: true,
+      assignment: true,
+      observations: { select: { evidencePhotoUrl: true } },
+    },
+  });
+
+  if (!audit) {
+    throw new ApiError(404, "Audit record not found");
+  }
+
+  if (user.role === "FIELD_AUDITOR" && audit.auditorId !== user.id) {
+    throw new ApiError(
+      403,
+      "Access forbidden: You cannot complete another auditor's visit",
+    );
+  }
+
+  if (!canTransitionAuditStatus(audit.status, "COMPLETED")) {
+    throw new ApiError(
+      409,
+      `Cannot complete audit from status [${audit.status}]. Must be IN_PROGRESS.`,
+    );
+  }
+
+  // Completeness check for required assignment items
+  const completeness = await checkAssignmentItemsCompleteness(
+    audit.id,
+    audit.assignmentId,
+  );
+
+  const ENFORCE_OBSERVATIONS = process.env.AUDIT_ENFORCE_OBSERVATIONS === "true";
+  if (ENFORCE_OBSERVATIONS && !completeness.isComplete) {
+    throw new ApiError(
+      400,
+      "Cannot complete audit: missing required product observations",
+      { missingProductIds: completeness.missingProductIds },
+    );
+  }
+
+  const hasCoords =
+    !gpsBypassed &&
+    latitude !== undefined &&
+    latitude !== null &&
+    longitude !== undefined &&
+    longitude !== null;
+
+  const parsedLat = hasCoords ? Number(latitude) : null;
+  const parsedLon = hasCoords ? Number(longitude) : null;
+  const parsedAccuracy = hasCoords && accuracyMeters !== undefined && accuracyMeters !== null
+    ? Number(accuracyMeters)
+    : null;
+
+  const verificationNote = gpsBypassed
+    ? "[Completed with Photo Proof Verification]"
+    : null;
+
+  let mergedNotes = audit.notes;
+  if (notes?.trim()) {
+    mergedNotes = mergedNotes ? `${mergedNotes}\n[Completion Note]: ${notes.trim()}` : notes.trim();
+  }
+  if (verificationNote) {
+    mergedNotes = mergedNotes ? `${mergedNotes}\n${verificationNote}` : verificationNote;
+  }
+
+  const [completedAudit] = await prisma.$transaction([
+    prisma.audit.update({
+      where: { id: auditId },
+      data: {
+        status: "COMPLETED",
+        completedAt: new Date(),
+        endLatitude: parsedLat,
+        endLongitude: parsedLon,
+        endAccuracyMeters: parsedAccuracy,
+        notes: mergedNotes,
+      },
+      include: AUDIT_INCLUDE_RELATIONS,
+    }),
+    prisma.surveyAssignment.update({
+      where: { id: audit.assignmentId },
+      data: {
+        status: "COMPLETED",
+        completedAt: new Date(),
+      },
+    }),
+  ]);
+
+  return formatAuditResponse(completedAudit);
 };
 /**
  * Update permitted mutable fields (only notes) while IN_PROGRESS.
@@ -318,101 +424,7 @@ export const updateAudit = async ({ auditId, user, notes }) => {
   return formatAuditResponse(updatedAudit);
 };
 
-/**
- * Complete an Audit visit with end GPS data and integrity verification.
- */
-export const completeAudit = async ({
-  auditId,
-  user,
-  latitude,
-  longitude,
-  accuracyMeters,
-  notes,
-}) => {
-  const audit = await prisma.audit.findUnique({
-    where: { id: auditId },
-    include: {
-      store: true,
-      assignment: true,
-    },
-  });
 
-  if (!audit) {
-    throw new ApiError(404, "Audit record not found");
-  }
-
-  if (user.role === "FIELD_AUDITOR" && audit.auditorId !== user.id) {
-    throw new ApiError(
-      403,
-      "Access forbidden: You cannot complete another auditor's visit",
-    );
-  }
-
-  if (!canTransitionAuditStatus(audit.status, "COMPLETED")) {
-    throw new ApiError(
-      409,
-      `Cannot complete audit from status [${audit.status}]. Must be IN_PROGRESS.`,
-    );
-  }
-
-  // Completeness check for required assignment items
-  const completeness = await checkAssignmentItemsCompleteness(
-    audit.id,
-    audit.assignmentId,
-  );
-
-  // If completion enforcement is enabled via environment variable
-  const ENFORCE_OBSERVATIONS =
-    process.env.AUDIT_ENFORCE_OBSERVATIONS === "true";
-  if (ENFORCE_OBSERVATIONS && !completeness.isComplete) {
-    throw new ApiError(
-      400,
-      "Cannot complete audit: missing required product observations",
-      {
-        missingProductIds: completeness.missingProductIds,
-      },
-    );
-  }
-
-  const parsedLat =
-    latitude !== undefined && latitude !== null ? Number(latitude) : null;
-  const parsedLon =
-    longitude !== undefined && longitude !== null ? Number(longitude) : null;
-  const parsedAccuracy =
-    accuracyMeters !== undefined && accuracyMeters !== null
-      ? Number(accuracyMeters)
-      : null;
-
-  const mergedNotes = notes?.trim()
-    ? audit.notes
-      ? `${audit.notes}\n[Completion Note]: ${notes.trim()}`
-      : notes.trim()
-    : audit.notes;
-
-  const [completedAudit] = await prisma.$transaction([
-    prisma.audit.update({
-      where: { id: auditId },
-      data: {
-        status: "COMPLETED",
-        completedAt: new Date(),
-        endLatitude: parsedLat,
-        endLongitude: parsedLon,
-        endAccuracyMeters: parsedAccuracy,
-        notes: mergedNotes,
-      },
-      include: AUDIT_INCLUDE_RELATIONS,
-    }),
-    prisma.surveyAssignment.update({
-      where: { id: audit.assignmentId },
-      data: {
-        status: "COMPLETED",
-        completedAt: new Date(),
-      },
-    }),
-  ]);
-
-  return formatAuditResponse(completedAudit);
-};
 
 /**
  * Cancel an Audit visit without physical deletion.

@@ -5,6 +5,7 @@ export const ASSIGNMENT_STATUSES = [
   "IN_PROGRESS",
   "COMPLETED",
   "CANCELLED",
+  "ARCHIVED",
 ];
 
 export const createAssignmentSchema = z.object({
@@ -26,7 +27,7 @@ export const createAssignmentSchema = z.object({
 export const updateAssignmentStatusSchema = z.object({
   status: z.enum(ASSIGNMENT_STATUSES, {
     required_error:
-      "Valid status is required (NOT_STARTED, IN_PROGRESS, COMPLETED, CANCELLED)",
+      "Valid status is required (NOT_STARTED, IN_PROGRESS, COMPLETED, CANCELLED, ARCHIVED)",
   }),
 });
 
@@ -62,13 +63,9 @@ export const assignmentQuerySchema = z
     status: z.enum(ASSIGNMENT_STATUSES).optional(),
     includeArchived: z.enum(["true", "false"]).optional(),
     page: z.coerce.number().int().min(1).optional().default(1),
-    limit: z.coerce.number().int().min(1).max(100).optional().default(10),
+    limit: z.coerce.number().int().min(1).max(100).optional().default(50),
   })
   .optional();
-
-// ============================================================
-// BATCH MULTI-AUDITOR ASSIGNMENT SCHEMAS
-// ============================================================
 
 export const createBatchAssignmentSchema = z.object({
   storeId: z.string({ required_error: "Store ID is required" }).min(1),

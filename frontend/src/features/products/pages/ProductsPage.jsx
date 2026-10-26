@@ -8,6 +8,8 @@ import { formatProductName } from "@/utils/formatters.js";
 import { useProducts } from "../hooks/useProducts.js";
 import { parseItemMasterWorkbook } from "../utils/parseItemMaster.js";
 import { ProductFormModal } from "../components/ProductFormModal .jsx";
+import { useAuth } from "@/hooks/useAuth.js";
+
 
 const TIER_FILTERS = [
 	{ label: "ALL", frequency: null },
@@ -41,7 +43,7 @@ export const ProductsPage = () => {
 		deleteProduct,
 		isDeleting,
 	} = useProducts();
-
+const { isAdmin, isManager } = useAuth();
 	const [selectedTier, setSelectedTier] = useState("ALL");
 	const [activeProductForPrice, setActiveProductForPrice] = useState(null);
 	const [newPrice, setNewPrice] = useState("");
@@ -318,59 +320,61 @@ export const ProductsPage = () => {
 				</div>
 
 				<Can role={["ADMIN", "MANAGER"]}>
-					<div className="flex items-center gap-2">
-						<button
-							type="button"
-							onClick={openCreate}
-							className="flex items-center gap-2 rounded-xl bg-[#A41821] hover:bg-[#7F1219] px-4 py-2.5 text-xs font-bold text-white shadow-xs cursor-pointer transition"
-						>
-							<svg
-								className="w-4 h-4"
-								fill="none"
-								stroke="currentColor"
-								viewBox="0 0 24 24"
+					{isAdmin && (
+						<div className="flex items-center gap-2">
+							<button
+								type="button"
+								onClick={openCreate}
+								className="flex items-center gap-2 rounded-xl bg-[#A41821] hover:bg-[#7F1219] px-4 py-2.5 text-xs font-bold text-white shadow-xs cursor-pointer transition"
 							>
-								<path
-									strokeLinecap="round"
-									strokeLinejoin="round"
-									strokeWidth="2"
-									d="M12 4v16m8-8H4"
-								/>
-							</svg>
-							New Product
-						</button>
+								<svg
+									className="w-4 h-4"
+									fill="none"
+									stroke="currentColor"
+									viewBox="0 0 24 24"
+								>
+									<path
+										strokeLinecap="round"
+										strokeLinejoin="round"
+										strokeWidth="2"
+										d="M12 4v16m8-8H4"
+									/>
+								</svg>
+								New Product
+							</button>
 
-						<input
-							type="file"
-							ref={fileInputRef}
-							onChange={handleFileChange}
-							accept=".xlsx,.xls,.xlsm"
-							className="hidden"
-						/>
-						<button
-							type="button"
-							disabled={isImporting}
-							onClick={() => fileInputRef.current?.click()}
-							className="flex items-center gap-2 rounded-xl bg-[#017C4D] hover:bg-[#01633D] px-4 py-2.5 text-xs font-bold text-white shadow-xs cursor-pointer transition disabled:opacity-50"
-						>
-							<svg
-								className="w-4 h-4"
-								fill="none"
-								stroke="currentColor"
-								viewBox="0 0 24 24"
+							<input
+								type="file"
+								ref={fileInputRef}
+								onChange={handleFileChange}
+								accept=".xlsx,.xls,.xlsm"
+								className="hidden"
+							/>
+							<button
+								type="button"
+								disabled={isImporting}
+								onClick={() => fileInputRef.current?.click()}
+								className="flex items-center gap-2 rounded-xl bg-[#017C4D] hover:bg-[#01633D] px-4 py-2.5 text-xs font-bold text-white shadow-xs cursor-pointer transition disabled:opacity-50"
 							>
-								<path
-									strokeLinecap="round"
-									strokeLinejoin="round"
-									strokeWidth="2"
-									d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
-								/>
-							</svg>
-							<span>
-								{isImporting ? "Importing..." : "Import Item Master (Excel)"}
-							</span>
-						</button>
-					</div>
+								<svg
+									className="w-4 h-4"
+									fill="none"
+									stroke="currentColor"
+									viewBox="0 0 24 24"
+								>
+									<path
+										strokeLinecap="round"
+										strokeLinejoin="round"
+										strokeWidth="2"
+										d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
+									/>
+								</svg>
+								<span>
+									{isImporting ? "Importing..." : "Import Item Master (Excel)"}
+								</span>
+							</button>
+						</div>
+					)}
 				</Can>
 			</div>
 

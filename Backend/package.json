@@ -12,7 +12,8 @@
     "db:migrate": "npx prisma migrate dev",
     "db:generate": "npx prisma generate",
     "db:studio": "npx prisma studio",
-    "db:seed": "node prisma/seed.js"
+    "db:seed": "node prisma/seed.js",
+    "db:seed:superadmin": "node prisma/seed-superadmin.js"
   },
   "devDependencies": {
     "@types/node": "^25.5.0",
