@@ -548,6 +548,7 @@ const StoreDispatchCard = ({
 	dispatch,
 	onManage,
 	onArchive,
+	  isAdmin,    
 	isArchiving,
 	onViewAudits,
 	onOpenProofGallery,
