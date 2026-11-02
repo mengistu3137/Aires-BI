@@ -3,12 +3,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import PDFDocument from "pdfkit";
-import {
-  CURRENCY,
-  formatDate,
-  formatPrice,
-  columnHeaderLabel,
-} from "./report.utils.js";
+import { formatDate, formatPrice, columnHeaderLabel } from "./report.utils.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,7 +28,6 @@ const C = {
   chartComp1: "#2D6A4F",
   chartComp2: "#D97706",
   chartComp3: "#0284C7",
-  // ── Aires brand tokens ──────────────────────────────────────────
   airesGreen: "#017C4D",
   airesOrange: "#FE7914",
   airesRed: "#A41821",
@@ -41,8 +35,6 @@ const C = {
 
 // ──────────────────────────────────────────────────────────────────
 // Aires logo — loaded once, cached in memory.
-// Falls back to null when the PNG isn't present so the header degrades
-// to a styled text wordmark instead of crashing.
 // ──────────────────────────────────────────────────────────────────
 
 const AIRES_LOGO_PATH = path.join(__dirname, "assets", "aires-logo.png");
@@ -76,9 +68,6 @@ const contentWidth = (doc) =>
 
 // ──────────────────────────────────────────────────────────────────
 // Aires brand strip — three-stop gradient bar
-//   green ─────► orange ─────► red
-// Drawn as ~96 thin vertical rectangles so it renders smoothly without
-// needing an image asset.
 // ──────────────────────────────────────────────────────────────────
 
 const hexToRgb = (hex) => {
@@ -105,19 +94,12 @@ const mixColor = (from, to, t) => {
 const rgbHex = ({ r, g, b }) =>
   "#" + [r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("");
 
-/**
- * Draws a 3-stop horizontal gradient bar.
- *   Stop 0 → C.airesGreen   (left)
- *   Stop 1 → C.airesOrange  (middle)
- *   Stop 2 → C.airesRed     (right)
- */
 const drawAiresGradientBar = (doc, x, y, width, height) => {
   const SEGMENTS = 96;
   const segW = width / SEGMENTS;
   for (let i = 0; i < SEGMENTS; i += 1) {
     const t = i / (SEGMENTS - 1);
     let color;
-    // Left → Right: RED ▸ ORANGE ▸ GREEN
     if (t <= 0.5) {
       color = rgbHex(mixColor(C.airesRed, C.airesOrange, t / 0.5));
     } else {
@@ -135,7 +117,7 @@ const drawAiresGradientBar = (doc, x, y, width, height) => {
 // Cover header (page 1 only)
 // ──────────────────────────────────────────────────────────────────
 
-const drawCoverHeader = (doc, model) => {
+const drawCoverHeader = (doc) => {
   const W = contentWidth(doc);
   const left = doc.page.margins.left;
   let y = doc.page.margins.top;
@@ -143,12 +125,10 @@ const drawCoverHeader = (doc, model) => {
   const logoBuffer = loadAiresLogo();
   const logoH = 40;
 
-  // ── Left: Aires logo (PNG) or text wordmark fallback ──────────
   if (logoBuffer) {
     try {
       doc.image(logoBuffer, left, y, { height: logoH });
     } catch {
-      // If pdfkit can't decode the image, fall back to text.
       doc
         .font("Helvetica-Bold")
         .fontSize(15)
@@ -156,7 +136,6 @@ const drawCoverHeader = (doc, model) => {
         .text("AIRES", left, y + 10, { lineBreak: false });
     }
   } else {
-    // Text wordmark — Green "AIRES" + Orange dot + Red "COMMUNICATION"
     doc
       .font("Helvetica-Bold")
       .fontSize(15)
@@ -174,7 +153,6 @@ const drawCoverHeader = (doc, model) => {
       .text("COMMUNICATION", left + 58, y + 14, { lineBreak: false });
   }
 
-  // ── Center: company name ──────────────────────────────────────
   doc
     .font("Helvetica-Bold")
     .fontSize(11)
@@ -185,7 +163,6 @@ const drawCoverHeader = (doc, model) => {
       lineBreak: false,
     });
 
-  // ── Right: badge text ────────────────────────────────────────
   doc
     .font("Helvetica")
     .fontSize(8)
@@ -198,7 +175,6 @@ const drawCoverHeader = (doc, model) => {
 
   y += logoH + 8;
 
-  // ── Gradient bar under the header ────────────────────────────
   drawAiresGradientBar(doc, left, y, W, 3);
   y += 14;
 
@@ -212,7 +188,7 @@ const drawCoverHeader = (doc, model) => {
 const drawExecutiveCoverPage = (doc, model) => {
   const W = contentWidth(doc);
   const left = doc.page.margins.left;
-  let y = drawCoverHeader(doc, model);
+  let y = drawCoverHeader(doc);
 
   doc
     .font("Helvetica-Bold")
@@ -417,9 +393,24 @@ const drawCycleHeader = (doc, cycle, left, W, y) => {
   return y + h + 4;
 };
 
+const drawTableHeaderRow = (doc, tableCols, left, W, y, headerH) => {
+  doc.save().rect(left, y, W, headerH).fill(C.navy).restore();
+  doc.font("Helvetica-Bold").fontSize(8).fillColor(C.white);
+
+  let curX = left;
+  tableCols.forEach((col) => {
+    doc.text(col.label, curX + 3, y + 8, {
+      width: col.width - 6,
+      align: col.align,
+    });
+    curX += col.width;
+  });
+  return y + headerH;
+};
+
 const drawCycleTable = (doc, cycle, section, left, W, startY) => {
   const columns = cycle.columns;
-  const noW = 24;
+  const noW = 28;
   const catW = 70;
   const nameW = 140;
   const unitW = 40;
@@ -437,21 +428,8 @@ const drawCycleTable = (doc, cycle, section, left, W, startY) => {
     })),
   ];
 
-  let y = startY;
-
   const headerH = 26;
-  doc.save().rect(left, y, W, headerH).fill(C.navy).restore();
-  doc.font("Helvetica-Bold").fontSize(8).fillColor(C.white);
-
-  let curX = left;
-  tableCols.forEach((col) => {
-    doc.text(col.label, curX + 3, y + 8, {
-      width: col.width - 6,
-      align: col.align,
-    });
-    curX += col.width;
-  });
-  y += headerH;
+  let y = drawTableHeaderRow(doc, tableCols, left, W, startY, headerH);
 
   let counter = 1;
   let zebra = false;
@@ -462,17 +440,7 @@ const drawCycleTable = (doc, cycle, section, left, W, startY) => {
       doc.addPage();
       y = doc.page.margins.top;
       y = drawCycleHeader(doc, cycle, left, W, y);
-      doc.save().rect(left, y, W, headerH).fill(C.navy).restore();
-      doc.font("Helvetica-Bold").fontSize(8).fillColor(C.white);
-      curX = left;
-      tableCols.forEach((col) => {
-        doc.text(col.label, curX + 3, y + 8, {
-          width: col.width - 6,
-          align: col.align,
-        });
-        curX += col.width;
-      });
-      y += headerH;
+      y = drawTableHeaderRow(doc, tableCols, left, W, y, headerH);
     }
 
     doc.save().rect(left, y, W, catHeaderH).fill(C.zebra).restore();
@@ -489,17 +457,7 @@ const drawCycleTable = (doc, cycle, section, left, W, startY) => {
         doc.addPage();
         y = doc.page.margins.top;
         y = drawCycleHeader(doc, cycle, left, W, y);
-        doc.save().rect(left, y, W, headerH).fill(C.navy).restore();
-        doc.font("Helvetica-Bold").fontSize(8).fillColor(C.white);
-        curX = left;
-        tableCols.forEach((col) => {
-          doc.text(col.label, curX + 3, y + 8, {
-            width: col.width - 6,
-            align: col.align,
-          });
-          curX += col.width;
-        });
-        y += headerH;
+        y = drawTableHeaderRow(doc, tableCols, left, W, y, headerH);
       }
 
       if (zebra) {
@@ -516,12 +474,16 @@ const drawCycleTable = (doc, cycle, section, left, W, startY) => {
         .stroke()
         .restore();
 
-      curX = left;
+      let curX = left;
+
+      // "No." = SortedBy sequence from the Item Master
+      const seqNo = prod.sortOrder > 0 ? prod.sortOrder : counter;
+      counter += 1;
       doc
         .font("Helvetica")
         .fontSize(7.5)
         .fillColor(C.muted)
-        .text(String(counter++), curX + 2, y + 5, {
+        .text(String(seqNo), curX + 2, y + 5, {
           width: noW - 4,
           align: "center",
         });
@@ -610,8 +572,6 @@ const drawCycleTable = (doc, cycle, section, left, W, startY) => {
       });
 
       y += rowH;
-
-   
     }
   }
 
@@ -630,23 +590,24 @@ const drawMatrixTable = (doc, section, startY) => {
     .text(`Master Competitor Pricing & Baseline Matrix — ${section.label}`, left, y);
   y += 18;
 
-  const cycles = section.cycles && section.cycles.length > 0
-    ? section.cycles
-    : [
-      {
-        period: {
-          id: "flat",
-          name: "Report Range",
-          status: null,
-          startDate: null,
-          endDate: null,
+  const cycles =
+    section.cycles && section.cycles.length > 0
+      ? section.cycles
+      : [
+        {
+          period: {
+            id: "flat",
+            name: "Report Range",
+            status: null,
+            startDate: null,
+            endDate: null,
+          },
+          label: "Report Range",
+          columns: section.columns,
+          categories: section.categories,
+          summary: section.summary,
         },
-        label: "Report Range",
-        columns: section.columns,
-        categories: section.categories,
-        summary: section.summary,
-      },
-    ];
+      ];
 
   for (let i = 0; i < cycles.length; i += 1) {
     const cycle = cycles[i];
@@ -713,13 +674,11 @@ const drawTopStripsAndFooters = (doc) => {
 
     const isFirstPage = i === range.start;
 
-    // ── Top gradient strip on pages 2+ ──────────────────────────
     if (!isFirstPage) {
       const stripY = doc.page.margins.top - 14;
       drawAiresGradientBar(doc, left, stripY, width, 2);
     }
 
-    // ── Footer: thin gradient bar + text ────────────────────────
     const y = doc.page.height - bottom + 16;
 
     drawAiresGradientBar(doc, left, y - 8, width, 1.5);

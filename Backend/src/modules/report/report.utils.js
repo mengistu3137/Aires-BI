@@ -1,5 +1,5 @@
 /**
- * Shared helpers for the observation report (PDF + Excel).
+ * Shared helpers for the observation report (PDF + Excel + Word).
  *
  * Optional environment variables:
  *   REPORT_CURRENCY  - currency label shown in reports (default "ETB")
@@ -20,6 +20,29 @@ export const REVIEW_LABELS = {
   APPROVED: "Approved",
   NEEDS_REVIEW: "Needs review",
   REJECTED: "Rejected",
+};
+export const formatProductName = (name) => {
+  if (!name || typeof name !== "string") return "";
+
+  const minorWords = new Set(["with", "and", "or", "in", "on", "at", "to", "for", "of", "by"]);
+
+  return name
+    .toLowerCase()
+    .replace(/[a-z0-9/()*'-]+/gi, (match, offset) => {   // (match, offset) is correct without a capture group
+      const lower = match.toLowerCase();
+
+      const unitMatch = match.match(/^(\d+(?:\/\d+)?)(gm|g|kg|ml|l|ltr|pcs|pack|gr)$/i);
+      if (unitMatch) {
+        const u = unitMatch[2].toLowerCase();
+        const normUnit = u === "gm" || u === "gr" ? "g" : u === "ltr" ? "L" : u === "l" ? "L" : u;
+        return `${unitMatch[1]}${normUnit}`;
+      }
+
+      if (offset > 0 && minorWords.has(lower)) return lower;
+      return match.charAt(0).toUpperCase() + match.slice(1);
+    })
+    .replace(/\s+/g, " ")
+    .trim();
 };
 
 export const formatPrice = (value) => {

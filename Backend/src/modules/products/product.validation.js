@@ -21,8 +21,9 @@ export const createProductSchema = z.object({
   barcode: z.string().trim().optional().nullable(),
   category: z.string({ required_error: "Category is required" }).trim().min(1),
   frequency: z.enum(SURVEY_FREQUENCIES).default("WEEKLY"),
-  unit: z.string().trim().default("pcs"),               // was "kg"; the Item Master has no unit column
-  priceSource: z.string().trim().max(200).optional(), 
+  unit: z.string().trim().default("pcs"),
+  sortOrder: z.coerce.number().int().nonnegative().default(0),
+  priceSource: z.string().trim().max(200).optional(),
   active: z.boolean().default(true),
   initialQueensPrice: z
     .number({ required_error: "Initial Queens benchmark price is required" })
@@ -38,6 +39,7 @@ export const updateProductSchema = z.object({
   category: z.string().optional(),
   frequency: z.enum(SURVEY_FREQUENCIES).optional(),
   unit: z.string().optional(),
+  sortOrder: z.coerce.number().int().nonnegative().optional(),
   active: z.boolean().optional(),
 });
 
@@ -58,13 +60,16 @@ export const productQuerySchema = z.object({
 const bulkItemSchema = z.object({
   id: z.string().trim().min(1),
   name: z.string().trim().min(1),
+  rawName: z.string().optional(),
   description: z.string().trim().optional().nullable(),
   sku: z.string().trim().optional().nullable(),
   barcode: z.string().trim().optional().nullable(),
   category: z.string().trim().default("General"),
-  unit: z.string().trim().default("kg"),
+  unit: z.string().trim().default("pcs"),
   frequency: z.enum(SURVEY_FREQUENCIES).default("WEEKLY"),
-  initialQueensPrice: z.number().nonnegative().default(0),
+  sortOrder: z.coerce.number().int().nonnegative().default(0),
+  initialQueensPrice: z.coerce.number().nonnegative().default(0),
+  priceSource: z.string().optional(),
 });
 
 export const bulkProductImportSchema = z.union([

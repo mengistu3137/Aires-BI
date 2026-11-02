@@ -14,7 +14,8 @@ export const formatProductWithActivePrice = (product) => {
     barcode: product.barcode,
     category: product.category,
     unit: product.unit,
-    frequency: product.frequency || "WEEKLY", // <-- CRITICAL FIX: Expose frequency
+    frequency: product.frequency || "WEEKLY",
+    sortOrder: product.sortOrder ?? 0, // <-- CRITICAL: Returns sequence to frontend
     active: product.active,
     currentQueensPrice: priceValue,
     queensPrice: priceValue,
