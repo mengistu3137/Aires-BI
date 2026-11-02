@@ -5,6 +5,14 @@ import { QueensPriceFilters } from "../components/QueensPriceFilters.jsx";
 import { QueensPriceListTable } from "../components/QueensPriceListTable.jsx";
 import { QueensPriceEmptyState } from "../components/QueensPriceEmptyState.jsx";
 
+// Track hierarchy order when viewing ALL
+const FREQ_ORDER = {
+	DAILY: 0,
+	WEEKLY: 1,
+	MONTHLY: 2,
+	BI_YEARLY: 3,
+};
+
 export const QueensPricesPage = () => {
 	const navigate = useNavigate();
 	const [page, setPage] = useState(1);
@@ -34,8 +42,34 @@ export const QueensPricesPage = () => {
 
 	const { data, isLoading, isError, error } = useQueensPrices(filters);
 
-	const prices = data?.prices || [];
+	const rawPrices = data?.prices || [];
 	const meta = data?.meta || { page: 1, totalPages: 1, total: 0 };
+
+	// ────────────────────────────────────────────────────────────
+	// EXACT EXCEL SEQUENCE SORTING (Imitating ProductsPage.jsx)
+	// ────────────────────────────────────────────────────────────
+	const sortedPrices = useMemo(() => {
+		const list = [...rawPrices];
+
+		return list.sort((a, b) => {
+			// If viewing ALL, sort by Track hierarchy first
+			if (activeFrequency === "ALL") {
+				const freqA = a.product?.frequency;
+				const freqB = b.product?.frequency;
+				const diffFreq = (FREQ_ORDER[freqA] ?? 9) - (FREQ_ORDER[freqB] ?? 9);
+				if (diffFreq !== 0) return diffFreq;
+			}
+
+			// Sort by exact Excel sequence index (1..20, 1..100, 1..500, 1..2804)
+			const aSeq = a.product?.sortOrder ?? 999999;
+			const bSeq = b.product?.sortOrder ?? 999999;
+			if (aSeq !== bSeq) return aSeq - bSeq;
+
+			return String(a.product?.name || "").localeCompare(
+				String(b.product?.name || ""),
+			);
+		});
+	}, [rawPrices, activeFrequency]);
 
 	return (
 		<div className="space-y-4">
@@ -49,10 +83,11 @@ export const QueensPricesPage = () => {
 						<span className="rounded-md border border-slate-200 bg-slate-100 px-2 py-0.5 font-mono text-[10px] font-bold text-slate-700">
 							{meta.total} Total Catalog Products
 						</span>
+					
 					</div>
 					<p className="mt-0.5 text-xs text-slate-500">
 						Authoritative reference prices across Daily, Weekly, Monthly, and
-						Bi-Yearly catalog tracks.
+						Bi-Yearly catalog tracks ordered by client Excel sequence.
 					</p>
 				</div>
 				<button
@@ -117,7 +152,7 @@ export const QueensPricesPage = () => {
 			{/* Content */}
 			{!isLoading && !isError && (
 				<>
-					{prices.length === 0 ? (
+					{sortedPrices.length === 0 ? (
 						<QueensPriceEmptyState
 							title={
 								debouncedSearch
@@ -155,7 +190,7 @@ export const QueensPricesPage = () => {
 							}
 						/>
 					) : (
-						<QueensPriceListTable prices={prices} />
+						<QueensPriceListTable prices={sortedPrices} />
 					)}
 
 					{/* Catalog-Wide Pagination */}

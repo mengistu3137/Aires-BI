@@ -1,5 +1,5 @@
 // frontend/src/features/products/ProductsPage.jsx
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useMemo } from "react";
 import { DataTable } from "@/components/DataTable.jsx";
 import { Can } from "@/components/Can.jsx";
 import { ConfirmDialog } from "@/components/ConfirmDialog.jsx";
@@ -9,7 +9,6 @@ import { useProducts } from "../hooks/useProducts.js";
 import { parseItemMasterWorkbook } from "../utils/parseItemMaster.js";
 import { ProductFormModal } from "../components/ProductFormModal .jsx";
 import { useAuth } from "@/hooks/useAuth.js";
-
 
 const TIER_FILTERS = [
 	{ label: "ALL", frequency: null },
@@ -21,12 +20,19 @@ const TIER_FILTERS = [
 
 const CHUNK_SIZE = 200;
 
+const FREQ_ORDER = { DAILY: 0, WEEKLY: 1, MONTHLY: 2, BI_YEARLY: 3 };
+
 const extractStats = (res) => {
 	const candidates = [res?.data?.data, res?.data, res?.data?.result, res];
 	return (
 		candidates.find((c) => c && typeof c.insertedCount === "number") || null
 	);
 };
+
+const isLinkedHistoryError = (err) =>
+	err?.response?.status === 409 ||
+	err?.status === 409 ||
+	err?.message?.toLowerCase().includes("linked history");
 
 export const ProductsPage = () => {
 	const {
@@ -43,7 +49,7 @@ export const ProductsPage = () => {
 		deleteProduct,
 		isDeleting,
 	} = useProducts();
-const { isAdmin, isManager } = useAuth();
+	const { isAdmin } = useAuth();
 	const [selectedTier, setSelectedTier] = useState("ALL");
 	const [activeProductForPrice, setActiveProductForPrice] = useState(null);
 	const [newPrice, setNewPrice] = useState("");
@@ -66,12 +72,28 @@ const { isAdmin, isManager } = useAuth();
 		product: null,
 	});
 	const [deleteTarget, setDeleteTarget] = useState(null);
-	const [deleteError, setDeleteError] = useState(null); // 409 → archive prompt
+	const [deleteError, setDeleteError] = useState(null);
 
 	const activeFilter = TIER_FILTERS.find((t) => t.label === selectedTier);
-	const filteredProducts = activeFilter?.frequency
-		? products.filter((p) => p.frequency === activeFilter.frequency)
-		: products;
+
+	const filteredProducts = useMemo(() => {
+		const list = activeFilter?.frequency
+			? products.filter((p) => p.frequency === activeFilter.frequency)
+			: [...products];
+
+		return list.sort((a, b) => {
+			if (!activeFilter?.frequency) {
+				const diffFreq =
+					(FREQ_ORDER[a.frequency] ?? 9) - (FREQ_ORDER[b.frequency] ?? 9);
+				if (diffFreq !== 0) return diffFreq;
+			}
+			// sortOrder 0 / null means "unset" -> push to the end
+			const aSeq = a.sortOrder > 0 ? a.sortOrder : 999999;
+			const bSeq = b.sortOrder > 0 ? b.sortOrder : 999999;
+			if (aSeq !== bSeq) return aSeq - bSeq;
+			return String(a.name || "").localeCompare(String(b.name || ""));
+		});
+	}, [products, activeFilter]);
 
 	// ------------------------------ CRUD ------------------------------
 	const openCreate = () =>
@@ -88,7 +110,7 @@ const { isAdmin, isManager } = useAuth();
 			}
 			setFormModal({ open: false, mode: "create", product: null });
 		} catch {
-			/* toast already handled by mutation */
+			/* toast handled by mutation */
 		}
 	};
 
@@ -99,8 +121,6 @@ const { isAdmin, isManager } = useAuth();
 			await deleteProduct(deleteTarget.id);
 			setDeleteTarget(null);
 		} catch (err) {
-			// If backend refuses because of linked survey history → switch dialog
-			// to "Archive instead" mode. Otherwise leave the toast-only error.
 			if (isLinkedHistoryError(err)) {
 				setDeleteError(err);
 			} else {
@@ -116,7 +136,7 @@ const { isAdmin, isManager } = useAuth();
 			setDeleteTarget(null);
 			setDeleteError(null);
 		} catch {
-			/* toast already handled by mutation */
+			/* toast handled by mutation */
 		}
 	};
 
@@ -149,13 +169,7 @@ const { isAdmin, isManager } = useAuth();
 
 		try {
 			const buffer = await file.arrayBuffer();
-			const parsed = parseItemMasterWorkbook(buffer);
-			const {
-				items = [],
-				invalid = 0,
-				renamedDuplicates = [],
-				crossSheetDuplicates = [],
-			} = parsed;
+			const { items = [], invalid = 0 } = parseItemMasterWorkbook(buffer);
 
 			if (!items.length) {
 				toast.error(
@@ -169,17 +183,19 @@ const { isAdmin, isManager } = useAuth();
 			setIsImportModalOpen(true);
 
 			let totalInserted = 0;
+			let totalUpdated = 0;
 			let totalSkipped = invalid;
 
 			for (let i = 0; i < items.length; i += CHUNK_SIZE) {
 				const chunk = items.slice(i, i + CHUNK_SIZE);
 				const res = await bulkImport(chunk);
 				const stats = extractStats(res);
+				if (!stats)
+					throw new Error("Unexpected response from the import endpoint.");
 
-				if (stats) {
-					totalInserted += stats.insertedCount;
-					totalSkipped += stats.skippedCount;
-				}
+				totalInserted += stats.insertedCount;
+				totalUpdated += stats.updatedCount ?? 0;
+				totalSkipped += stats.skippedCount ?? 0;
 
 				const current = Math.min(i + CHUNK_SIZE, items.length);
 				setImportProgress({
@@ -192,17 +208,19 @@ const { isAdmin, isManager } = useAuth();
 			setImportSummary({
 				total: items.length + invalid,
 				inserted: totalInserted,
+				updated: totalUpdated,
 				skipped: totalSkipped,
-				renamedDuplicates: renamedDuplicates.length,
-				crossSheetDuplicates: crossSheetDuplicates.length,
 			});
 
-			toast.success(`Import complete! ${totalInserted} items added.`);
+			toast.success(
+				`Import complete: ${totalInserted} added, ${totalUpdated} updated.`,
+			);
 		} catch (err) {
 			console.error("Import failed:", err);
 			setIsImportModalOpen(false);
 			toast.error(
-				err?.response?.data?.message ||
+				err?.response?.data?.errors?.[0]?.message ||
+					err?.response?.data?.message ||
 					err?.message ||
 					"Failed to parse and import Excel file",
 			);
@@ -211,8 +229,19 @@ const { isAdmin, isManager } = useAuth();
 		}
 	};
 
-	// ------------------------------ TABLE ------------------------------
+	// ------------------------------ TABLE COLUMNS ------------------------------
 	const tableColumns = [
+		{
+			header: "No.",
+			key: "sortOrder",
+			sortable: true,
+			align: "center",
+			render: (row) => (
+				<span className="inline-flex items-center justify-center rounded-md bg-slate-100 px-2 py-1 font-mono text-xs font-bold text-slate-700">
+					#{row.sortOrder > 0 ? row.sortOrder : "—"}
+				</span>
+			),
+		},
 		{
 			header: "Product Item",
 			key: "name",
@@ -230,7 +259,7 @@ const { isAdmin, isManager } = useAuth();
 						{row.frequency ? ` • [${row.frequency}]` : ""}
 						{` • Unit: ${row.unit}`}
 						{row.active === false && (
-							<span className="ml-2 rounded bg-slate-200 px-1.5 py-0.5 text-[9px] font-bold text-slate-600 uppercase">
+							<span className="ml-2 rounded bg-slate-200 px-1.5 py-0.5 text-[9px] font-bold uppercase text-slate-600">
 								Archived
 							</span>
 						)}
@@ -254,7 +283,7 @@ const { isAdmin, isManager } = useAuth();
 			sortable: true,
 			render: (row) => (
 				<div>
-					<span className="font-mono font-black text-slate-900 text-sm">
+					<span className="font-mono text-sm font-black text-slate-900">
 						{Number(row.currentQueensPrice || 0).toFixed(2)} ETB
 					</span>
 					<span className="block text-[10px] text-slate-400">
@@ -276,14 +305,14 @@ const { isAdmin, isManager } = useAuth();
 								setActiveProductForPrice(row);
 								setNewPrice(row.currentQueensPrice || "");
 							}}
-							className="text-xs font-semibold text-[#017C4D] hover:underline cursor-pointer"
+							className="cursor-pointer text-xs font-semibold text-[#017C4D] hover:underline"
 						>
 							Update Price
 						</button>
 						<button
 							type="button"
 							onClick={() => openEdit(row)}
-							className="text-xs font-semibold text-slate-700 hover:underline cursor-pointer"
+							className="cursor-pointer text-xs font-semibold text-slate-700 hover:underline"
 						>
 							Edit
 						</button>
@@ -295,7 +324,7 @@ const { isAdmin, isManager } = useAuth();
 									setDeleteError(null);
 								}}
 								disabled={isDeleting}
-								className="text-xs font-semibold text-[#A41821] hover:underline cursor-pointer disabled:opacity-50"
+								className="cursor-pointer text-xs font-semibold text-[#A41821] hover:underline disabled:opacity-50"
 							>
 								Delete
 							</button>
@@ -309,13 +338,13 @@ const { isAdmin, isManager } = useAuth();
 	return (
 		<div className="mx-auto max-w-6xl space-y-6 pb-12">
 			{/* Top banner */}
-			<div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+			<div className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-xs sm:flex-row sm:items-center sm:justify-between">
 				<div>
-					<h1 className="text-xl font-black text-slate-900 tracking-tight">
-						Master Product Catalog & Benchmark Pricing
+					<h1 className="text-xl font-black tracking-tight text-slate-900">
+						Master Product Catalog &amp; Benchmark Pricing
 					</h1>
-					<p className="text-xs text-slate-500 mt-0.5">
-						Full Item Master database ({products.length} products loaded)
+					<p className="mt-0.5 text-xs text-slate-500">
+						Full Item Master database ({products.length} products)
 					</p>
 				</div>
 
@@ -325,10 +354,10 @@ const { isAdmin, isManager } = useAuth();
 							<button
 								type="button"
 								onClick={openCreate}
-								className="flex items-center gap-2 rounded-xl bg-[#A41821] hover:bg-[#7F1219] px-4 py-2.5 text-xs font-bold text-white shadow-xs cursor-pointer transition"
+								className="flex cursor-pointer items-center gap-2 rounded-xl bg-[#A41821] px-4 py-2.5 text-xs font-bold text-white shadow-xs transition hover:bg-[#7F1219]"
 							>
 								<svg
-									className="w-4 h-4"
+									className="h-4 w-4"
 									fill="none"
 									stroke="currentColor"
 									viewBox="0 0 24 24"
@@ -354,10 +383,10 @@ const { isAdmin, isManager } = useAuth();
 								type="button"
 								disabled={isImporting}
 								onClick={() => fileInputRef.current?.click()}
-								className="flex items-center gap-2 rounded-xl bg-[#017C4D] hover:bg-[#01633D] px-4 py-2.5 text-xs font-bold text-white shadow-xs cursor-pointer transition disabled:opacity-50"
+								className="flex cursor-pointer items-center gap-2 rounded-xl bg-[#017C4D] px-4 py-2.5 text-xs font-bold text-white shadow-xs transition hover:bg-[#01633D] disabled:opacity-50"
 							>
 								<svg
-									className="w-4 h-4"
+									className="h-4 w-4"
 									fill="none"
 									stroke="currentColor"
 									viewBox="0 0 24 24"
@@ -381,7 +410,7 @@ const { isAdmin, isManager } = useAuth();
 			{/* Tier filter pills & table */}
 			<div className="space-y-3">
 				<div className="flex items-center justify-between gap-3">
-					<h2 className="text-sm font-bold text-slate-800 whitespace-nowrap">
+					<h2 className="whitespace-nowrap text-sm font-bold text-slate-800">
 						Product Catalog ({filteredProducts.length})
 					</h2>
 
@@ -391,7 +420,7 @@ const { isAdmin, isManager } = useAuth();
 								key={t.label}
 								type="button"
 								onClick={() => setSelectedTier(t.label)}
-								className={`whitespace-nowrap rounded-lg px-2.5 py-1 text-xs font-semibold transition cursor-pointer ${
+								className={`cursor-pointer whitespace-nowrap rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
 									selectedTier === t.label
 										? "bg-[#A41821] text-white"
 										: "bg-slate-100 text-slate-600 hover:bg-slate-200"
@@ -419,28 +448,26 @@ const { isAdmin, isManager } = useAuth();
 
 			{/* Import Progress Modal */}
 			{isImportModalOpen && (
-				<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4">
-					<div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl border border-slate-100 space-y-4">
+				<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-xs">
+					<div className="w-full max-w-md space-y-4 rounded-2xl border border-slate-100 bg-white p-6 shadow-2xl">
 						<h3 className="text-base font-black text-slate-900">
 							{importSummary
 								? "Item Master Import Completed"
-								: "Importing Item Master Database..."}
+								: "Importing Item Master..."}
 						</h3>
 
 						{!importSummary ? (
 							<div className="space-y-3">
 								<p className="text-xs text-slate-600">
-									Processing {importProgress.total.toLocaleString()} items in
-									safe batches of {CHUNK_SIZE}. Please keep this browser window
-									open.
+									Processing {importProgress.total.toLocaleString()} items…
 								</p>
-								<div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
+								<div className="h-3 w-full overflow-hidden rounded-full bg-slate-100">
 									<div
-										className="bg-[#017C4D] h-full transition-all duration-300"
+										className="h-full bg-[#017C4D] transition-all duration-300"
 										style={{ width: `${importProgress.percentage}%` }}
 									/>
 								</div>
-								<div className="flex justify-between text-xs font-mono text-slate-500 font-bold">
+								<div className="flex justify-between font-mono text-xs font-bold text-slate-500">
 									<span>
 										{importProgress.current} / {importProgress.total} items
 									</span>
@@ -449,43 +476,31 @@ const { isAdmin, isManager } = useAuth();
 							</div>
 						) : (
 							<div className="space-y-3">
-								<div className="rounded-xl bg-slate-50 border border-slate-200 p-3 space-y-1 text-xs">
+								<div className="space-y-1 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs">
 									<div className="flex justify-between">
 										<span className="text-slate-600">Total in File:</span>
-										<span className="font-bold font-mono">
+										<span className="font-mono font-bold">
 											{importSummary.total}
 										</span>
 									</div>
 									<div className="flex justify-between text-[#017C4D]">
-										<span className="font-semibold">
-											Successfully Inserted:
-										</span>
-										<span className="font-bold font-mono">
+										<span className="font-semibold">Inserted:</span>
+										<span className="font-mono font-bold">
 											+{importSummary.inserted}
 										</span>
 									</div>
+									<div className="flex justify-between text-slate-700">
+										<span className="font-semibold">Updated:</span>
+										<span className="font-mono font-bold">
+											{importSummary.updated}
+										</span>
+									</div>
 									<div className="flex justify-between text-slate-500">
-										<span>Skipped (Existing / Invalid):</span>
-										<span className="font-bold font-mono">
+										<span>Skipped (Duplicates / Invalid):</span>
+										<span className="font-mono font-bold">
 											{importSummary.skipped}
 										</span>
 									</div>
-									{importSummary.renamedDuplicates > 0 && (
-										<div className="flex justify-between text-amber-700">
-											<span>Same-sheet codes auto-suffixed:</span>
-											<span className="font-bold font-mono">
-												{importSummary.renamedDuplicates}
-											</span>
-										</div>
-									)}
-									{importSummary.crossSheetDuplicates > 0 && (
-										<div className="flex justify-between text-amber-700">
-											<span>Codes reused across sheets:</span>
-											<span className="font-bold font-mono">
-												{importSummary.crossSheetDuplicates}
-											</span>
-										</div>
-									)}
 								</div>
 
 								<div className="flex justify-end pt-2">
@@ -495,7 +510,7 @@ const { isAdmin, isManager } = useAuth();
 											setIsImportModalOpen(false);
 											setImportSummary(null);
 										}}
-										className="rounded-xl bg-[#A41821] hover:bg-[#7F1219] px-5 py-2 font-bold text-white text-xs cursor-pointer"
+										className="cursor-pointer rounded-xl bg-[#A41821] px-5 py-2 text-xs font-bold text-white hover:bg-[#7F1219]"
 									>
 										Close
 									</button>
@@ -508,21 +523,21 @@ const { isAdmin, isManager } = useAuth();
 
 			{/* Benchmark Price Modal */}
 			{activeProductForPrice && (
-				<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
-					<div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl border border-slate-100 space-y-4">
+				<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-xs">
+					<div className="w-full max-w-sm space-y-4 rounded-2xl border border-slate-100 bg-white p-6 shadow-xl">
 						<div className="flex items-center justify-between border-b border-slate-100 pb-3">
 							<div>
 								<h3 className="text-base font-bold text-slate-900">
 									Update Queens Benchmark
 								</h3>
-								<p className="text-xs text-slate-500 font-medium">
+								<p className="text-xs font-medium text-slate-500">
 									{activeProductForPrice.name} ({activeProductForPrice.unit})
 								</p>
 							</div>
 							<button
 								type="button"
 								onClick={() => setActiveProductForPrice(null)}
-								className="text-slate-400 hover:text-slate-600 cursor-pointer"
+								className="cursor-pointer text-slate-400 hover:text-slate-600"
 							>
 								✕
 							</button>
@@ -533,7 +548,7 @@ const { isAdmin, isManager } = useAuth();
 							className="space-y-3 text-xs"
 						>
 							<div>
-								<label className="block font-semibold text-slate-700 mb-1">
+								<label className="mb-1 block font-semibold text-slate-700">
 									New Queens Benchmark Price (ETB)
 								</label>
 								<input
@@ -544,12 +559,12 @@ const { isAdmin, isManager } = useAuth();
 									placeholder="e.g. 68.00"
 									value={newPrice}
 									onChange={(e) => setNewPrice(e.target.value)}
-									className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-base font-bold text-slate-900 focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] outline-hidden font-mono"
+									className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 font-mono text-base font-bold text-slate-900 outline-hidden focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821]"
 								/>
 							</div>
 
 							<div>
-								<label className="block font-semibold text-slate-700 mb-1">
+								<label className="mb-1 block font-semibold text-slate-700">
 									Change Note / ERP Reference
 								</label>
 								<input
@@ -557,22 +572,22 @@ const { isAdmin, isManager } = useAuth();
 									placeholder="e.g. Supplier cost increase Week 39"
 									value={priceNotes}
 									onChange={(e) => setPriceNotes(e.target.value)}
-									className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] outline-hidden"
+									className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-800 outline-hidden focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821]"
 								/>
 							</div>
 
-							<div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+							<div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
 								<button
 									type="button"
 									onClick={() => setActiveProductForPrice(null)}
-									className="rounded-xl border border-slate-200 px-4 py-2 font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
+									className="cursor-pointer rounded-xl border border-slate-200 px-4 py-2 font-semibold text-slate-600 hover:bg-slate-50"
 								>
 									Cancel
 								</button>
 								<button
 									type="submit"
 									disabled={isUpdatingPrice}
-									className="rounded-xl bg-[#A41821] hover:bg-[#7F1219] px-4 py-2 font-bold text-white shadow-xs cursor-pointer disabled:opacity-50"
+									className="cursor-pointer rounded-xl bg-[#A41821] px-4 py-2 font-bold text-white shadow-xs hover:bg-[#7F1219] disabled:opacity-50"
 								>
 									{isUpdatingPrice ? "Saving..." : "Save Revision"}
 								</button>
@@ -611,7 +626,7 @@ const { isAdmin, isManager } = useAuth();
 						? deleteError?.response?.data?.message ||
 							deleteError?.message ||
 							"Archive this product instead to keep the sales / observation history intact."
-						: "If this product has linked survey history (assignments, observations, price analysis, alerts), the server will refuse to delete it and offer to archive it instead."
+						: "If this product has linked survey history, the server will offer to archive it instead."
 				}
 				confirmLabel={deleteError ? "Archive Instead" : "Delete"}
 				cancelLabel="Cancel"

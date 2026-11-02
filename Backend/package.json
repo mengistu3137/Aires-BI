@@ -13,6 +13,8 @@
     "db:generate": "npx prisma generate",
     "db:studio": "npx prisma studio",
     "db:seed": "node prisma/seed.js",
+    "db:sort": "node prisma/sortAndCase.js",
+    "db:adapt": "node prisma/adapt-pilot-products.js",
     "db:seed:superadmin": "node prisma/seed-superadmin.js"
   },
   "devDependencies": {

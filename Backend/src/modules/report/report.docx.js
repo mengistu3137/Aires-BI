@@ -16,31 +16,32 @@ import {
     Footer,
     PageNumber,
 } from "docx";
+import { formatProductName } from "./report.utils.js";
 
 /* ─────────────────────────── Aires Brand Tokens ─────────────────────────── */
 
 const FONT = "Calibri";
 
 const COLOR = {
-    NAVY_HEADING: "1F4E79",   // Section 1 / Primary Heading Blue
-    ORANGE_SUB: "FE7914",     // Subheading 1.1 / Accent Orange
-    AIRES_RED: "A41821",      // Aires Brand Red / Out of stock
-    AIRES_GREEN: "017C4D",    // Lowest price / Optimal
-    TEXT_DARK: "1F2937",      // Primary body text
-    TEXT_MUTED: "64748B",     // Secondary / dates
-    TABLE_HEADER: "1F3A5F",   // Table header navy fill
-    ZEBRA_BG: "F8FAFC",       // Subtle table stripe
-    BORDER_LINE: "CBD5E1",    // 0.5pt subtle border
+    NAVY_HEADING: "1F4E79",
+    ORANGE_SUB: "FE7914",
+    AIRES_RED: "A41821",
+    AIRES_GREEN: "017C4D",
+    TEXT_DARK: "1F2937",
+    TEXT_MUTED: "64748B",
+    TABLE_HEADER: "1F3A5F",
+    ZEBRA_BG: "F8FAFC",
+    BORDER_LINE: "CBD5E1",
     WHITE: "FFFFFF",
 };
 
 const PT = (n) => Math.round(n * 2);
 const TW = (pt) => Math.round(pt * 20);
 
-// A4 Dimensions (11906 x 16838 dxa) with 1" margins (1440 dxa)
+// A4 (11906 x 16838 dxa) with 1" margins (1440 dxa)
 const PAGE = { width: 11906, height: 16838 };
 const MARGIN = 1440;
-const CONTENT_WIDTH = PAGE.width - MARGIN * 2; // 9026 dxa
+const CONTENT_WIDTH = PAGE.width - MARGIN * 2;
 
 const CELL_MARGINS = { top: 100, bottom: 100, left: 140, right: 140 };
 
@@ -52,11 +53,44 @@ const NO_BORDERS = {
     right: NO_BORDER,
 };
 
+/* ─────────────────────────── Report metadata per track ─────────────────────────── */
+
+const REPORT_META = {
+    DAILY: {
+        title: "DAILY FRESH PRODUCE PRICE INTELLIGENCE REPORT",
+        subtitle: "Daily Fresh Produce · Real-Time Market Audit",
+        scope: "Fresh Corner, Garment Market, Straight Market",
+    },
+    WEEKLY: {
+        title: "WEEKLY ULTRA-SENSITIVE FMCG PRICE INTELLIGENCE REPORT",
+        subtitle: "Ultra-Sensitive FMCG Goods · Carrefour 95% Parity Index Benchmark",
+        scope: "Shoa, Abadir, Allmart, Bambis",
+    },
+    MONTHLY: {
+        title: "MONTHLY SENSITIVE FMCG PRICE INTELLIGENCE REPORT",
+        subtitle: "Sensitive Packaged Grocery · Monthly Audit",
+        scope: "Shoa, Abadir, Allmart, Bambis",
+    },
+    BI_YEARLY: {
+        title: "BI-YEARLY NON-SENSITIVE PRICE INTELLIGENCE REPORT",
+        subtitle: "Non-Sensitive Long-Tail Articles · Bi-Yearly Audit",
+        scope: "Shoa, Abadir, Allmart, Bambis",
+    },
+    ALL: {
+        title: "QUEENS PRICE INTELLIGENCE REPORT",
+        subtitle: "All Tracks · Consolidated Market Audit",
+        scope: "All tracked competitors",
+    },
+};
+
 /* ─────────────────────────── Inline Typography Parsing ─────────────────────────── */
 
 const INLINE_RE = /\*\*\*(.+?)\*\*\*|\*\*(.+?)\*\*|\*(?!\s)(.+?)\*/g;
 
-const inlineRuns = (text, { size = PT(11), color = COLOR.TEXT_DARK, bold = false } = {}) => {
+const inlineRuns = (
+    text,
+    { size = PT(11), color = COLOR.TEXT_DARK, bold = false } = {},
+) => {
     const runs = [];
     const base = { font: FONT, size, color };
     let last = 0;
@@ -82,11 +116,14 @@ const inlineRuns = (text, { size = PT(11), color = COLOR.TEXT_DARK, bold = false
 };
 
 const stripInline = (text) =>
-    (text || "").replace(/\*\*\*(.+?)\*\*\*/g, "$1").replace(/\*\*(.+?)\*\*/g, "$1").replace(/\*(?!\s)(.+?)\*/g, "$1").trim();
+    (text || "")
+        .replace(/\*\*\*(.+?)\*\*\*/g, "$1")
+        .replace(/\*\*(.+?)\*\*/g, "$1")
+        .replace(/\*(?!\s)(.+?)\*/g, "$1")
+        .trim();
 
 /* ─────────────────────────── Block Builders ─────────────────────────── */
 
-// Level 1 Section Heading (#1F4E79 Bold Uppercase)
 const h1Block = (text) =>
     new Paragraph({
         heading: HeadingLevel.HEADING_1,
@@ -103,7 +140,6 @@ const h1Block = (text) =>
         ],
     });
 
-// Level 2 Subheading (1.1, 1.2 in Aires Orange #FE7914 Bold)
 const h2Block = (text) =>
     new Paragraph({
         heading: HeadingLevel.HEADING_2,
@@ -120,7 +156,6 @@ const h2Block = (text) =>
         ],
     });
 
-// Standard Body with Lead-in Bold detection ("Lead-in Phrase: explanation...")
 const bodyBlock = (text) => {
     const leadMatch = text.match(/^([^:\n]+:)\s+(.*)$/);
 
@@ -157,9 +192,12 @@ const bulletBlock = (text) =>
 
 const buildTable = (headers, rows) => {
     const colCount = headers.length;
-    const fixed = [650, 3100, 750]; // No. (650), Item Name (3100), Unit (750)
+    const fixed = [650, 3100, 750];
     const remaining = CONTENT_WIDTH - fixed.reduce((a, b) => a + b, 0);
-    const compColWidth = Math.max(800, Math.floor(remaining / Math.max(1, colCount - 3)));
+    const compColWidth = Math.max(
+        800,
+        Math.floor(remaining / Math.max(1, colCount - 3)),
+    );
 
     const widths = [fixed[0], fixed[1], fixed[2]];
     for (let c = 3; c < colCount; c++) {
@@ -174,7 +212,11 @@ const buildTable = (headers, rows) => {
                 new TableCell({
                     width: { size: widths[i] || 1200, type: WidthType.DXA },
                     margins: CELL_MARGINS,
-                    shading: { type: ShadingType.CLEAR, color: "auto", fill: COLOR.TABLE_HEADER },
+                    shading: {
+                        type: ShadingType.CLEAR,
+                        color: "auto",
+                        fill: COLOR.TABLE_HEADER,
+                    },
                     borders: {
                         ...NO_BORDERS,
                         bottom: { style: BorderStyle.SINGLE, size: 8, color: COLOR.NAVY_HEADING },
@@ -193,7 +235,7 @@ const buildTable = (headers, rows) => {
                             ],
                         }),
                     ],
-                })
+                }),
         ),
     });
 
@@ -234,7 +276,7 @@ const buildTable = (headers, rows) => {
                         ],
                     });
                 }),
-            })
+            }),
     );
 
     return new Table({
@@ -259,21 +301,18 @@ const markdownToDocx = (markdown) => {
         const trimmed = line.trim();
         if (!trimmed) continue;
 
-        // Subheading check (e.g. "1.1 Core Platform Capabilities:" or "## 1.1")
         const subMatch = trimmed.match(/^(?:#{1,4}\s*)?(\d+\.\d+[\s\w:\-–—]+)$/);
         if (subMatch && !trimmed.startsWith("###")) {
             blocks.push(h2Block(subMatch[1]));
             continue;
         }
 
-        // Main Section Heading ("1. EXECUTIVE SUMMARY" or "# 1. EXECUTIVE")
         const mainMatch = trimmed.match(/^(?:#{1,3}\s*)?(\d+\.\s+[A-Z\s\-–—&]+)$/);
         if (mainMatch) {
             blocks.push(h1Block(mainMatch[1]));
             continue;
         }
 
-        // Generic Headings
         const headingMatch = trimmed.match(/^(#{1,6})\s+(.*)$/);
         if (headingMatch) {
             const level = headingMatch[1].length;
@@ -281,14 +320,12 @@ const markdownToDocx = (markdown) => {
             continue;
         }
 
-        // Bullet items
         const bulletMatch = trimmed.match(/^[-*•]\s+(.*)$/);
         if (bulletMatch) {
             blocks.push(bulletBlock(bulletMatch[1]));
             continue;
         }
 
-        // Standard body paragraph
         blocks.push(bodyBlock(trimmed));
     }
 
@@ -297,15 +334,14 @@ const markdownToDocx = (markdown) => {
 
 /* ─────────────────────────── Document Export Entry ─────────────────────────── */
 
-export const buildObservationReportDocx = async ({ model, aiNarrative, reportType }) => {
-    const isFresh = reportType === "FRESH_CORNER";
-    const title = isFresh
-        ? "DAILY FRESH PRODUCE PRICE INTELLIGENCE REPORT"
-        : "WEEKLY ULTRA-SENSITIVE FMCG PRICE INTELLIGENCE REPORT";
-
-    const subtitle = isFresh
-        ? "20 Daily Fresh Produce Items · Real-Time Approved & Pending Market Audit"
-        : "100 Ultra-Sensitive FMCG Goods · Carrefour 95% Parity Index Benchmark";
+export const buildObservationReportDocx = async ({
+    model,
+    aiNarrative,
+    reportType,
+}) => {
+    const meta = REPORT_META[reportType] || REPORT_META.ALL;
+    const title = meta.title;
+    const subtitle = meta.subtitle;
 
     const children = [];
 
@@ -336,20 +372,24 @@ export const buildObservationReportDocx = async ({ model, aiNarrative, reportTyp
                     color: COLOR.TEXT_MUTED,
                 }),
             ],
-        })
+        }),
     );
 
     // 2. Metadata Box Table
     const metadataRows = [
         [
             "Survey Target Date:",
-            `${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
+            new Date().toLocaleDateString("en-US", {
+                month: "long",
+                day: "numeric",
+                year: "numeric",
+            }),
             "Reference Baseline:",
             `${model.period.name} (${model.period.id})`,
         ],
         [
             "Scope:",
-            isFresh ? "Fresh Corner, Garment Market, Straight Market" : "Shoa, Abadir, Allmart, Bambis",
+            meta.scope,
             "Prepared By:",
             "Pricing Intelligence Unit, Aires Communication PLC",
         ],
@@ -383,33 +423,34 @@ export const buildObservationReportDocx = async ({ model, aiNarrative, reportTyp
                                             ],
                                         }),
                                     ],
-                                })
+                                }),
                         ),
-                    })
+                    }),
             ),
         }),
-        new Paragraph({ spacing: { after: TW(10) }, children: [] })
+        new Paragraph({ spacing: { after: TW(10) }, children: [] }),
     );
 
     // 3. AI Synthesized Executive Section
     children.push(...markdownToDocx(aiNarrative));
 
-    // 4. Master Price Matrix Section
+    // 4. Master Price Matrix — one table per track, in SortedBy order
     children.push(h1Block("2. Master Price & Competitor Matrix"));
 
-    const sectionData = model.sections?.[0];
-    if (sectionData) {
+    for (const sectionData of model.sections || []) {
+        children.push(h2Block(sectionData.label));
+
         const priceCols = sectionData.columns || [];
-        const headers = ["No.", "Category & Item Name", "Unit", ...priceCols.map((c) => c.label)];
+        const headers = ["No.", "Item Name", "Unit", ...priceCols.map((c) => c.label)];
 
         const rows = [];
         let counter = 1;
         for (const cat of sectionData.categories || []) {
             for (const prod of cat.products || []) {
                 rows.push([
-                    String(counter++),
-                    prod.name,
-                    prod.unit || "kg",
+                    String(prod.sortOrder > 0 ? prod.sortOrder : counter),
+                    formatProductName(prod.name),
+                    prod.unit || "pcs",
                     ...priceCols.map((col) => {
                         const cell = prod.cells?.[col.key];
                         if (!cell) return "—";
@@ -420,6 +461,7 @@ export const buildObservationReportDocx = async ({ model, aiNarrative, reportTyp
                             : "—";
                     }),
                 ]);
+                counter += 1;
             }
         }
 
@@ -440,7 +482,7 @@ export const buildObservationReportDocx = async ({ model, aiNarrative, reportTyp
                     color: COLOR.TEXT_MUTED,
                 }),
             ],
-        })
+        }),
     );
 
     const doc = new Document({
@@ -493,8 +535,18 @@ export const buildObservationReportDocx = async ({ model, aiNarrative, reportTyp
                             new Paragraph({
                                 alignment: AlignmentType.RIGHT,
                                 children: [
-                                    new TextRun({ text: "Page ", size: PT(8.5), font: FONT, color: COLOR.TEXT_MUTED }),
-                                    new TextRun({ children: [PageNumber.CURRENT], size: PT(8.5), font: FONT, color: COLOR.TEXT_MUTED }),
+                                    new TextRun({
+                                        text: "Page ",
+                                        size: PT(8.5),
+                                        font: FONT,
+                                        color: COLOR.TEXT_MUTED,
+                                    }),
+                                    new TextRun({
+                                        children: [PageNumber.CURRENT],
+                                        size: PT(8.5),
+                                        font: FONT,
+                                        color: COLOR.TEXT_MUTED,
+                                    }),
                                 ],
                             }),
                         ],

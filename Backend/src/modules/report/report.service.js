@@ -5,9 +5,8 @@ import { buildObservationReportPdf } from "./report.pdf.js";
 import { buildObservationReportExcel } from "./report.excel.js";
 import { groq, getActiveGroqModel } from "../../config/groq.js";
 import { buildObservationReportDocx } from "./report.docx.js";
-import { slugify } from "./report.utils.js";
+import { slugify, formatProductName } from "./report.utils.js";
 import {
-  CATEGORY_ORDER,
   REPORT_TYPES,
   REPORT_TYPE_KEYS,
   matchColumn,
@@ -35,6 +34,7 @@ const PRODUCT_SELECT = {
   category: true,
   frequency: true,
   unit: true,
+  sortOrder: true,
 };
 
 const REVIEW_RANK = { APPROVED: 0, PENDING: 1, NEEDS_REVIEW: 2, REJECTED: 3 };
@@ -89,10 +89,36 @@ const withCoverage = (counters) => ({
   coveragePct: pct(counters.recorded, counters.items),
 });
 
-const byText = (a, b) =>
-  String(a).localeCompare(String(b), "en", { sensitivity: "base" });
-
 const categoryOf = (product) => product.category?.trim() || UNCATEGORIZED;
+
+// ============================================================
+// SortedBy ordering helpers
+// ============================================================
+
+// sortOrder 0 / null means "unset" → pushed to the end
+const seq = (p) => (p.sortOrder > 0 ? p.sortOrder : Number.MAX_SAFE_INTEGER);
+
+const compareProducts = (a, b) =>
+  seq(a) - seq(b) || String(a.name).localeCompare(String(b.name));
+
+/**
+ * Groups an already-ordered product list into CONSECUTIVE category bands.
+ * A category that appears in two separate runs of the SortedBy sequence
+ * produces two bands, so the global order is never broken.
+ */
+const groupIntoBands = (list, getRow = (p) => p) => {
+  const bands = [];
+  for (const p of list) {
+    const name = categoryOf(p);
+    let band = bands[bands.length - 1];
+    if (!band || band.name !== name) {
+      band = { name, products: [] };
+      bands.push(band);
+    }
+    band.products.push(getRow(p));
+  }
+  return bands;
+};
 
 const loadCurrentQueensPrices = async (productIds) => {
   const result = new Map();
@@ -125,15 +151,6 @@ const loadCurrentQueensPrices = async (productIds) => {
 // Date-range resolution
 // ============================================================
 
-/**
- * Resolves the survey period(s) / date range(s) selected by the user
- * into a normalized list of "range descriptors".
- *
- * Always returns an array. Each item is one of:
- *   { type: "PERIOD",  periodRecord, startDate, endDate, periodName, periodId }
- *   { type: "DATE",    startDate, endDate, periodName, periodId }
- *   { type: "ALL",     startDate, endDate, periodName, periodId }
- */
 const resolveDateRanges = async ({
   surveyPeriodId,
   rangeType,
@@ -142,7 +159,6 @@ const resolveDateRanges = async ({
 }) => {
   const now = new Date();
 
-  // Normalize to array of ids (both shapes accepted)
   const rawIds = Array.isArray(surveyPeriodId)
     ? surveyPeriodId
     : surveyPeriodId
@@ -153,7 +169,6 @@ const resolveDateRanges = async ({
     .map((v) => String(v ?? "").trim())
     .filter((v) => v && v !== "ALL" && v !== "all");
 
-  // 1. Explicit Week Range
   if (rangeType === "WEEK") {
     const start = new Date(now);
     start.setDate(now.getDate() - 7);
@@ -168,7 +183,6 @@ const resolveDateRanges = async ({
     ];
   }
 
-  // 2. Explicit Month Range
   if (rangeType === "MONTH") {
     const start = new Date(now);
     start.setDate(now.getDate() - 30);
@@ -183,7 +197,6 @@ const resolveDateRanges = async ({
     ];
   }
 
-  // 3. Custom Date Range
   if (startDate && endDate) {
     const start = new Date(startDate);
     const end = new Date(endDate);
@@ -203,7 +216,6 @@ const resolveDateRanges = async ({
     }
   }
 
-  // 4. One or more specific survey periods
   if (periodIds.length > 0) {
     const periods = await prisma.surveyPeriod.findMany({
       where: { id: { in: periodIds } },
@@ -227,7 +239,6 @@ const resolveDateRanges = async ({
     }));
   }
 
-  // 5. No period and no range supplied → ALL survey data ever gathered.
   const allTime = await prisma.priceObservation.aggregate({
     _min: { capturedAt: true },
     _max: { capturedAt: true },
@@ -272,9 +283,7 @@ const loadRawData = async ({
     .filter((r) => r.type === "PERIOD")
     .map((r) => r.periodId);
   const dateRanges = ranges.filter((r) => r.type === "DATE");
-  const isAllData = ranges.length === 1 && ranges[0].type === "ALL";
 
-  // Normalize storeIds to array
   const rawStoreIds = Array.isArray(storeId)
     ? storeId
     : storeId
@@ -295,37 +304,30 @@ const loadRawData = async ({
     const found = new Set(stores.map((s) => s.id));
     const missing = storeIds.filter((id) => !found.has(id));
     if (missing.length > 0) {
-      throw new ApiError(
-        404,
-        `Store(s) not found: ${missing.join(", ")}`,
-      );
+      throw new ApiError(404, `Store(s) not found: ${missing.join(", ")}`);
     }
   }
 
-  // Human-readable label for the report header
   const period = {
-    id:
-      ranges.length === 1 ? ranges[0].periodId : "multi-range",
+    id: ranges.length === 1 ? ranges[0].periodId : "multi-range",
     name:
       ranges.length === 1
         ? ranges[0].periodName
         : `${ranges.length} survey cycles selected`,
     startDate: ranges.reduce(
-      (min, r) =>
-        !min || r.startDate < min ? r.startDate : min,
+      (min, r) => (!min || r.startDate < min ? r.startDate : min),
       null,
     ),
     endDate: ranges.reduce(
-      (max, r) =>
-        !max || r.endDate > max ? r.endDate : max,
+      (max, r) => (!max || r.endDate > max ? r.endDate : max),
       null,
     ),
-    status: ranges.length === 1 && ranges[0].periodRecord
-      ? ranges[0].periodRecord.status
-      : "MIXED",
+    status:
+      ranges.length === 1 && ranges[0].periodRecord
+        ? ranges[0].periodRecord.status
+        : "MIXED",
   };
 
-  // Build the observation filter
   const observationWhere = {
     audit: {
       status: { notIn: EXCLUDED_AUDIT_STATUSES },
@@ -335,15 +337,12 @@ const loadRawData = async ({
   };
 
   if (periodIds.length > 0 && dateRanges.length === 0) {
-    // Only periods selected
     observationWhere.audit.surveyPeriodId = { in: periodIds };
   } else if (dateRanges.length > 0 && periodIds.length === 0) {
-    // Only date-range(s) selected — OR them together
     observationWhere.OR = dateRanges.map((r) => ({
       capturedAt: { gte: r.startDate, lte: r.endDate },
     }));
   } else if (periodIds.length > 0 && dateRanges.length > 0) {
-    // Both — periods OR date ranges
     observationWhere.OR = [
       { audit: { surveyPeriodId: { in: periodIds } } },
       ...dateRanges.map((r) => ({
@@ -351,9 +350,7 @@ const loadRawData = async ({
       })),
     ];
   }
-  // else: isAllData → no filter
 
-  // Build the assignment items filter
   const assignmentWhere = {
     assignment: {
       status: { not: "CANCELLED" },
@@ -386,12 +383,13 @@ const loadRawData = async ({
     ];
   }
 
-  // Queen's master list — canonical row set
-  const masterProducts = await prisma.product.findMany({
-    where: { active: true },
-    orderBy: { id: "asc" },
-    select: PRODUCT_SELECT,
-  });
+  // Master catalog in SortedBy order (unset sortOrder → end)
+  const masterProducts = (
+    await prisma.product.findMany({
+      where: { active: true },
+      select: PRODUCT_SELECT,
+    })
+  ).sort(compareProducts);
 
   const [observations, assignmentItems] = await Promise.all([
     prisma.priceObservation.findMany({
@@ -402,6 +400,7 @@ const loadRawData = async ({
         productId: true,
         availability: true,
         price: true,
+        substituteProduct: true,
         observedUnit: true,
         packageSize: true,
         capturedAt: true,
@@ -434,13 +433,13 @@ const loadRawData = async ({
     }),
   ]);
 
-  // Which survey cycles to include as cycle blocks
   const cycleIds = new Set();
   for (const obs of observations) {
     if (obs.audit?.surveyPeriodId) cycleIds.add(obs.audit.surveyPeriodId);
   }
   for (const item of assignmentItems) {
-    if (item.assignment?.surveyPeriodId) cycleIds.add(item.assignment.surveyPeriodId);
+    if (item.assignment?.surveyPeriodId)
+      cycleIds.add(item.assignment.surveyPeriodId);
   }
 
   let cycles = [];
@@ -469,6 +468,10 @@ const loadRawData = async ({
   };
 };
 
+// ============================================================
+// Cycle builder
+// ============================================================
+
 const buildCycle = (
   config,
   cycle,
@@ -487,12 +490,18 @@ const buildCycle = (
   const competitorColumns = columns.filter((c) => c.kind === "COMPETITOR");
   const queensColumn = columns.find((c) => c.kind === "QUEENS") || null;
 
-  // Filter master products belonging to this specific Track
-  const products = masterProducts.filter((p) => config.acceptsProduct(p));
+  // Products for this track — already in SortedBy order
+  const products = masterProducts.filter((p) =>
+    config.acceptsProduct ? config.acceptsProduct(p) : true,
+  );
   if (products.length === 0) return null;
 
+  const productById = new Map(products.map((p) => [p.id, p]));
+
   const pairs = new Map();
-  const columnStores = new Map(competitorColumns.map((c) => [c.key, new Set()]));
+  const columnStores = new Map(
+    competitorColumns.map((c) => [c.key, new Set()]),
+  );
 
   const getPair = (columnKey, productId) => {
     const key = `${columnKey}|${productId}`;
@@ -502,11 +511,9 @@ const buildCycle = (
     return pairs.get(key);
   };
 
-  const productIdsSet = new Set(products.map((p) => p.id));
-
   for (const item of assignmentItems) {
     if (item.assignment?.surveyPeriodId !== cycle.id) continue;
-    if (!productIdsSet.has(item.productId)) continue;
+    if (!productById.has(item.productId)) continue;
 
     const column = matchColumn(
       competitorColumns,
@@ -520,7 +527,7 @@ const buildCycle = (
 
   for (const obs of observations) {
     if (obs.audit?.surveyPeriodId !== cycle.id) continue;
-    if (!productIdsSet.has(obs.productId)) continue;
+    if (!productById.has(obs.productId)) continue;
 
     const obsStore = obs.audit.store;
     const column = matchColumn(competitorColumns, obsStore?.competitor?.name);
@@ -563,73 +570,61 @@ const buildCycle = (
       : null;
   }
 
-  const categoriesMap = new Map();
-  for (const p of products) {
-    const cat = categoryOf(p);
-    if (!categoriesMap.has(cat)) categoriesMap.set(cat, []);
-    categoriesMap.get(cat).push({
-      id: p.id,
-      name: p.name,
-      code: p.sku || p.barcode || p.id,
-      unit: p.unit ?? "",
-      category: cat,
-      frequency: p.frequency,
-    });
-  }
-
   let queensPriced = 0;
 
-  const categoryOrder = CATEGORY_ORDER[config.key] || [];
-  const rankOf = (name) => {
-    const idx = categoryOrder.indexOf(name);
-    return idx === -1 ? categoryOrder.length + 1 : idx;
+  const buildRow = (p) => {
+    const cells = {};
+    for (const column of columns) {
+      if (column.kind === "QUEENS") {
+        const q = queensPrices.get(p.id);
+        if (q) {
+          queensPriced += 1;
+          cells[column.key] = {
+            kind: "QUEENS",
+            availability: "AVAILABLE",
+            price: Number(q.price),
+            effectiveFrom: q.effectiveFrom,
+            effectiveTo: q.effectiveTo ?? null,
+            source: q.source ?? null,
+          };
+        } else {
+          cells[column.key] = undefined;
+        }
+      } else {
+        const pair = pairs.get(`${column.key}|${p.id}`);
+        cells[column.key] = pair ? pair.record : undefined;
+      }
+    }
+    return {
+      id: p.id,
+      name: formatProductName(p.name),
+      code: p.sku || p.barcode || p.id,
+      unit: p.unit ?? "",
+      category: categoryOf(p),
+      sortOrder: p.sortOrder ?? 0,
+      cells,
+    };
   };
 
-  const sortedCategoryNames = [...categoriesMap.keys()].sort((a, b) => {
-    const ra = rankOf(a);
-    const rb = rankOf(b);
-    if (ra !== rb) return ra - rb;
-    return byText(a, b);
-  });
-
-  const categories = sortedCategoryNames.map((name) => ({
-    name,
-    products: categoriesMap.get(name).map((product) => {
-      const cells = {};
-      for (const column of columns) {
-        if (column.kind === "QUEENS") {
-          const q = queensPrices.get(product.id);
-          if (q) {
-            queensPriced += 1;
-            cells[column.key] = {
-              kind: "QUEENS",
-              availability: "AVAILABLE",
-              price: Number(q.price),
-              effectiveFrom: q.effectiveFrom,
-              effectiveTo: q.effectiveTo ?? null,
-              source: q.source ?? null,
-            };
-          } else {
-            cells[column.key] = undefined;
-          }
-        } else {
-          const pair = pairs.get(`${column.key}|${product.id}`);
-          cells[column.key] = pair ? pair.record : undefined;
-        }
-      }
-      return { ...product, cells };
-    }),
-  }));
+  // Consecutive category bands in strict SortedBy order
+  const categories = groupIntoBands(products, buildRow);
 
   const totalCounters = blankCounters();
-  const categoryCounters = new Map(categories.map((c) => [c.name, blankCounters()]));
-  const columnCounters = new Map(competitorColumns.map((c) => [c.key, blankCounters()]));
+  const categoryCounters = new Map(
+    [...new Set(products.map(categoryOf))].map((name) => [
+      name,
+      blankCounters(),
+    ]),
+  );
+  const columnCounters = new Map(
+    competitorColumns.map((c) => [c.key, blankCounters()]),
+  );
   const review = { APPROVED: 0, PENDING: 0, NEEDS_REVIEW: 0 };
   let lowest = null;
   let highest = null;
 
   for (const pair of pairs.values()) {
-    const product = products.find((p) => p.id === pair.productId);
+    const product = productById.get(pair.productId);
     if (!product) continue;
     const column = competitorColumns.find((c) => c.key === pair.columnKey);
     if (!column) continue;
@@ -642,9 +637,12 @@ const buildCycle = (
       if (review[pair.record.reviewStatus] !== undefined) {
         review[pair.record.reviewStatus] += 1;
       }
-      if (pair.record.availability === "AVAILABLE" && pair.record.price !== null) {
+      if (
+        pair.record.availability === "AVAILABLE" &&
+        pair.record.price !== null
+      ) {
         const entry = {
-          product: product.name,
+          product: formatProductName(product.name),
           productCode: product.sku || product.barcode || product.id,
           competitor: column.label,
           store: pair.record.storeName,
@@ -674,10 +672,10 @@ const buildCycle = (
     queens: queensColumn
       ? { products: products.length, priced: queensPriced }
       : null,
-    byCategory: categories.map((c) => ({
-      category: c.name,
-      products: c.products.length,
-      ...withCoverage(categoryCounters.get(c.name)),
+    byCategory: [...categoryCounters.keys()].map((name) => ({
+      category: name,
+      products: products.filter((p) => categoryOf(p) === name).length,
+      ...withCoverage(categoryCounters.get(name)),
     })),
     byCompetitor: competitorColumns.map((c) => ({
       competitorKey: c.key,
@@ -796,8 +794,10 @@ const aggregateSummaries = (cycles) => {
     }
 
     if (s.priceRange) {
-      if (!lowest || s.priceRange.lowest.price < lowest.price) lowest = s.priceRange.lowest;
-      if (!highest || s.priceRange.highest.price > highest.price) highest = s.priceRange.highest;
+      if (!lowest || s.priceRange.lowest.price < lowest.price)
+        lowest = s.priceRange.lowest;
+      if (!highest || s.priceRange.highest.price > highest.price)
+        highest = s.priceRange.highest;
     }
   }
 
@@ -811,7 +811,9 @@ const aggregateSummaries = (cycles) => {
       duplicatesResolved,
     },
     review,
-    queens: hasQueens ? { products: queensProducts, priced: queensPriced } : null,
+    queens: hasQueens
+      ? { products: queensProducts, priced: queensPriced }
+      : null,
     byCategory: [...byCategoryMap.values()].map((c) => ({
       category: c.category,
       products: c.products,
@@ -853,25 +855,17 @@ const buildSection = (
 
   if (cycleBlocks.length === 0) return null;
 
-  const flatCategories = [];
+  // Merge products across cycles, then re-apply SortedBy order and regroup
+  // into consecutive category bands. No alphabetical re-sorting.
+  const byId = new Map();
   for (const block of cycleBlocks) {
     for (const cat of block.categories) {
-      const existing = flatCategories.find((c) => c.name === cat.name);
-      if (existing) {
-        for (const prod of cat.products) {
-          if (!existing.products.find((p) => p.id === prod.id)) {
-            existing.products.push(prod);
-          }
-        }
-      } else {
-        flatCategories.push({ name: cat.name, products: [...cat.products] });
+      for (const prod of cat.products) {
+        if (!byId.has(prod.id)) byId.set(prod.id, prod);
       }
     }
   }
-  flatCategories.sort((a, b) => byText(a.name, b.name));
-  for (const cat of flatCategories) {
-    cat.products.sort((a, b) => byText(a.name, b.name));
-  }
+  const flatCategories = groupIntoBands([...byId.values()].sort(compareProducts));
 
   const columnShape = cycleBlocks[0].columns;
 
@@ -933,7 +927,12 @@ export const buildReportModel = ({
   }
 
   return {
-    scope: stores && stores.length > 1 ? "MULTI_STORE" : store ? "STORE" : "ALL_STORES",
+    scope:
+      stores && stores.length > 1
+        ? "MULTI_STORE"
+        : store
+          ? "STORE"
+          : "ALL_STORES",
     reportType: reportTypes.length === 1 ? reportTypes[0] : "ALL",
     generatedAt: new Date(),
     generatedBy: user?.name || user?.email || "",
@@ -979,7 +978,7 @@ const loadReportModel = async ({
   if (requested === null) {
     throw new ApiError(
       400,
-      `reportType must be one of: ${REPORT_TYPE_KEYS.join(", ")} (omit it to get both)`,
+      `reportType must be one of: ${REPORT_TYPE_KEYS.join(", ")} (omit it to get all)`,
     );
   }
   const reportTypes = requested ? [requested] : REPORT_TYPE_KEYS;
@@ -990,7 +989,7 @@ const loadReportModel = async ({
     startDate,
     endDate,
     storeId,
-    needsQueens: reportTypes.includes("FRESH_CORNER") || reportTypes.length > 1,
+    needsQueens: true,
   });
 
   return buildReportModel({ ...raw, reportTypes, user });
@@ -1015,21 +1014,12 @@ export const getAiReportSummary = async (params) => {
   const reportType = params.reportType || "ALL";
 
   const totalProducts = model.sections.reduce(
-    (acc, s) => acc + (s.categories?.reduce((cAcc, c) => cAcc + c.products.length, 0) || 0),
+    (acc, s) =>
+      acc + (s.categories?.reduce((cAcc, c) => cAcc + c.products.length, 0) || 0),
     0,
   );
 
-  // ─────────────────────────────────────────────────────────────
-  // Build a COMPACT payload for the LLM. We deliberately do NOT
-  // send the full product list — with 100+ products × up to 4
-  // competitors + Queens, the raw JSON blows past Groq's 8k TPM
-  // limit. Instead we send:
-  //   • per-section summary totals
-  //   • per-cycle totals
-  //   • top 5 price gaps (where Queens is most above / below the
-  //     cheapest competitor)
-  //   • a handful of "not found" highlights
-  // ─────────────────────────────────────────────────────────────
+  // COMPACT payload for the LLM (keeps us under Groq's TPM limit).
   const sectionsPayload = model.sections.map((section) => {
     const competitors = section.columns
       .filter((c) => c.kind === "COMPETITOR")
@@ -1037,20 +1027,23 @@ export const getAiReportSummary = async (params) => {
 
     const queensColumn = section.columns.find((c) => c.kind === "QUEENS");
 
-    // Gather products with a Queens price AND at least one competitor
-    // price, then rank by price gap.
     const ranked = [];
     for (const cat of section.categories) {
       for (const prod of cat.products) {
         const queensCell = queensColumn ? prod.cells?.[queensColumn.key] : null;
-        if (!queensCell || queensCell.price === null || queensCell.price === undefined) {
+        if (
+          !queensCell ||
+          queensCell.price === null ||
+          queensCell.price === undefined
+        ) {
           continue;
         }
         const competitorPrices = section.columns
           .filter((c) => c.kind === "COMPETITOR")
           .map((c) => prod.cells?.[c.key])
           .filter(
-            (rec) => rec && rec.availability === "AVAILABLE" && rec.price !== null,
+            (rec) =>
+              rec && rec.availability === "AVAILABLE" && rec.price !== null,
           )
           .map((rec) => Number(rec.price));
 
@@ -1067,15 +1060,16 @@ export const getAiReportSummary = async (params) => {
           unit: prod.unit || "",
           queensPrice: queens,
           cheapestCompetitor: cheapest,
-          cheapestCompetitorName: section.columns.find((c) => {
-            const rec = prod.cells?.[c.key];
-            return (
-              c.kind === "COMPETITOR" &&
-              rec &&
-              rec.availability === "AVAILABLE" &&
-              Number(rec.price) === cheapest
-            );
-          })?.label || "",
+          cheapestCompetitorName:
+            section.columns.find((c) => {
+              const rec = prod.cells?.[c.key];
+              return (
+                c.kind === "COMPETITOR" &&
+                rec &&
+                rec.availability === "AVAILABLE" &&
+                Number(rec.price) === cheapest
+              );
+            })?.label || "",
           gapETB: Math.round(gap * 100) / 100,
           gapPct: Math.round(gapPct * 10) / 10,
         });
@@ -1085,8 +1079,6 @@ export const getAiReportSummary = async (params) => {
     const overpriced = [...ranked].sort((a, b) => b.gapPct - a.gapPct).slice(0, 5);
     const underpriced = [...ranked].sort((a, b) => a.gapPct - b.gapPct).slice(0, 5);
 
-    // Not-found highlights: products where every competitor column is
-    // "Not found" this cycle. Useful for the AI to spot assortment gaps.
     const notFoundHighlights = [];
     for (const cat of section.categories) {
       for (const prod of cat.products) {
@@ -1097,10 +1089,7 @@ export const getAiReportSummary = async (params) => {
             return rec && rec.availability === "AVAILABLE";
           });
         if (!anyAvailable) {
-          notFoundHighlights.push({
-            category: cat.name,
-            name: prod.name,
-          });
+          notFoundHighlights.push({ category: cat.name, name: prod.name });
           if (notFoundHighlights.length >= 8) break;
         }
       }
@@ -1137,7 +1126,7 @@ export const getAiReportSummary = async (params) => {
   );
 
   let prompt = "";
-  if (reportType === "FRESH_CORNER") {
+  if (reportType === "DAILY") {
     prompt = `
 You are the Chief Fresh Produce Pricing Strategist for Queens Supermarket PLC / Carrefour Ethiopia.
 Generate a decisive C-level executive pricing brief for this produce period (${model.period.name}):
@@ -1153,7 +1142,7 @@ Structure your report into these exact sections:
 
 Tone: Decisive, urgent, operational, referencing exact Ethiopian Birr (ETB) figures and competitor discrepancies.
 `;
-  } else if (reportType === "ULTRA_SENSITIVE") {
+  } else if (reportType === "WEEKLY") {
     prompt = `
 You are the Lead Commercial Pricing Intelligence Director for Queens Supermarket PLC / MIDROC Investment Group.
 Generate a structured C-level executive pricing brief for this FMCG benchmarking window (${model.period.name}):
@@ -1172,7 +1161,7 @@ Tone: Corporate, analytical, C-suite grade. Mention specific margin opportunitie
   } else {
     prompt = `
 You are the Chief Commercial Officer & Head of Retail Pricing for Queens Supermarket PLC / MIDROC Investment Group.
-Generate an integrated comprehensive executive pricing intelligence brief for both **Daily Fresh Produce** and **100 Ultra-Sensitive FMCG** across this timeframe (${model.period.name}):
+Generate an integrated comprehensive executive pricing intelligence brief across the tracked product tracks for this timeframe (${model.period.name}):
 
 Market Intelligence Context:
 ${contextJson}
@@ -1190,13 +1179,9 @@ Tone: Highly authoritative, executive-grade retail intelligence. Use ETB figures
 
   const activeModel = await getActiveGroqModel("reasoning");
 
-  // Guard: keep the final prompt under ~6000 tokens so it never
-  // trips Groq's 8000 TPM limit. If it's still too big, cut the
-  // notFound highlights first, then the underpriced/overpriced tail.
   const roughTokenCount = Math.ceil(prompt.length / 4);
   let finalPrompt = prompt;
   if (roughTokenCount > 6000) {
-    // Fallback: send only totals + competitor lists, no product rows
     const minimalPayload = JSON.stringify(
       {
         timeframe: model.period.name,
@@ -1223,7 +1208,10 @@ Tone: Highly authoritative, executive-grade retail intelligence. Use ETB figures
   const completion = await groq.chat.completions.create({
     model: activeModel,
     messages: [
-      { role: "system", content: "You write high-level corporate retail pricing briefs." },
+      {
+        role: "system",
+        content: "You write high-level corporate retail pricing briefs.",
+      },
       { role: "user", content: finalPrompt },
     ],
     temperature: 0.2,
@@ -1234,7 +1222,8 @@ Tone: Highly authoritative, executive-grade retail intelligence. Use ETB figures
 
   return {
     reportType,
-    rangeType: params.rangeType || (params.surveyPeriodId ? "PERIOD" : "CUSTOM"),
+    rangeType:
+      params.rangeType || (params.surveyPeriodId ? "PERIOD" : "CUSTOM"),
     totalProducts,
     period: model.period,
     generatedAt: new Date(),
