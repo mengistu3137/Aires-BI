@@ -5,7 +5,11 @@ export const getAll = async (query = {}) => {
     const where = {};
     if (query.competitorId) where.competitorId = query.competitorId;
     if (query.type) where.type = query.type;
-    if (query.active !== undefined) where.active = query.active === "true";
+
+    // Supports ?active=true, ?active=false, and boolean values
+    if (query.active !== undefined) {
+        where.active = query.active === "true" || query.active === true;
+    }
 
     return prisma.store.findMany({
         where,

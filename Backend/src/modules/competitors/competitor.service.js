@@ -7,7 +7,8 @@ export const getAll = async (activeOnly = false) => {
         where,
         orderBy: { name: "asc" },
         include: {
-            stores: true,
+            // Only include active physical branches when activeOnly is true
+            stores: activeOnly ? { where: { active: true } } : true,
             _count: {
                 select: { stores: true },
             },

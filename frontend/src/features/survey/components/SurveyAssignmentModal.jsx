@@ -11,6 +11,13 @@ import { getStoreAllocationsRequest } from "@/services/api/assignment.api.js";
 import { formatProductName } from "@/utils/formatters.js";
 import toast from "react-hot-toast";
 
+const TRACK_ORDER = {
+	DAILY: 0,
+	WEEKLY: 1,
+	MONTHLY: 2,
+	BI_YEARLY: 3,
+};
+
 /**
  * Computes equal slices across total items for N auditors
  */
@@ -85,23 +92,43 @@ const getProductTrack = (p) => {
 	return "BI_YEARLY";
 };
 
+/**
+ * Strict Excel sequence sort by sortOrder (1..N)
+ */
+const sortBySortOrder = (items = []) =>
+	[...items].sort((a, b) => {
+		const aSeq = a.sortOrder ?? 999999;
+		const bSeq = b.sortOrder ?? 999999;
+		if (aSeq !== bSeq) return aSeq - bSeq;
+		return String(a.name || "").localeCompare(String(b.name || ""));
+	});
+
 export const SurveyAssignmentModal = ({
 	isOpen,
 	onClose,
 	storeId: initialStoreId = null,
 }) => {
-	const { stores = [], isLoading: storesLoading } = useStores();
+	// Query active stores only using existing hook
+	const { stores = [], isLoading: storesLoading } = useStores({
+		active: "true",
+	});
 	const { users = [] } = useUsers();
 	const { products = [], isLoading: productsLoading } = useProducts();
 	const { activePeriod, periods = [] } = usePeriods();
-
-	const createBatch = useCreateBatchAssignment();
-	const updateAllocations = useUpdateStoreAllocations();
 
 	const openPeriods = useMemo(
 		() => (periods || []).filter((p) => p.status === "OPEN"),
 		[periods],
 	);
+
+	// Filter out any deactivated stores
+	const activeStores = useMemo(
+		() => stores.filter((s) => s.active !== false),
+		[stores],
+	);
+
+	const createBatch = useCreateBatchAssignment();
+	const updateAllocations = useUpdateStoreAllocations();
 
 	const auditors = useMemo(
 		() =>
@@ -126,26 +153,63 @@ export const SurveyAssignmentModal = ({
 	const [isEditMode, setIsEditMode] = useState(false);
 	const [isLoadingExisting, setIsLoadingExisting] = useState(false);
 
-	// 4 Track Pools
+	// Auto-select first active store and period on open
+	useEffect(() => {
+		if (!isOpen) return;
+		setSurveyPeriodId(activePeriod?.id || openPeriods[0]?.id || "");
+		if (activeStores.length > 0) {
+			const candidateId =
+				initialStoreId && activeStores.some((s) => s.id === initialStoreId)
+					? initialStoreId
+					: activeStores[0]?.id || "";
+			setStoreId(candidateId);
+		}
+	}, [isOpen, activePeriod, openPeriods, initialStoreId, activeStores]);
+
+	// ────────────────────────────────────────────────────────────
+	// 4 TRACK POOLS — SORTED STRICTLY BY EXCEL SEQUENCE (sortOrder)
+	// ────────────────────────────────────────────────────────────
 	const dailyFreshProducts = useMemo(
-		() => products.filter((p) => getProductTrack(p) === "DAILY"),
+		() =>
+			sortBySortOrder(products.filter((p) => getProductTrack(p) === "DAILY")),
 		[products],
 	);
 
 	const weeklyUltraProducts = useMemo(
-		() => products.filter((p) => getProductTrack(p) === "WEEKLY"),
+		() =>
+			sortBySortOrder(products.filter((p) => getProductTrack(p) === "WEEKLY")),
 		[products],
 	);
 
 	const monthlySensitiveProducts = useMemo(
-		() => products.filter((p) => getProductTrack(p) === "MONTHLY"),
+		() =>
+			sortBySortOrder(products.filter((p) => getProductTrack(p) === "MONTHLY")),
 		[products],
 	);
 
 	const biYearlyProducts = useMemo(
-		() => products.filter((p) => getProductTrack(p) === "BI_YEARLY"),
+		() =>
+			sortBySortOrder(
+				products.filter((p) => getProductTrack(p) === "BI_YEARLY"),
+			),
 		[products],
 	);
+
+	// All products sorted hierarchically: Daily (1..20) -> Weekly (1..100) -> Sensitive (1..500) -> Non-Sensitive (1..2804)
+	const allProductsSorted = useMemo(() => {
+		return [...products].sort((a, b) => {
+			const freqA = getProductTrack(a);
+			const freqB = getProductTrack(b);
+			const diffFreq = (TRACK_ORDER[freqA] ?? 9) - (TRACK_ORDER[freqB] ?? 9);
+			if (diffFreq !== 0) return diffFreq;
+
+			const aSeq = a.sortOrder ?? 999999;
+			const bSeq = b.sortOrder ?? 999999;
+			if (aSeq !== bSeq) return aSeq - bSeq;
+
+			return String(a.name || "").localeCompare(String(b.name || ""));
+		});
+	}, [products]);
 
 	// Active Selected Counts per Track
 	const selectedDailyCount = useMemo(
@@ -174,13 +238,6 @@ export const SurveyAssignmentModal = ({
 			biYearlyProducts.filter((p) => selectedProductIds.includes(p.id)).length,
 		[biYearlyProducts, selectedProductIds],
 	);
-
-	// Initialize store and survey period on open
-	useEffect(() => {
-		if (!isOpen) return;
-		setSurveyPeriodId(activePeriod?.id || openPeriods[0]?.id || "");
-		setStoreId(initialStoreId || stores[0]?.id || "");
-	}, [isOpen, activePeriod, openPeriods, initialStoreId, stores]);
 
 	// Pre-select weekly ultra-sensitive products by default for standard weekly cycles
 	useEffect(() => {
@@ -223,7 +280,6 @@ export const SurveyAssignmentModal = ({
 						setSelectedProductIds(allAssignedIds);
 					}
 
-					// Map relative sequential ranges (1 to count) rather than catalog indices
 					let currentStart = 1;
 					const mapped = existing.map((asn) => {
 						const count = asn.productIds?.length || 0;
@@ -371,7 +427,7 @@ export const SurveyAssignmentModal = ({
 		);
 	}, []);
 
-	// Active Tab items
+	// Active Tab items (strictly sorted by sortOrder)
 	const currentTabPool = useMemo(() => {
 		switch (activeProductTab) {
 			case "DAILY":
@@ -383,7 +439,7 @@ export const SurveyAssignmentModal = ({
 			case "BI_YEARLY":
 				return biYearlyProducts;
 			default:
-				return products;
+				return allProductsSorted;
 		}
 	}, [
 		activeProductTab,
@@ -391,10 +447,10 @@ export const SurveyAssignmentModal = ({
 		weeklyUltraProducts,
 		monthlySensitiveProducts,
 		biYearlyProducts,
-		products,
+		allProductsSorted,
 	]);
 
-	// Filtered products list for checklist render
+	// Filtered products list for checklist render (maintains sequence)
 	const displayedChecklist = useMemo(() => {
 		if (!checklistSearch.trim()) return currentTabPool;
 		const term = checklistSearch.toLowerCase().trim();
@@ -417,12 +473,23 @@ export const SurveyAssignmentModal = ({
 		if (selectedProductIds.length === 0)
 			return toast.error("Please select at least one product to audit");
 
-		const activeProductsPool = products.filter((p) =>
-			selectedProductIds.includes(p.id),
-		);
+		// Sort the active pool by track and sortOrder before dividing into ranges
+		const activeProductsPool = products
+			.filter((p) => selectedProductIds.includes(p.id))
+			.sort((a, b) => {
+				const freqA = getProductTrack(a);
+				const freqB = getProductTrack(b);
+				const diffFreq = (TRACK_ORDER[freqA] ?? 9) - (TRACK_ORDER[freqB] ?? 9);
+				if (diffFreq !== 0) return diffFreq;
+
+				const aSeq = a.sortOrder ?? 999999;
+				const bSeq = b.sortOrder ?? 999999;
+				if (aSeq !== bSeq) return aSeq - bSeq;
+
+				return String(a.name || "").localeCompare(String(b.name || ""));
+			});
 
 		const formattedAllocations = allocations.map((alloc) => {
-			// Single auditor automatically gets the entire active pool
 			if (allocations.length === 1) {
 				return {
 					auditorId: alloc.auditorId,
@@ -472,7 +539,7 @@ export const SurveyAssignmentModal = ({
 
 	if (!isOpen) return null;
 
-	const selectedStore = stores.find((s) => s.id === storeId);
+	const selectedStore = activeStores.find((s) => s.id === storeId);
 
 	return (
 		<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-xs">
@@ -534,7 +601,7 @@ export const SurveyAssignmentModal = ({
 								disabled={storesLoading || isLoadingExisting}
 								className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-800 outline-hidden focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] cursor-pointer disabled:bg-slate-100 disabled:cursor-not-allowed"
 							>
-								{stores.map((s) => (
+								{activeStores.map((s) => (
 									<option key={s.id} value={s.id}>
 										{s.name} ({s.type})
 									</option>
@@ -568,7 +635,7 @@ export const SurveyAssignmentModal = ({
 							</button>
 						</div>
 
-						{/* 4 Tracks Navigation Tabs with Brand Tokens */}
+						{/* 4 Tracks Navigation Tabs */}
 						<div className="grid grid-cols-2 sm:grid-cols-5 gap-1 rounded-xl border border-slate-200 bg-slate-100 p-1">
 							<button
 								type="button"
@@ -633,7 +700,7 @@ export const SurveyAssignmentModal = ({
 							</button>
 						</div>
 
-						{/* Track Toolbar: Quick Select / Deselect */}
+						{/* Track Toolbar */}
 						<div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pt-1">
 							{activeProductTab !== "ALL" ? (
 								<button
@@ -710,8 +777,9 @@ export const SurveyAssignmentModal = ({
 													onChange={() => handleToggleProduct(p.id)}
 													className="cursor-pointer rounded border-slate-300 text-[#A41821] focus:ring-[#A41821]"
 												/>
-												<span className="font-mono text-[10px] text-slate-400">
-													#{idx + 1}
+												{/* Exact Excel sequence index: 1..20, 1..100, 1..500, 1..2804 */}
+												<span className="font-mono text-[10px] font-bold text-slate-700">
+													#{p.sortOrder ?? idx + 1}
 												</span>
 												<span className="truncate">
 													{formatProductName(p.name)} ({p.unit})
