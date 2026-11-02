@@ -491,11 +491,9 @@ export const getQueensPriceById = async (id) => {
 };
 
 /**
- * Lists benchmark prices across products with optional filtering.
- */
-/**
  * Lists benchmark prices across all catalog products (SSOT).
  * Evaluates active benchmarks and supports track frequency filtering (DAILY, WEEKLY, MONTHLY, BI_YEARLY).
+ * Strictly ordered by Excel sequence (sortOrder).
  */
 export const listQueensPrices = async (query = {}) => {
   const {
@@ -505,7 +503,6 @@ export const listQueensPrices = async (query = {}) => {
     search,
     frequency,
     current,
-    
   } = query;
 
   const page = Math.max(1, parseInt(rawPage, 10) || 1);
@@ -553,9 +550,13 @@ export const listQueensPrices = async (query = {}) => {
       where: productWhere,
       skip,
       take: limit,
+      // ────────────────────────────────────────────────────────────
+      // EXACT EXCEL SEQUENCE: Order by track and then by sortOrder
+      // ────────────────────────────────────────────────────────────
       orderBy: [
         { frequency: "asc" },
-        { name: "asc" },
+        { sortOrder: "asc" },
+        { id: "asc" },
       ],
       include: {
         queensPrices: {
@@ -609,6 +610,7 @@ export const listQueensPrices = async (query = {}) => {
           category: product.category,
           unit: product.unit,
           frequency: product.frequency,
+          sortOrder: product.sortOrder ?? 0, // <-- EXPOSE sortOrder TO FRONTEND
           active: product.active,
         },
       };
@@ -634,6 +636,7 @@ export const listQueensPrices = async (query = {}) => {
         category: product.category,
         unit: product.unit,
         frequency: product.frequency,
+        sortOrder: product.sortOrder ?? 0, // <-- EXPOSE sortOrder TO FRONTEND
         active: product.active,
       },
     };

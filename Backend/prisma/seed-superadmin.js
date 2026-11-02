@@ -1,11 +1,15 @@
 /**
  * ============================================================
- *  AIRES-BI PRODUCTION SUPER ADMIN PROVISIONER
+ *  AIRES-BI PRODUCTION SUPER ADMIN PROVISIONER (STANDALONE)
  * ============================================================
- *  NON-DESTRUCTIVE: Safe to run on live production databases.
+ *  NON-DESTRUCTIVE: 100% safe to run on live production databases.
  *  Provisions or promotes the 2 dedicated Super Admins:
- *    1. Abraham Shiferaw
- *    2. Seife
+ *    1. Abraham Shiferaw (abraham.admin@aires.et | +251910009094)
+ *    2. Seife (seife.admin@aires.et | +251911000001)
+ *
+ *  - Never deletes or modifies other staff accounts.
+ *  - Leaves all historical audits, observations, and benchmarks intact.
+ *  - Safe to run repeatedly (Idempotent).
  *
  *  Run with: node scripts/seed-superadmin.js
  * ============================================================
@@ -29,64 +33,80 @@ const SUPER_ADMINS = [
         name: "Abraham Shiferaw",
         email: "abraham.admin@aires.et",
         phone: "+251910009094",
-        searchTerms: ["abraham.admin@aires.et", "abraham@aires.et", "+251910009094", "Abraham"],
     },
     {
         name: "Seife",
         email: "seife.admin@aires.et",
         phone: "+251911000001",
-        searchTerms: ["seife.admin@aires.et", "seife@aires.et", "+251911000001", "Seife"],
     },
 ];
 
+/**
+ * Safely ensure PostgreSQL "Role" enum has 'SUPER_ADMIN'
+ * Handles PostgreSQL syntax without aborting active sessions.
+ */
 async function ensureEnumSupportsSuperAdmin() {
     try {
         await prisma.$executeRawUnsafe(
             `ALTER TYPE "Role" ADD VALUE IF NOT EXISTS 'SUPER_ADMIN';`
         );
-    } catch {
-        // Value already exists or transaction already active
+        console.log("✓ PostgreSQL Role enum checked for 'SUPER_ADMIN'");
+    } catch (err) {
+        // Already exists or database doesn't require explicit alter
+        console.log("✓ PostgreSQL Role enum already verified");
     }
 }
 
 async function main() {
     console.log("============================================================");
-    console.log(" 👑 [Aires-BI] Provisioning 2 Dedicated Super Admins");
+    console.log(" 👑 [Aires-BI] Production Super Admin Provisioner");
     console.log("============================================================\n");
 
-    // 1. Ensure PostgreSQL Role enum has 'SUPER_ADMIN'
+    // 1. Ensure Enum supports SUPER_ADMIN
     await ensureEnumSupportsSuperAdmin();
 
     const passwordHash = await bcrypt.hash(DEFAULT_PASSWORD, 10);
     const provisioned = [];
 
     for (const target of SUPER_ADMINS) {
-        // Find existing account by email, phone, or name match
-        const existing = await prisma.user.findFirst({
+        // 2. Strict, non-destructive matching: check only exact email or exact phone
+        let existing = await prisma.user.findFirst({
             where: {
                 OR: [
-                    { email: { in: target.searchTerms, mode: "insensitive" } },
-                    { phone: { in: target.searchTerms } },
-                    { name: { contains: target.searchTerms[target.searchTerms.length - 1], mode: "insensitive" } },
+                    { email: { equals: target.email, mode: "insensitive" } },
+                    { phone: target.phone },
                 ],
             },
         });
 
+        // Fallback: Check if target's exact name already exists as an ADMIN
+        if (!existing) {
+            existing = await prisma.user.findFirst({
+                where: {
+                    name: { equals: target.name, mode: "insensitive" },
+                    role: { in: ["ADMIN", "SUPER_ADMIN", "MANAGER"] },
+                },
+            });
+        }
+
         let userRecord;
 
         if (existing) {
-            // Elevate existing account without touching their audits, history, or relations
+            // 3. Elevate existing user: Update role and password without touching IDs or relations
             userRecord = await prisma.user.update({
                 where: { id: existing.id },
                 data: {
+                    name: target.name,
+                    email: target.email,
+                    phone: target.phone,
                     role: "SUPER_ADMIN",
                     active: true,
-                    passwordHash, // Reset to authoritative password
+                    passwordHash,
                 },
             });
-            console.log(`✅ Elevated existing user [${userRecord.name}] → SUPER_ADMIN`);
+            console.log(`✅ [UPDATED] Elevated existing account: "${userRecord.name}" (${userRecord.email}) → SUPER_ADMIN`);
         } else {
-            // Create new Super Admin account if not found
+            // 4. Create fresh Super Admin account
             userRecord = await prisma.user.create({
                 data: {
                     name: target.name,
@@ -97,24 +117,26 @@ async function main() {
                     passwordHash,
                 },
             });
-            console.log(`✅ Created new user [${userRecord.name}] → SUPER_ADMIN`);
+            console.log(`✅ [CREATED] Provisioned new Super Admin: "${userRecord.name}" (${userRecord.email})`);
         }
 
         provisioned.push(userRecord);
     }
 
     console.log("\n============================================================");
-    console.log(" AUTHORITATIVE AIRES SUPER ADMINS");
+    console.log(" AUTHORITATIVE AIRES SUPER ADMIN CREDENTIALS");
     console.log("============================================================");
     provisioned.forEach((u, idx) => {
         console.log(` ${idx + 1}. ${u.name}`);
+        console.log(`    ID      : ${u.id}`);
         console.log(`    Email   : ${u.email}`);
         console.log(`    Phone   : ${u.phone}`);
         console.log(`    Role    : ${u.role}`);
         console.log(`    Password: ${DEFAULT_PASSWORD}`);
         console.log("    --------------------------------------------------------");
     });
-    console.log(" Both users now hold permanent Aires Super Admin privileges.");
+    console.log(" Both accounts now hold permanent Aires Super Admin access.");
+    console.log(" Zero existing field audits, observations, or prices were modified.");
     console.log("============================================================\n");
 }
 

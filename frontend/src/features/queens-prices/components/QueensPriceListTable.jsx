@@ -30,6 +30,7 @@ export const QueensPriceListTable = ({ prices = [] }) => {
 				<table className="w-full text-left text-xs">
 					<thead className="border-b border-slate-100 bg-slate-50 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
 						<tr>
+							<th className="w-16 px-3 py-3 text-center">No.</th>
 							<th className="px-4 py-3">Product Item</th>
 							<th className="px-4 py-3">Track</th>
 							<th className="px-4 py-3">Category</th>
@@ -43,25 +44,37 @@ export const QueensPriceListTable = ({ prices = [] }) => {
 						{prices.map((item) => {
 							const track = item.product?.frequency || "WEEKLY";
 							const badgeStyle = TRACK_BADGES[track] || TRACK_BADGES.WEEKLY;
+							const seqNo = item.product?.sortOrder ?? "—";
 
 							return (
 								<tr
 									key={item.id || item.productId}
 									className="transition hover:bg-slate-50/75"
 								>
+									{/* Sequence Index from Excel SortedBy */}
+									<td className="px-3 py-3 text-center">
+										<span className="inline-flex items-center justify-center rounded-md bg-slate-100 px-2 py-1 font-mono text-xs font-bold text-slate-700">
+											#{seqNo}
+										</span>
+									</td>
+
+									{/* Product Item */}
 									<td className="px-4 py-3">
 										<div className="font-bold text-slate-900">
 											{formatProductName(item.product?.name) || "—"} (
 											{item.product?.unit || "pcs"})
 										</div>
-										<div className="text-[10px] font-mono text-slate-400">
+										<div className="font-mono text-[10px] text-slate-400">
 											Item Code:{" "}
-											{item.product?.barcode ||
-												item.product?.sku ||
-												item.productId}
+											<span className="font-semibold text-slate-600">
+												{item.product?.barcode ||
+													item.product?.sku ||
+													item.productId}
+											</span>
 										</div>
 									</td>
 
+									{/* Track */}
 									<td className="px-4 py-3">
 										<span
 											className={`rounded border px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider ${badgeStyle}`}
@@ -70,12 +83,14 @@ export const QueensPriceListTable = ({ prices = [] }) => {
 										</span>
 									</td>
 
+									{/* Category */}
 									<td className="px-4 py-3 text-slate-500">
 										<span className="rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
 											{item.product?.category || "—"}
 										</span>
 									</td>
 
+									{/* Benchmark Price */}
 									<td className="px-4 py-3 text-right">
 										{item.price !== null ? (
 											<div>
@@ -95,7 +110,8 @@ export const QueensPriceListTable = ({ prices = [] }) => {
 										)}
 									</td>
 
-									<td className="px-4 py-3 text-slate-500 font-mono text-[11px]">
+									{/* Effective Period */}
+									<td className="px-4 py-3 font-mono text-[11px] text-slate-500">
 										{item.effectiveFrom ? (
 											<>
 												{formatDate(item.effectiveFrom)} →{" "}
@@ -108,6 +124,7 @@ export const QueensPriceListTable = ({ prices = [] }) => {
 										)}
 									</td>
 
+									{/* Status */}
 									<td className="px-4 py-3">
 										{item.status === "NO_BENCHMARK" ? (
 											<span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-bold text-slate-400">
@@ -118,6 +135,7 @@ export const QueensPriceListTable = ({ prices = [] }) => {
 										)}
 									</td>
 
+									{/* Action */}
 									<td className="px-4 py-3 text-right">
 										{item.id ? (
 											<button
