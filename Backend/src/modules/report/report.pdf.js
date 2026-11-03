@@ -3,7 +3,13 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import PDFDocument from "pdfkit";
-import { formatDate, formatPrice, columnHeaderLabel } from "./report.utils.js";
+import {
+  CURRENCY,
+  formatDate,
+  formatPrice,
+  columnHeaderLabel,
+  formatProductName,
+} from "./report.utils.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -17,6 +23,7 @@ const C = {
   headerBlue: "#1F4E79",
   textDark: "#1F2937",
   muted: "#6B7280",
+  strikeMuted: "#94A3B8",
   border: "#CBD5E1",
   gridLine: "#E5E7EB",
   zebra: "#F8FAFC",
@@ -49,10 +56,7 @@ const loadAiresLogo = () => {
   } catch {
     _airesLogoBuffer = null;
     console.warn(
-      `[report.pdf] Aires logo not found at ${AIRES_LOGO_PATH}. ` +
-      `Falling back to text wordmark. Run: ` +
-      `mkdir -p Backend/src/modules/report/assets && ` +
-      `cp Frontend/public/icons/icon-192.png Backend/src/modules/report/assets/aires-logo.png`,
+      `[report.pdf] Aires logo not found at ${AIRES_LOGO_PATH}. Falling back to text wordmark.`,
     );
   }
   return _airesLogoBuffer;
@@ -65,10 +69,6 @@ const loadAiresLogo = () => {
 const bottomLimit = (doc) => doc.page.height - doc.page.margins.bottom;
 const contentWidth = (doc) =>
   doc.page.width - doc.page.margins.left - doc.page.margins.right;
-
-// ──────────────────────────────────────────────────────────────────
-// Aires brand strip — three-stop gradient bar
-// ──────────────────────────────────────────────────────────────────
 
 const hexToRgb = (hex) => {
   const h = hex.replace("#", "");
@@ -174,7 +174,6 @@ const drawCoverHeader = (doc) => {
     });
 
   y += logoH + 8;
-
   drawAiresGradientBar(doc, left, y, W, 3);
   y += 14;
 
@@ -239,10 +238,6 @@ const drawExecutiveCoverPage = (doc, model) => {
 
   drawPriceComparisonChart(doc, model, left, y, W);
 };
-
-// ──────────────────────────────────────────────────────────────────
-// Price chart
-// ──────────────────────────────────────────────────────────────────
 
 const drawPriceComparisonChart = (doc, model, x0, y0, totalW) => {
   const chartTitle = `Price Benchmark Comparison Dashboard - ${formatDate(model.period.startDate)}`;
@@ -452,7 +447,20 @@ const drawCycleTable = (doc, cycle, section, left, W, startY) => {
     y += catHeaderH;
 
     for (const prod of cat.products) {
-      const rowH = 18;
+      // ────────────────────────────────────────────────────────────
+      // Check if ANY surveyed competitor recorded a shelf substitute
+      // ────────────────────────────────────────────────────────────
+      const substituteRecord = Object.values(prod.cells || {}).find(
+        (c) =>
+          c &&
+          (c.availability === "OUT_OF_STOCK" || c.availability === "NOT_FOUND") &&
+          Boolean(c.substituteProduct?.trim()),
+      );
+
+      const hasSubstitute = Boolean(substituteRecord);
+      // Expand row height to 26pt if a substitute is rendered, else 18pt
+      const rowH = hasSubstitute ? 26 : 18;
+
       if (y + rowH > bottomLimit(doc) - 70) {
         doc.addPage();
         y = doc.page.margins.top;
@@ -476,19 +484,20 @@ const drawCycleTable = (doc, cycle, section, left, W, startY) => {
 
       let curX = left;
 
-      // "No." = SortedBy sequence from the Item Master
+      // ── Column 1: No. (SortedBy sequence index) ─────────────────
       const seqNo = prod.sortOrder > 0 ? prod.sortOrder : counter;
       counter += 1;
       doc
         .font("Helvetica")
         .fontSize(7.5)
         .fillColor(C.muted)
-        .text(String(seqNo), curX + 2, y + 5, {
+        .text(String(seqNo), curX + 2, y + (hasSubstitute ? 8 : 5), {
           width: noW - 4,
           align: "center",
         });
       curX += noW;
 
+      // ── Column 2: Category ──────────────────────────────────────
       doc
         .font("Helvetica")
         .fontSize(7.5)
@@ -496,31 +505,90 @@ const drawCycleTable = (doc, cycle, section, left, W, startY) => {
         .text("", curX + 2, y + 5, { width: catW - 4, align: "left" });
       curX += catW;
 
-      doc
-        .font("Helvetica-Bold")
-        .fontSize(7.5)
-        .fillColor(C.textDark)
-        .text(prod.name, curX + 2, y + 5, {
-          width: nameW - 4,
-          align: "left",
-        });
+      // ── Column 3: Item Name (with Strikethrough & ⌊› Sub: Alternative) ─
+      const prodName = formatProductName(prod.name);
+
+      if (hasSubstitute) {
+        const subName = formatProductName(substituteRecord.substituteProduct);
+
+        // Line 1: Original Product Name (Struck through in muted gray)
+        doc
+          .font("Helvetica-Bold")
+          .fontSize(7)
+          .fillColor(C.strikeMuted)
+          .text(prodName, curX + 2, y + 3, {
+            width: nameW - 4,
+            align: "left",
+            lineBreak: false,
+          });
+
+        // Strikethrough line
+        const nameLen = Math.min(doc.widthOfString(prodName), nameW - 6);
+        const strikeY = y + 7.5;
+        doc
+          .save()
+          .lineWidth(0.8)
+          .strokeColor(C.strikeMuted)
+          .moveTo(curX + 2, strikeY)
+          .lineTo(curX + 2 + nameLen, strikeY)
+          .stroke()
+          .restore();
+
+        // Line 2: Elegant curved branch arrow vector
+        doc
+          .save()
+          .lineWidth(0.7)
+          .strokeColor(C.airesOrange)
+          .moveTo(curX + 4, y + 13)
+          .bezierCurveTo(curX + 4, y + 16, curX + 5, y + 17.5, curX + 9, y + 17.5)
+          .stroke()
+          // Arrowhead
+          .moveTo(curX + 7.5, y + 16)
+          .lineTo(curX + 9.5, y + 17.5)
+          .lineTo(curX + 7.5, y + 19)
+          .stroke()
+          .restore();
+
+        // Text label: Sub: [Name]
+        doc
+          .font("Helvetica-Bold")
+          .fontSize(6.5)
+          .fillColor(C.airesOrange)
+          .text(`Sub: ${subName}`, curX + 13, y + 14, {
+            width: nameW - 15,
+            align: "left",
+            lineBreak: false,
+          });
+      } else {
+        // Standard normal available item
+        doc
+          .font("Helvetica-Bold")
+          .fontSize(7.5)
+          .fillColor(C.textDark)
+          .text(prodName, curX + 2, y + 5, {
+            width: nameW - 4,
+            align: "left",
+          });
+      }
       curX += nameW;
 
+      // ── Column 4: Unit ──────────────────────────────────────────
       doc
         .font("Helvetica")
         .fontSize(7.5)
         .fillColor(C.muted)
-        .text(prod.unit, curX + 2, y + 5, {
+        .text(prod.unit, curX + 2, y + (hasSubstitute ? 8 : 5), {
           width: unitW - 4,
           align: "center",
         });
       curX += unitW;
 
+      // ── Competitor Columns ──────────────────────────────────────
       columns.forEach((col) => {
         const cell = prod.cells?.[col.key];
         let valStr = "Not found";
         let color = C.muted;
-        let subText = null;
+        let isSubPrice = false;
 
         if (cell) {
           if (cell.availability === "AVAILABLE" && cell.price !== null) {
@@ -528,19 +596,19 @@ const drawCycleTable = (doc, cycle, section, left, W, startY) => {
             color = C.textDark;
             if (col.kind === "QUEENS") color = C.headerBlue;
           } else if (cell.availability === "OUT_OF_STOCK") {
-            if (cell.substituteProduct) {
-              valStr = cell.price ? `${formatPrice(cell.price)} ETB` : "OUT OF STOCK";
-              subText = `↳ ${cell.substituteProduct.slice(0, 18)}`;
+            if (cell.substituteProduct && cell.price !== null) {
+              valStr = `${formatPrice(cell.price)} ETB`;
               color = C.airesOrange;
+              isSubPrice = true;
             } else {
               valStr = "OUT OF STOCK";
               color = "#B91C1C";
             }
           } else if (cell.availability === "NOT_FOUND") {
-            if (cell.substituteProduct) {
-              valStr = cell.price ? `${formatPrice(cell.price)} ETB` : "Not found";
-              subText = `↳ ${cell.substituteProduct.slice(0, 18)}`;
+            if (cell.substituteProduct && cell.price !== null) {
+              valStr = `${formatPrice(cell.price)} ETB`;
               color = C.airesOrange;
+              isSubPrice = true;
             } else {
               valStr = "Not found";
               color = C.muted;
@@ -548,21 +616,23 @@ const drawCycleTable = (doc, cycle, section, left, W, startY) => {
           }
         }
 
+        const cellY = hasSubstitute ? y + 4 : y + 5;
+
         doc
-          .font("Helvetica")
+          .font(isSubPrice ? "Helvetica-Bold" : "Helvetica")
           .fontSize(7)
           .fillColor(color)
-          .text(valStr, curX + 2, y + (subText ? 2 : 5), {
+          .text(valStr, curX + 2, cellY, {
             width: compW - 6,
             align: "right",
           });
 
-        if (subText) {
+        if (isSubPrice && hasSubstitute) {
           doc
-            .font("Helvetica-Oblique")
-            .fontSize(6)
+            .font("Helvetica-Bold")
+            .fontSize(5.5)
             .fillColor(C.airesOrange)
-            .text(subText, curX + 2, y + 10, {
+            .text("SUB. PRICE", curX + 2, y + 14, {
               width: compW - 6,
               align: "right",
             });
@@ -680,7 +750,6 @@ const drawTopStripsAndFooters = (doc) => {
     }
 
     const y = doc.page.height - bottom + 16;
-
     drawAiresGradientBar(doc, left, y - 8, width, 1.5);
 
     doc.font("Helvetica").fontSize(7.5).fillColor(C.muted);
