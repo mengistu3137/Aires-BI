@@ -401,10 +401,10 @@ export const ObservationDetailPage = () => {
 						<div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/70 px-4 py-2.5">
 							<div className="flex items-center gap-2">
 								<span className="flex h-5 w-5 items-center justify-center rounded-lg bg-[#FE7914] text-[11px] font-black text-white">
-									⚡
+									
 								</span>
 								<span className="text-xs font-black text-slate-800">
-									 AI Anomaly Guardian
+									  Anomaly Guardian
 								</span>
 								
 							</div>

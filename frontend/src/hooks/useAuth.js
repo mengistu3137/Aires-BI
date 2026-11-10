@@ -20,8 +20,15 @@ export function useAuth() {
   };
 
   const role = user?.role;
-  const isAdmin = role === "ADMIN";
-  const isManager = role === "MANAGER" || role === "ADMIN";
+
+  // Queens Admin is strictly view-only
+  const isQueensAdmin =
+    role === "QUEENS_ADMIN" ||
+    role === "QUEENS" ||
+    (Boolean(user?.organization?.toLowerCase().includes("queens")) && role === "ADMIN");
+
+  const isAdmin = role === "ADMIN" && !isQueensAdmin;
+  const isManager = (role === "MANAGER" || role === "ADMIN") && !isQueensAdmin;
   const isAuditor = role === "FIELD_AUDITOR";
 
   return useMemo(
@@ -35,6 +42,7 @@ export function useAuth() {
       isAdmin,
       isManager,
       isAuditor,
+      isQueensAdmin,
 
       login: setAuth,
       logout,
@@ -54,6 +62,7 @@ export function useAuth() {
       isAdmin,
       isManager,
       isAuditor,
+      isQueensAdmin,
       setAuth,
       setUser,
       updateUser,

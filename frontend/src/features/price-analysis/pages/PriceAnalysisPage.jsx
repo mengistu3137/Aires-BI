@@ -14,7 +14,7 @@ import { PriceAnalysisMobileList } from "../components/PriceAnalysisMobileList.j
 import { PriceAnalysisEmptyState } from "../components/PriceAnalysisEmptyState.jsx";
 import { PriceAnalysisSummaryBar } from "../components/PriceAnalysisSummaryBar.jsx";
 import { RecalculateConfirmModal } from "../components/RecalculateConfirmModal.jsx";
-import { ExecutiveAiReportModal } from "../components/ExecutiveAiReportModal.jsx";
+// import { ExecutiveAiReportModal } from "../components/ExecutiveAiReportModal.jsx";
 import { exportPriceAnalysisExcelRequest } from "@/services/api/price-analysis.api.js";
 import { RapidPriceAdjustmentDrawer } from "../components/RapidPriceAdjustmentDrawer.jsx";
 
@@ -174,7 +174,7 @@ export const PriceAnalysisPage = () => {
 				</div>
 
 				<div className="flex flex-wrap items-center gap-2">
-					{isManager && (
+					{/* {isManager && (
 						<button
 							type="button"
 							onClick={() => setShowAiReportModal(true)}
@@ -182,7 +182,7 @@ export const PriceAnalysisPage = () => {
 						>
 							<span>Executive AI Brief</span>
 						</button>
-					)}
+					)} */}
 
 					{isManager && flaggedAnalyses.length > 0 && (
 						<button
@@ -557,14 +557,14 @@ export const PriceAnalysisPage = () => {
 			/>
 
 			{/* AI Report Modal */}
-			<ExecutiveAiReportModal
+			{/* <ExecutiveAiReportModal
 				isOpen={showAiReportModal}
 				onClose={() => setShowAiReportModal(false)}
 				surveyPeriodId={surveyPeriodId || undefined}
 				surveyPeriodName={
 					surveyPeriodId ? analyses[0]?.surveyPeriod?.name : "All Survey Cycles"
 				}
-			/>
+			/> */}
 		</div>
 	);
 };

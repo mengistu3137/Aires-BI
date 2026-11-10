@@ -35,7 +35,7 @@ const formatAssignedDate = (dateString) => {
 
 export const SurveyProgress = () => {
 	const navigate = useNavigate();
-	const { isAuditor } = useAuth();
+	const { isAuditor, isQueensAdmin } = useAuth();
 	const [searchParams, setSearchParams] = useSearchParams();
 
 	// URL-backed pagination (survives refresh + shareable)
@@ -53,7 +53,6 @@ export const SurveyProgress = () => {
 		const nextParams = new URLSearchParams(searchParams);
 		if (!value) nextParams.delete("status");
 		else nextParams.set("status", value);
-		// Reset to page 1 whenever the filter changes
 		nextParams.delete("page");
 		setSearchParams(nextParams, { replace: true });
 	};
@@ -74,15 +73,18 @@ export const SurveyProgress = () => {
 	const [viewMode, setViewMode] = useState("STORE_DISPATCH"); // 'STORE_DISPATCH' | 'INDIVIDUAL_TASKS'
 	const [isAssignmentModalOpen, setIsAssignmentModalOpen] = useState(false);
 	const [isPeriodModalOpen, setIsPeriodModalOpen] = useState(false);
+
+	// Both storeId AND surveyPeriodId tracked so editing targets the exact cycle
 	const [selectedStoreId, setSelectedStoreId] = useState(null);
+	const [selectedSurveyPeriodId, setSelectedSurveyPeriodId] = useState(null);
+
 	const [editingAssignment, setEditingAssignment] = useState(null);
 	const [deleteCandidate, setDeleteCandidate] = useState(null);
 	const [searchTerm, setSearchTerm] = useState("");
 
-	// Alias for readability further down
 	const statusFilter = statusFromUrl;
 
-	// Group assignments by Store + SurveyPeriod for Overall Store Dispatch Tracking
+	// Group assignments by Store + SurveyPeriod (distinguishes Weekly vs Daily dispatches)
 	const storeDispatches = useMemo(() => {
 		const groups = new Map();
 
@@ -95,6 +97,7 @@ export const SurveyProgress = () => {
 				groups.set(groupKey, {
 					id: groupKey,
 					storeId,
+					surveyPeriodId: cycleId,
 					store: asn.store,
 					surveyPeriod: asn.surveyPeriod,
 					assignments: [],
@@ -115,10 +118,7 @@ export const SurveyProgress = () => {
 				});
 			}
 
-			// Authoritative count from backend helper (asn.observedCount)
 			let asnObsCount = Number(asn.observedCount ?? asn.observationsCount ?? 0);
-
-			// Fallback if raw relational audits array is provided
 			if (!asnObsCount && Array.isArray(asn.audits)) {
 				asn.audits.forEach((aud) => {
 					asnObsCount +=
@@ -184,6 +184,8 @@ export const SurveyProgress = () => {
 			list = list.filter((d) => {
 				const storeName = (d.store?.name || "").toLowerCase();
 				const area = (d.store?.area || d.store?.address || "").toLowerCase();
+				const cycleName = (d.surveyPeriod?.name || "").toLowerCase();
+				const cycleId = (d.surveyPeriodId || "").toLowerCase();
 				const auditors = d.assignments
 					.map((a) => a.auditor?.name || "")
 					.join(" ")
@@ -191,6 +193,8 @@ export const SurveyProgress = () => {
 				return (
 					storeName.includes(term) ||
 					area.includes(term) ||
+					cycleName.includes(term) ||
+					cycleId.includes(term) ||
 					auditors.includes(term)
 				);
 			});
@@ -214,11 +218,13 @@ export const SurveyProgress = () => {
 				const area = (a.store?.area || a.store?.address || "").toLowerCase();
 				const auditorName = (a.auditor?.name || "").toLowerCase();
 				const cycleId = (a.surveyPeriod?.id || "").toLowerCase();
+				const cycleName = (a.surveyPeriod?.name || "").toLowerCase();
 				return (
 					storeName.includes(term) ||
 					area.includes(term) ||
 					auditorName.includes(term) ||
-					cycleId.includes(term)
+					cycleId.includes(term) ||
+					cycleName.includes(term)
 				);
 			});
 		}
@@ -246,6 +252,7 @@ export const SurveyProgress = () => {
 		try {
 			await deleteAssignment.mutateAsync(deleteCandidate.id);
 			setDeleteCandidate(null);
+			refetch();
 		} catch (err) {
 			toast.error(
 				err?.response?.data?.message || "Failed to delete assignment",
@@ -253,8 +260,30 @@ export const SurveyProgress = () => {
 		}
 	};
 
-	const handleOpenDispatchModal = (storeId = null) => {
+	// Delete entire store dispatch (Requirement #4)
+	const handleDeleteStoreDispatch = async (dispatch) => {
+		const isCompleted = dispatch.overallStatus === "COMPLETED";
+		const promptMsg = isCompleted
+			? `Warning: This survey dispatch is COMPLETED. Deleting it will permanently remove ${dispatch.assignments.length} assignment task(s). Continue?`
+			: `Are you sure you want to delete the dispatch for "${dispatch.store?.name}" (${dispatch.surveyPeriod?.name || dispatch.surveyPeriodId})? This will remove ${dispatch.assignments.length} assigned task(s).`;
+
+		if (!window.confirm(promptMsg)) return;
+
+		try {
+			const promises = dispatch.assignments.map((a) =>
+				deleteAssignment.mutateAsync(a.id),
+			);
+			await Promise.all(promises);
+			toast.success("Store dispatch deleted successfully");
+			refetch();
+		} catch (err) {
+			toast.error(err?.response?.data?.message || "Failed to delete dispatch");
+		}
+	};
+
+	const handleOpenDispatchModal = (storeId = null, surveyPeriodId = null) => {
 		setSelectedStoreId(storeId);
+		setSelectedSurveyPeriodId(surveyPeriodId);
 		setEditingAssignment(null);
 		setIsAssignmentModalOpen(true);
 	};
@@ -270,10 +299,13 @@ export const SurveyProgress = () => {
 					<p className="mt-0.5 text-xs text-slate-500">
 						{isAuditor
 							? "Your assigned store audits and target product checklists"
-							: "Monitor store dispatch completion and allocate tasks across multiple field auditors"}
+							: isQueensAdmin
+								? "View store dispatches and audit checklists (Read Only)"
+								: "Monitor store dispatch completion and allocate tasks across multiple field auditors"}
 					</p>
 				</div>
 
+				{/* Header Actions: Hidden for Queens Admin */}
 				<Can role={["ADMIN", "MANAGER"]}>
 					<div className="flex items-center gap-2">
 						<button
@@ -285,7 +317,7 @@ export const SurveyProgress = () => {
 						</button>
 						<button
 							type="button"
-							onClick={() => handleOpenDispatchModal(null)}
+							onClick={() => handleOpenDispatchModal(null, null)}
 							className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-[#A41821] px-4 py-2.5 text-xs font-bold text-white shadow-xs transition hover:bg-[#7F1219] active:scale-95"
 						>
 							+ Dispatch Store Survey
@@ -294,7 +326,7 @@ export const SurveyProgress = () => {
 				</Can>
 			</div>
 
-			{/* KPI Summary (Reflects Total Store Dispatches) */}
+			{/* KPI Summary */}
 			<div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
 				<Kpi label="Store Dispatches" value={counts.all} tone="slate" />
 				<Kpi label="Not Started" value={counts.notStarted} tone="amber" />
@@ -302,7 +334,7 @@ export const SurveyProgress = () => {
 				<Kpi label="Completed" value={counts.completed} tone="emerald" />
 			</div>
 
-			{/* Search, Status Filters & View Toggle */}
+			{/* Search, Filters & View Toggle */}
 			<div className="space-y-3">
 				<div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
 					<div className="relative flex-1">
@@ -310,7 +342,7 @@ export const SurveyProgress = () => {
 							type="text"
 							value={searchTerm}
 							onChange={(e) => setSearchTerm(e.target.value)}
-							placeholder="Search store name, area, or assigned auditor..."
+							placeholder="Search store, area, survey cycle, or assigned auditor..."
 							className="w-full rounded-xl border border-slate-200 bg-slate-50/70 px-3.5 py-2.5 pl-9 text-xs font-medium text-slate-800 placeholder:text-slate-400 focus:border-[#A41821] focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-[#A41821]"
 						/>
 						<svg
@@ -328,7 +360,7 @@ export const SurveyProgress = () => {
 						</svg>
 					</div>
 
-					{/* View Mode Toggle (Management only) */}
+					{/* View Mode Toggle (Management and Queens Admin) */}
 					{!isAuditor && (
 						<div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-slate-100 p-1 text-xs font-bold flex-none">
 							<button
@@ -403,12 +435,13 @@ export const SurveyProgress = () => {
 			{!isLoading && !isError && (
 				<>
 					{viewMode === "STORE_DISPATCH" && !isAuditor ? (
-						/* A. OVERALL STORE DISPATCH CARDS (Aggregated Multi-Auditor Progress) */
+						/* A. OVERALL STORE DISPATCH CARDS */
 						filteredStoreDispatches.length === 0 ? (
 							<EmptyState
 								statusFilter={statusFilter}
 								searchTerm={searchTerm}
-								onNew={() => handleOpenDispatchModal(null)}
+								onNew={() => handleOpenDispatchModal(null, null)}
+								isQueensAdmin={isQueensAdmin}
 							/>
 						) : (
 							<div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -416,7 +449,14 @@ export const SurveyProgress = () => {
 									<StoreDispatchCard
 										key={dispatch.id}
 										dispatch={dispatch}
-										onManage={() => handleOpenDispatchModal(dispatch.storeId)}
+										isQueensAdmin={isQueensAdmin}
+										onManage={() =>
+											handleOpenDispatchModal(
+												dispatch.storeId,
+												dispatch.surveyPeriodId,
+											)
+										}
+										onDelete={() => handleDeleteStoreDispatch(dispatch)}
 										onViewAudits={() =>
 											navigate(`/audits?storeId=${dispatch.storeId}`)
 										}
@@ -429,7 +469,8 @@ export const SurveyProgress = () => {
 						<EmptyState
 							statusFilter={statusFilter}
 							searchTerm={searchTerm}
-							onNew={() => handleOpenDispatchModal(null)}
+							onNew={() => handleOpenDispatchModal(null, null)}
+							isQueensAdmin={isQueensAdmin}
 						/>
 					) : (
 						<div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -438,12 +479,16 @@ export const SurveyProgress = () => {
 									key={assignment.id}
 									assignment={assignment}
 									isAuditor={isAuditor}
+									isQueensAdmin={isQueensAdmin}
 									onViewAudits={() =>
 										navigate(`/audits?assignmentId=${assignment.id}`)
 									}
 									onEdit={() => {
 										setEditingAssignment(assignment);
-										setIsAssignmentModalOpen(true);
+										handleOpenDispatchModal(
+											assignment.storeId,
+											assignment.surveyPeriodId,
+										);
 									}}
 									onDelete={() => setDeleteCandidate(assignment)}
 								/>
@@ -453,7 +498,7 @@ export const SurveyProgress = () => {
 				</>
 			)}
 
-			{/* Pagination footer (managers/admins only) */}
+			{/* Pagination footer */}
 			{!isLoading && !isError && !isAuditor && meta.totalPages > 1 && (
 				<div className="flex flex-col items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-xs sm:flex-row">
 					<p className="text-[11px] font-semibold text-slate-500">
@@ -491,7 +536,6 @@ export const SurveyProgress = () => {
 							Previous
 						</button>
 
-						{/* Page number pills (window of ±2 around the current page) */}
 						{(() => {
 							const total = meta.totalPages;
 							const current = meta.page;
@@ -542,26 +586,28 @@ export const SurveyProgress = () => {
 				</div>
 			)}
 
-			{/* Dispatch Modal */}
+			{/* Dispatch Modal: passes both storeId AND surveyPeriodId */}
 			<SurveyAssignmentModal
 				isOpen={isAssignmentModalOpen}
 				onClose={() => {
 					setIsAssignmentModalOpen(false);
 					setSelectedStoreId(null);
+					setSelectedSurveyPeriodId(null);
 					setEditingAssignment(null);
 					refetch();
 				}}
 				storeId={selectedStoreId}
+				surveyPeriodId={selectedSurveyPeriodId}
 				assignment={editingAssignment}
 			/>
 
-			{/* Period management modal */}
+			{/* Period Management Modal */}
 			<PeriodManagementModal
 				isOpen={isPeriodModalOpen}
 				onClose={() => setIsPeriodModalOpen(false)}
 			/>
 
-			{/* Confirm delete */}
+			{/* Confirm Delete Modal */}
 			<ConfirmDeleteAssignmentModal
 				isOpen={Boolean(deleteCandidate)}
 				onClose={() => setDeleteCandidate(null)}
@@ -574,9 +620,21 @@ export const SurveyProgress = () => {
 };
 
 /* Overall Store Dispatch Card Component */
-const StoreDispatchCard = ({ dispatch, onManage, onViewAudits }) => {
+const StoreDispatchCard = ({
+	dispatch,
+	isQueensAdmin,
+	onManage,
+	onDelete,
+	onViewAudits,
+}) => {
 	const store = dispatch.store || {};
+	const cycle = dispatch.surveyPeriod || {};
 	const isDone = dispatch.overallStatus === "COMPLETED";
+
+	// Distinguish Daily Fresh Corner cycle vs Weekly Ultra cycle
+	const isDailyCycle =
+		dispatch.surveyPeriodId?.includes("-DAILY-") ||
+		cycle.name?.toLowerCase().includes("daily");
 
 	const statusAccent =
 		{
@@ -590,8 +648,8 @@ const StoreDispatchCard = ({ dispatch, onManage, onViewAudits }) => {
 		<div className="flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs transition hover:border-slate-300 hover:shadow-sm">
 			<div className={`h-1.5 w-full ${statusAccent}`} />
 
-			<div className="flex flex-1 flex-col p-4 space-y-3.5">
-				{/* Header: Store Name + Overall Status */}
+			<div className="flex flex-1 flex-col p-4 space-y-3">
+				{/* Header: Store Name + Status */}
 				<div className="flex items-start justify-between gap-2">
 					<div className="min-w-0 flex-1">
 						<h3 className="truncate text-base font-black text-slate-900">
@@ -604,10 +662,26 @@ const StoreDispatchCard = ({ dispatch, onManage, onViewAudits }) => {
 					<StatusBadge status={dispatch.overallStatus} />
 				</div>
 
-				{/* OVERALL DISPATCH PROGRESS BAR */}
+				{/* Clear Cycle Identifier: Distinguishes Daily Fresh vs Weekly Ultra */}
+				<div className="flex items-center gap-1.5">
+					<span
+						className={`rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+							isDailyCycle
+								? "bg-emerald-50 text-[#017C4D] border border-emerald-200"
+								: "bg-red-50 text-[#A41821] border border-red-200"
+						}`}
+					>
+						{isDailyCycle ? "Daily Fresh Survey" : "Weekly Survey Cycle"}
+					</span>
+					<span className="truncate font-mono text-[11px] font-semibold text-slate-600">
+						{cycle.name || dispatch.surveyPeriodId}
+					</span>
+				</div>
+
+				{/* Progress Bar */}
 				<div className="space-y-1.5 rounded-xl bg-slate-50/80 p-3 border border-slate-100">
 					<div className="flex items-center justify-between text-xs font-bold text-slate-700">
-						<span>Overall Dispatch Progress:</span>
+						<span>Dispatch Progress:</span>
 						<span className="font-mono text-slate-900">
 							{dispatch.observedCount} / {dispatch.totalProducts} items
 						</span>
@@ -634,10 +708,10 @@ const StoreDispatchCard = ({ dispatch, onManage, onViewAudits }) => {
 					</div>
 				</div>
 
-				{/* Team on Duty (Assigned Auditors) */}
+				{/* Team on Duty */}
 				<div>
-					<span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1.5">
-						Team on Duty ({dispatch.assignments.length} Auditors)
+					<span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+						Auditors on Duty ({dispatch.assignments.length})
 					</span>
 					<div className="flex flex-wrap gap-1.5">
 						{dispatch.assignments.map((asn) => (
@@ -652,7 +726,7 @@ const StoreDispatchCard = ({ dispatch, onManage, onViewAudits }) => {
 					</div>
 				</div>
 
-				{/* Card Footer Actions */}
+				{/* Card Actions: View Visits for all, Edit/Delete hidden for Queens Admin */}
 				<div className="mt-auto flex items-center justify-between border-t border-slate-100 pt-3 text-xs font-semibold">
 					<button
 						type="button"
@@ -662,13 +736,25 @@ const StoreDispatchCard = ({ dispatch, onManage, onViewAudits }) => {
 						View Visits →
 					</button>
 
-					<button
-						type="button"
-						onClick={onManage}
-						className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 transition cursor-pointer"
-					>
-						Manage Dispatch
-					</button>
+					{!isQueensAdmin && (
+						<div className="flex items-center gap-2">
+							<button
+								type="button"
+								onClick={onDelete}
+								className="text-red-600 hover:text-red-800 hover:underline cursor-pointer text-xs"
+								title="Delete this store dispatch"
+							>
+								Delete
+							</button>
+							<button
+								type="button"
+								onClick={onManage}
+								className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 transition cursor-pointer"
+							>
+								Manage Dispatch
+							</button>
+						</div>
+					)}
 				</div>
 			</div>
 		</div>
@@ -678,6 +764,7 @@ const StoreDispatchCard = ({ dispatch, onManage, onViewAudits }) => {
 const AssignmentCard = ({
 	assignment,
 	isAuditor,
+	isQueensAdmin,
 	onViewAudits,
 	onEdit,
 	onDelete,
@@ -687,9 +774,7 @@ const AssignmentCard = ({
 	const cycle = assignment.surveyPeriod || {};
 
 	const canEdit = assignment.status === "NOT_STARTED";
-	const canDelete =
-		assignment.status === "NOT_STARTED" && (assignment.auditsCount ?? 0) <= 1;
-
+	const canDelete = assignment.status === "NOT_STARTED";
 	const productCount =
 		assignment.totalItemsCount ?? assignment.items?.length ?? 0;
 
@@ -755,7 +840,8 @@ const AssignmentCard = ({
 						View audits →
 					</button>
 
-					{!isAuditor && (
+					{/* CRUD Buttons: Hidden for Auditors and Queens Admin */}
+					{!isAuditor && !isQueensAdmin && (
 						<div className="flex items-center gap-3 text-xs font-semibold">
 							<button
 								type="button"
@@ -781,7 +867,7 @@ const AssignmentCard = ({
 	);
 };
 
-const EmptyState = ({ statusFilter, searchTerm, onNew }) => (
+const EmptyState = ({ statusFilter, searchTerm, onNew, isQueensAdmin }) => (
 	<div className="rounded-2xl border border-dashed border-slate-200 bg-white px-6 py-12 text-center">
 		<div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-slate-100 text-slate-400">
 			<svg
@@ -808,15 +894,17 @@ const EmptyState = ({ statusFilter, searchTerm, onNew }) => (
 				? "Try adjusting your search query or filters."
 				: "Dispatch a new survey assignment to begin tracking store progress."}
 		</p>
-		<div className="mt-4">
-			<button
-				type="button"
-				onClick={onNew}
-				className="rounded-xl bg-[#A41821] px-4 py-2 text-xs font-bold text-white shadow-xs"
-			>
-				+ Dispatch Store Survey
-			</button>
-		</div>
+		{!isQueensAdmin && (
+			<div className="mt-4">
+				<button
+					type="button"
+					onClick={onNew}
+					className="rounded-xl bg-[#A41821] px-4 py-2 text-xs font-bold text-white shadow-xs"
+				>
+					+ Dispatch Store Survey
+				</button>
+			</div>
+		)}
 	</div>
 );
 
