@@ -10,6 +10,7 @@ import {
   updateAssignmentStatusSchema,
   updateAssignmentSchema,
   assignmentQuerySchema,
+  
 } from "./assignment.validation.js";
 
 const router = Router();
@@ -17,8 +18,11 @@ const router = Router();
 router.use(authenticate);
 
 router.get("/mine", assignmentController.getMine);
-// Cross-Auditor Store Progress Route
-// Store allocations query & batch dispatch
+router.post(
+  "/store/:storeId/period/:surveyPeriodId/archive",
+  restrictTo("ADMIN", "MANAGER"),
+  assignmentController.archiveStoreDispatch
+);
 router.get(
   "/store/:storeId/period/:surveyPeriodId/allocations",
   restrictTo("ADMIN", "MANAGER"),

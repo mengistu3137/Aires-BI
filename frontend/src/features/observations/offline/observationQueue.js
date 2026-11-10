@@ -76,6 +76,7 @@ export const formatQueuedObservation = (record) => {
     productId: record.productId,
     availability: record.availability,
     price: record.price,
+    substituteProduct: record.substituteProduct || null,
     observedUnit: record.observedUnit || null,
     packageSize: record.packageSize || null,
     capturedAt: record.capturedAt,
@@ -98,6 +99,8 @@ export const formatQueuedObservation = (record) => {
     __local: true,
   };
 };
+
+// In syncObservation payload construction:
 
 /**
  * Queue an observation for sync. `observation.operation` is "CREATE"
@@ -271,12 +274,14 @@ export const syncObservation = async (observation) => {
       productId: observation.productId,
       availability: observation.availability,
       price: observation.price,
+      substituteProduct: observation.substituteProduct || null,
       observedUnit: observation.observedUnit || null,
       packageSize: observation.packageSize || null,
       capturedAt: observation.capturedAt,
       evidencePhotoUrl: observation.evidencePhotoUrl || null,
       notes: observation.notes || null,
     };
+
 
     const response =
       observation.operation === "UPDATE" && observation.serverObservationId

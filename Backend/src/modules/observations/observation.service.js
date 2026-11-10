@@ -65,6 +65,7 @@ export const createObservation = async ({ auditId, user, data }) => {
     productId,
     availability,
     price = null,
+    substituteProduct = null,
     observedUnit = null,
     packageSize = null,
     capturedAt,
@@ -72,8 +73,12 @@ export const createObservation = async ({ auditId, user, data }) => {
     notes = null,
   } = data;
 
-  // 1. Availability and Price integrity check
-  const priceCheck = validateAvailabilityPriceCombination(availability, price);
+  // 1. Availability and Price integrity check (including substitute product validation)
+  const priceCheck = validateAvailabilityPriceCombination(
+    availability,
+    price,
+    substituteProduct
+  );
   if (!priceCheck.isValid) {
     throw new ApiError(400, priceCheck.message);
   }
@@ -99,7 +104,7 @@ export const createObservation = async ({ auditId, user, data }) => {
   if (user.role === "FIELD_AUDITOR" && audit.auditorId !== user.id) {
     throw new ApiError(
       403,
-      "Access forbidden: You cannot add observations to another auditor's visit",
+      "Access forbidden: You cannot add observations to another auditor's visit"
     );
   }
 
@@ -107,7 +112,7 @@ export const createObservation = async ({ auditId, user, data }) => {
   if (audit.status !== "IN_PROGRESS") {
     throw new ApiError(
       409,
-      `Cannot record observations for audit in status [${audit.status}]. Audit must be IN_PROGRESS.`,
+      `Cannot record observations for audit in status [${audit.status}]. Audit must be IN_PROGRESS.`
     );
   }
 
@@ -123,19 +128,19 @@ export const createObservation = async ({ auditId, user, data }) => {
   if (!product.active) {
     throw new ApiError(
       400,
-      `Product [${product.name}] is inactive and cannot be observed`,
+      `Product [${product.name}] is inactive and cannot be observed`
     );
   }
 
   // 6. Strict Assignment Item rule: Product MUST belong to the assignment
   const isAssignedProduct = audit.assignment.items.some(
-    (item) => item.productId === productId,
+    (item) => item.productId === productId
   );
 
   if (!isAssignedProduct) {
     throw new ApiError(
       400,
-      `Product [${product.name} (${productId})] is not assigned to this audit's store visit`,
+      `Product [${product.name} (${productId})] is not assigned to this audit's store visit`
     );
   }
 
@@ -155,7 +160,11 @@ export const createObservation = async ({ auditId, user, data }) => {
     return formatObservationResponse(existingObservation);
   }
 
-  // 9. Persist observation with SYNCED status (successful server ingestion)
+  // 9. Persist: Keep price if AVAILABLE or if substituteProduct is present
+  const formattedSubstitute = substituteProduct?.trim() || null;
+  const hasSubstitute = Boolean(formattedSubstitute);
+  const finalPrice = availability === "AVAILABLE" || hasSubstitute ? price : null;
+
   const observation = await prisma.priceObservation.create({
     data: {
       clientObservationId,
@@ -163,7 +172,8 @@ export const createObservation = async ({ auditId, user, data }) => {
       productId,
       auditorId: audit.auditorId,
       availability,
-      price: availability === "AVAILABLE" ? price : null,
+      price: finalPrice,
+      substituteProduct: formattedSubstitute,
       observedUnit: observedUnit || product.unit,
       packageSize,
       capturedAt: new Date(capturedAt),
@@ -178,6 +188,95 @@ export const createObservation = async ({ auditId, user, data }) => {
   });
 
   return formatObservationResponse(observation);
+};
+
+export const updateObservation = async ({ observationId, user, updates }) => {
+  const observation = await prisma.priceObservation.findUnique({
+    where: { id: observationId },
+    include: { audit: true },
+  });
+
+  if (!observation) {
+    throw new ApiError(404, "Price observation not found");
+  }
+
+  if (user.role === "FIELD_AUDITOR" && observation.auditorId !== user.id) {
+    throw new ApiError(
+      403,
+      "Access forbidden: You cannot modify another auditor's observation"
+    );
+  }
+
+  // Only cancelled audits are strictly forbidden from mutation
+  if (
+    user.role === "FIELD_AUDITOR" &&
+    observation.audit.status === "CANCELLED"
+  ) {
+    throw new ApiError(
+      409,
+      "Cannot update observation: corresponding audit was CANCELLED"
+    );
+  }
+
+  const newAvailability = updates.availability ?? observation.availability;
+
+  // Resolve substitute product candidate
+  const newSubstitute =
+    updates.substituteProduct !== undefined
+      ? updates.substituteProduct?.trim() || null
+      : observation.substituteProduct;
+  const hasSubstitute = Boolean(newSubstitute);
+
+  let newPrice =
+    updates.price !== undefined ? updates.price : observation.price;
+
+  // Clear price only if not AVAILABLE AND no substitute product is provided
+  if (newAvailability !== "AVAILABLE" && !hasSubstitute) {
+    newPrice = null;
+  }
+
+  const priceCheck = validateAvailabilityPriceCombination(
+    newAvailability,
+    newPrice,
+    newSubstitute
+  );
+
+  if (!priceCheck.isValid) {
+    throw new ApiError(400, priceCheck.message);
+  }
+
+  const updatedObservation = await prisma.priceObservation.update({
+    where: { id: observationId },
+    data: {
+      availability: newAvailability,
+      price: newPrice,
+      substituteProduct: newSubstitute,
+      observedUnit:
+        updates.observedUnit !== undefined
+          ? updates.observedUnit
+          : observation.observedUnit,
+      packageSize:
+        updates.packageSize !== undefined
+          ? updates.packageSize
+          : observation.packageSize,
+      evidencePhotoUrl:
+        updates.evidencePhotoUrl !== undefined
+          ? updates.evidencePhotoUrl
+          : observation.evidencePhotoUrl,
+      notes:
+        updates.notes !== undefined
+          ? updates.notes?.trim() || null
+          : observation.notes,
+      reviewStatus:
+        observation.reviewStatus === "REJECTED" ||
+          observation.reviewStatus === "NEEDS_REVIEW"
+          ? "PENDING"
+          : observation.reviewStatus,
+    },
+    include: OBSERVATION_INCLUDE_RELATIONS,
+  });
+
+  return formatObservationResponse(updatedObservation);
 };
 
 /**
@@ -401,86 +500,6 @@ export const listAllObservations = async ({ user, query = {} }) => {
 };
 
 
-export const updateObservation = async ({ observationId, user, updates }) => {
-  const observation = await prisma.priceObservation.findUnique({
-    where: { id: observationId },
-    include: { audit: true },
-  });
-
-  if (!observation) {
-    throw new ApiError(404, "Price observation not found");
-  }
-
-  if (user.role === "FIELD_AUDITOR" && observation.auditorId !== user.id) {
-    throw new ApiError(
-      403,
-      "Access forbidden: You cannot modify another auditor's observation",
-    );
-  }
-
-  // Only cancelled audits are strictly forbidden from mutation
-  if (
-    user.role === "FIELD_AUDITOR" &&
-    observation.audit.status === "CANCELLED"
-  ) {
-    throw new ApiError(
-      409,
-      "Cannot update observation: corresponding audit was CANCELLED",
-    );
-  }
-
-  const newAvailability = updates.availability ?? observation.availability;
-  let newPrice =
-    updates.price !== undefined ? updates.price : observation.price;
-
-  if (
-    updates.availability !== undefined &&
-    updates.availability !== "AVAILABLE"
-  ) {
-    newPrice = null;
-  }
-
-  const priceCheck = validateAvailabilityPriceCombination(
-    newAvailability,
-    newPrice,
-  );
-
-  if (!priceCheck.isValid) {
-    throw new ApiError(400, priceCheck.message);
-  }
-
-  const updatedObservation = await prisma.priceObservation.update({
-    where: { id: observationId },
-    data: {
-      availability: newAvailability,
-      price: newPrice,
-      observedUnit:
-        updates.observedUnit !== undefined
-          ? updates.observedUnit
-          : observation.observedUnit,
-      packageSize:
-        updates.packageSize !== undefined
-          ? updates.packageSize
-          : observation.packageSize,
-      evidencePhotoUrl:
-        updates.evidencePhotoUrl !== undefined
-          ? updates.evidencePhotoUrl
-          : observation.evidencePhotoUrl,
-      notes:
-        updates.notes !== undefined
-          ? updates.notes?.trim()
-          : observation.notes,
-      reviewStatus:
-        observation.reviewStatus === "REJECTED" ||
-          observation.reviewStatus === "NEEDS_REVIEW"
-          ? "PENDING"
-          : observation.reviewStatus,
-    },
-    include: OBSERVATION_INCLUDE_RELATIONS,
-  });
-
-  return formatObservationResponse(updatedObservation);
-};
 
 /**
  * Approve observation (ADMIN or MANAGER only).

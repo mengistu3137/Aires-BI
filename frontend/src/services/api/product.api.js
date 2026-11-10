@@ -1,5 +1,9 @@
 import { apiClient } from '../client.js'
 
+
+
+
+
 /**
  * Creates a single product under the active organization.
  * Endpoint: POST /products
@@ -16,10 +20,10 @@ export const createProductRequest = async (productData) => {
  * @param {Array<object>} products - Array of product objects
  */
 export const bulkCreateProductsRequest = async (products) => {
-  const response = await apiClient.post('/products/bulk', products)
-  return response.data
-}
-
+  const payload = Array.isArray(products) ? products : products.items;
+  const response = await apiClient.post('/products/bulk', payload);
+  return response.data;
+};
 /**
  * Retrieves a paginated, filterable catalog of products.
  * Endpoint: GET /products

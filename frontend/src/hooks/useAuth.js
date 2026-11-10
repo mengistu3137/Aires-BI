@@ -7,6 +7,8 @@ export function useAuth() {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const isInitialized = useAuthStore((state) => state.isInitialized);
   const activeAssignmentId = useAuthStore((state) => state.activeAssignmentId);
+  const isImpersonating = useAuthStore((state) => state.isImpersonating);
+  const impersonatorSession = useAuthStore((state) => state.impersonatorSession);
 
   const setAuth = useAuthStore((state) => state.setAuth);
   const clearAuth = useAuthStore((state) => state.clearAuth);
@@ -14,22 +16,23 @@ export function useAuth() {
   const updateUser = useAuthStore((state) => state.updateUser);
   const setInitialized = useAuthStore((state) => state.setInitialized);
   const setActiveAssignmentId = useAuthStore((state) => state.setActiveAssignmentId);
+  const impersonate = useAuthStore((state) => state.impersonate);
+  const stopImpersonation = useAuthStore((state) => state.stopImpersonation);
 
   const logout = () => {
     clearAuth();
   };
 
   const role = user?.role;
-
-  // Queens Admin is strictly view-only
-  const isQueensAdmin =
-    role === "QUEENS_ADMIN" ||
-    role === "QUEENS" ||
-    (Boolean(user?.organization?.toLowerCase().includes("queens")) && role === "ADMIN");
-
-  const isAdmin = role === "ADMIN" && !isQueensAdmin;
-  const isManager = (role === "MANAGER" || role === "ADMIN") && !isQueensAdmin;
+  const isSuperAdmin = role === "SUPER_ADMIN";
+  const isAiresAdmin = role === "ADMIN";
+  const isAdmin = isSuperAdmin || isAiresAdmin;
+  const isQueensAdmin = role === "MANAGER";
+  const isManager = isQueensAdmin || isAdmin;
   const isAuditor = role === "FIELD_AUDITOR";
+
+  // Only Aires Super Admin can sign in as another user
+  const canImpersonate = isSuperAdmin || Boolean(impersonatorSession);
 
   return useMemo(
     () => ({
@@ -39,10 +42,22 @@ export function useAuth() {
       isInitialized,
       activeAssignmentId,
       role,
+
+      // 4 Distinct Role Checks
+      isSuperAdmin,
+      isAiresAdmin,
       isAdmin,
+      isQueensAdmin,
       isManager,
       isAuditor,
-      isQueensAdmin,
+
+      // Impersonation Capabilities
+      canImpersonate,
+      isImpersonating: Boolean(isImpersonating),
+      impersonator: impersonatorSession?.impersonator || null,
+      impersonatorSession,
+      impersonate,
+      stopImpersonation,
 
       login: setAuth,
       logout,
@@ -59,10 +74,17 @@ export function useAuth() {
       isInitialized,
       activeAssignmentId,
       role,
+      isSuperAdmin,
+      isAiresAdmin,
       isAdmin,
+      isQueensAdmin,
       isManager,
       isAuditor,
-      isQueensAdmin,
+      canImpersonate,
+      isImpersonating,
+      impersonatorSession,
+      impersonate,
+      stopImpersonation,
       setAuth,
       setUser,
       updateUser,

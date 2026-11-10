@@ -1,29 +1,25 @@
 import prisma from "../../config/db.js";
 import ApiError from "../../utils/api-error.js";
 import { comparePassword, generateAuthPayload, sanitizeUser } from "./auth.helpers.js";
+import { signToken } from "../../utils/jwt.js";
 
-/**
- * Resolves phone number variations (local & international) into an array of search candidates.
- */
 const resolveLoginCandidates = (identifier) => {
   const clean = identifier.trim();
   const candidates = [clean];
 
-  // If it's an email, do not generate phone variations
   if (clean.includes("@")) {
     return { emailCandidate: clean.toLowerCase(), phoneCandidates: [] };
   }
 
-  // Extract digits for phone variations
   let digits = clean.replace(/\D/g, "");
   if (digits.startsWith("251")) digits = digits.slice(3);
   if (digits.startsWith("0")) digits = digits.slice(1);
 
   if (digits.length >= 9) {
     const last9 = digits.slice(-9);
-    candidates.push(`+251${last9}`); // E.164 standard (+2519...)
-    candidates.push(`0${last9}`);     // Local standard (09... / 07...)
-    candidates.push(last9);           // Raw 9-digit
+    candidates.push(`+251${last9}`);
+    candidates.push(`0${last9}`);
+    candidates.push(last9);
   }
 
   return { emailCandidate: clean.toLowerCase(), phoneCandidates: candidates };
@@ -82,8 +78,52 @@ export const getMe = async (userId) => {
   return sanitizeUser(user);
 };
 
+/**
+ * Super Admin (Aires) generates an authorized session token on behalf of a target user.
+ */
+export const impersonateUser = async (targetUserId, adminUser) => {
+  // Strict rule: Only Aires Super Admin can sign in as another user
+  if (adminUser.role !== "SUPER_ADMIN" && adminUser.role !== "ADMIN") {
+    throw new ApiError(403, "Access forbidden: Only Aires Super Admin can sign in on behalf of users.");
+  }
+
+  if (targetUserId === adminUser.id) {
+    throw new ApiError(400, "Cannot impersonate your own active administrator account.");
+  }
+
+  const targetUser = await prisma.user.findUnique({
+    where: { id: targetUserId },
+  });
+
+  if (!targetUser) {
+    throw new ApiError(404, `Target user '${targetUserId}' not found.`);
+  }
+
+  if (!targetUser.active) {
+    throw new ApiError(400, `Cannot sign in as deactivated user [${targetUser.name}].`);
+  }
+
+  // Issue standard token tagged with impersonation claims
+  const token = signToken({
+    id: targetUser.id,
+    role: targetUser.role,
+    impersonatedBy: adminUser.id,
+  });
+
+  return {
+    token,
+    user: sanitizeUser(targetUser),
+    impersonator: {
+      id: adminUser.id,
+      name: adminUser.name,
+      role: adminUser.role,
+    },
+  };
+};
+
 export const authService = {
   login,
   logout,
   getMe,
+  impersonateUser,
 };

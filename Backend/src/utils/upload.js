@@ -22,7 +22,7 @@ export const uploadFile = async (file, options = {}) => {
     returnFullObject = false,
   } = options;
 
-  // Ensure upload directory exists
+  // Ensure upload directory exists in src/uploads
   const uploadDir = path.join(__dirname, "../uploads", folder);
   await fs.mkdir(uploadDir, { recursive: true });
 
@@ -30,7 +30,7 @@ export const uploadFile = async (file, options = {}) => {
   const timestamp = Date.now();
   const randomString = crypto.randomBytes(4).toString("hex");
   const fileExtension = path.extname(filename);
-  const baseName = path.basename(filename, fileExtension);
+  const baseName = path.basename(filename, fileExtension).replace(/[^\w-]/g, "_");
   const uniqueFilename = `${timestamp}-${randomString}-${baseName}${fileExtension}`;
   const filePath = path.join(uploadDir, uniqueFilename);
 
@@ -68,7 +68,7 @@ export const deleteFile = async (filePath) => {
   }
 };
 
-// Multer configuration
+// Multer memory storage
 const storage = multer.memoryStorage();
 
 const fileFilter = (req, file, cb) => {
@@ -92,16 +92,20 @@ const fileFilter = (req, file, cb) => {
   }
 };
 
+// Configured with up to 10 files and 10MB per file
 export const upload = multer({
   storage,
   limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB
-    files: 1,
+    fileSize: 10 * 1024 * 1024, // 10MB per file
+    files: 10,                   // <-- CRITICAL FIX: Raised from 1 to 10!
   },
   fileFilter,
 });
 
 export const uploadMiddleware = upload.single("proof");
 
-// For multiple file uploads
-export const uploadMultipleMiddleware = upload.array("proofs", 5);
+// Resilient middleware that accepts both "proofs" and "proof" array fields
+export const uploadMultipleMiddleware = upload.fields([
+  { name: "proofs", maxCount: 10 },
+  { name: "proof", maxCount: 10 },
+]);

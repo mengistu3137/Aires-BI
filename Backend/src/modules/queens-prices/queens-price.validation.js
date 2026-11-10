@@ -96,6 +96,7 @@ export const listQueensPricesQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().positive().max(100).default(20),
   productId: z.string().trim().optional(),
+  frequency: z.enum(["ALL", "DAILY", "WEEKLY", "MONTHLY", "BI_YEARLY"]).optional(),
   current: z
     .enum(["true", "false"])
     .transform((val) => val === "true")

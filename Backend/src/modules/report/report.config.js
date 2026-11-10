@@ -1,112 +1,94 @@
 import { normalizeKey } from "./report.utils.js";
 
-/**
- * Report layout configuration.
- *
- * The export is split in two report types. Each one has its own fixed list of
- * columns (one column per COMPETITOR, all stores of that competitor combined):
- *
- *   FRESH_CORNER     -> every category that is NOT "Ultra-Sensitive"
- *                       Fresh Corner | Garment Market | Straight Market | Queens Price
- *   ULTRA_SENSITIVE  -> only the "Ultra-Sensitive" category
- *                       Shoa | Abadir | Allmart | Bambis
- *
- * Column kinds:
- *   COMPETITOR - prices come from audit observations. A store belongs to the
- *                column when its Competitor.name matches one of the `aliases`
- *                (compared case-insensitively, ignoring spaces/punctuation,
- *                and the alias may be contained in the competitor name).
- *   QUEENS     - our own price; taken from the QueensPrice table (the price
- *                that is effective right now).
- *
- * A column with no data (e.g. Bambis today) is still shown, with blank cells.
- * If a competitor is named differently in your database, add the spelling to
- * its `aliases` list below.
- */
+const FMCG_COLUMNS = [
+  { key: "shoa", label: "Shoa", kind: "COMPETITOR", aliases: ["shoa"] },
+  { key: "abadir", label: "Abadir", kind: "COMPETITOR", aliases: ["abadir"] },
+  { key: "allmart", label: "Allmart", kind: "COMPETITOR", aliases: ["allmart"] },
+  { key: "bambis", label: "Bambis", kind: "COMPETITOR", aliases: ["bambis", "bambi"] },
+  { key: "queens-price", label: "Queens Price", kind: "QUEENS", aliases: [] },
+];
 
-export const isUltraSensitiveCategory = (category) =>
-  normalizeKey(category) === "ultrasensitive";
+const FRESH_COLUMNS = [
+  {
+    key: "fresh-corner",
+    label: "Fresh Corner",
+    kind: "COMPETITOR",
+    aliases: ["freshcorner"],
+  },
+  {
+    key: "garment-market",
+    label: "Garment Market",
+    kind: "COMPETITOR",
+    aliases: ["garmentmarket", "garment"],
+  },
+  {
+    key: "straight-market",
+    label: "Straight Market",
+    kind: "COMPETITOR",
+    aliases: ["straightmarket", "straight"],
+  },
+  {
+    key: "queens-price",
+    label: "Queens Price",
+    kind: "QUEENS",
+    aliases: [],
+  },
+];
 
 export const REPORT_TYPES = {
-  FRESH_CORNER: {
-    key: "FRESH_CORNER",
-    slug: "fresh-corner",
-    label: "Fresh Corner",
-    description: "All categories except Ultra-Sensitive",
-    acceptsCategory: (category) => !isUltraSensitiveCategory(category),
-    columns: [
-      {
-        key: "fresh-corner",
-        label: "Fresh Corner",
-        kind: "COMPETITOR",
-        aliases: ["freshcorner"],
-      },
-      {
-        key: "garment-market",
-        label: "Garment Market",
-        kind: "COMPETITOR",
-        aliases: ["garmentmarket", "garment"],
-      },
-      {
-        key: "straight-market",
-        label: "Straight Market",
-        kind: "COMPETITOR",
-        aliases: ["straightmarket", "straight"],
-      },
-      {
-        key: "queens-price",
-        label: "Queens Price",
-        kind: "QUEENS",
-        aliases: [],
-      },
-    ],
+  DAILY: {
+    key: "DAILY",
+    slug: "daily-fresh",
+    label: "Daily Fresh (20 Products)",
+    description: "Daily volatile items: Vegetables, Fruits, Dairy, and Meat",
+    acceptsProduct: (p) => p.frequency === "DAILY",
+    columns: FRESH_COLUMNS,
   },
 
-  ULTRA_SENSITIVE: {
-    key: "ULTRA_SENSITIVE",
-    slug: "ultra-sensitive",
-    label: "Ultra-Sensitive",
-    description: "Ultra-Sensitive category only",
-    acceptsCategory: (category) => isUltraSensitiveCategory(category),
-    columns: [
-      { key: "shoa", label: "Shoa", kind: "COMPETITOR", aliases: ["shoa"] },
-      {
-        key: "abadir",
-        label: "Abadir",
-        kind: "COMPETITOR",
-        aliases: ["abadir"],
-      },
-      {
-        key: "allmart",
-        label: "Allmart",
-        kind: "COMPETITOR",
-        aliases: ["allmart"],
-      },
-      {
-        key: "bambis",
-        label: "Bambis",
-        kind: "COMPETITOR",
-        aliases: ["bambis", "bambi"],
-      },
-    ],
+  WEEKLY: {
+    key: "WEEKLY",
+    slug: "weekly-ultra-sensitive",
+    label: "Ultra-Sensitive (100 Articles)",
+    description: "Core FMCG staples audited weekly",
+    acceptsProduct: (p) => p.frequency === "WEEKLY",
+    columns: FMCG_COLUMNS,
+  },
+
+  MONTHLY: {
+    key: "MONTHLY",
+    slug: "monthly-sensitive",
+    label: "Sensitive (500 Articles)",
+    description: "Secondary FMCG packaged goods audited monthly",
+    acceptsProduct: (p) => p.frequency === "MONTHLY",
+    columns: FMCG_COLUMNS,
+  },
+
+  BI_YEARLY: {
+    key: "BI_YEARLY",
+    slug: "bi-yearly-non-sensitive",
+    label: "Non-Sensitive (2,804 Articles)",
+    description: "Long-tail niche articles audited bi-yearly",
+    acceptsProduct: (p) => p.frequency === "BI_YEARLY",
+    columns: FMCG_COLUMNS,
   },
 };
 
-export const REPORT_TYPE_KEYS = Object.keys(REPORT_TYPES);
+export const REPORT_TYPE_KEYS = ["DAILY", "WEEKLY", "MONTHLY", "BI_YEARLY"];
 
 const TYPE_ALIASES = {
-  FRESH: "FRESH_CORNER",
-  FRESHCORNER: "FRESH_CORNER",
-  ULTRA: "ULTRA_SENSITIVE",
-  ULTRASENSITIVE: "ULTRA_SENSITIVE",
+  FRESH: "DAILY",
+  FRESH_CORNER: "DAILY",
+  FRESHCORNER: "DAILY",
+  DAILY_FRESH: "DAILY",
+  ULTRA: "WEEKLY",
+  ULTRA_SENSITIVE: "WEEKLY",
+  ULTRASENSITIVE: "WEEKLY",
+  SENSITIVE: "MONTHLY",
+  NONSENSITIVE: "BI_YEARLY",
+  NON_SENSITIVE: "BI_YEARLY",
+  BIYEARLY: "BI_YEARLY",
 };
 
-/**
- * Normalises the `reportType` query value.
- *   - undefined -> both reports (empty / "ALL" / "BOTH")
- *   - a key     -> that report only
- *   - null      -> invalid value
- */
 export const normalizeReportType = (value) => {
   const raw = String(value ?? "")
     .trim()
@@ -119,7 +101,6 @@ export const normalizeReportType = (value) => {
   return null;
 };
 
-/** Finds the COMPETITOR column a competitor name belongs to (or null). */
 export const matchColumn = (columns, competitorName) => {
   const name = normalizeKey(competitorName);
   if (!name) return null;
@@ -131,21 +112,19 @@ export const matchColumn = (columns, competitorName) => {
     ) || null
   );
 };
-// report.config.js
 
-// A canonical display order for categories, per report type.
-// Categories not listed here are sorted alphabetically and appended at the end.
 export const CATEGORY_ORDER = {
-  FRESH_CORNER: [
+  DAILY: [
     "Vegetables",
     "Fruits",
-    "Fresh",
+    "Fresh Produce",
     "Dairy",
     "Dairy products",
     "Meat",
     "Meat products",
     "Poultry",
-    "POULTRY PRODUCT",
   ],
-  ULTRA_SENSITIVE: ["Ultra-Sensitive"],
+  WEEKLY: ["Ultra-Sensitive", "Grocery", "Cooking Ingredients"],
+  MONTHLY: ["Sensitive", "Personal Care", "Cleaning & Detergents", "Canned Food"],
+  BI_YEARLY: ["Non-Sensitive"],
 };

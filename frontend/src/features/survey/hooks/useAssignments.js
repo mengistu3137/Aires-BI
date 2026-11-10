@@ -8,10 +8,28 @@ import {
   deleteAssignmentRequest,
   createBatchAssignmentRequest,
   updateStoreAllocationsRequest,
+  archiveStoreDispatchRequest
 } from "@/services/api/assignment.api.js";
 import { useAuth } from "@/hooks/useAuth.js";
 import toast from "react-hot-toast";
 
+
+
+
+export const useArchiveStoreDispatch = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: archiveStoreDispatchRequest,
+    onSuccess: (res) => {
+      toast.success(res?.data?.message || "Store dispatch archived successfully");
+      queryClient.invalidateQueries({ queryKey: ["assignments"] });
+    },
+    onError: (err) => {
+      toast.error(err?.response?.data?.message || err?.message || "Failed to archive dispatch");
+    },
+  });
+};
 export const useCreateBatchAssignment = () => {
   const queryClient = useQueryClient();
   return useMutation({

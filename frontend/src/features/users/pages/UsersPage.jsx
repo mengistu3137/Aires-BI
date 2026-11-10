@@ -1,8 +1,10 @@
 import React, { useState } from "react";
-import { Navigate, useSearchParams } from "react-router-dom";
+import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { useUsers } from "../hooks/useUsers.js";
 import { useAuth } from "@/hooks/useAuth.js";
+import { useAuthStore } from "@/stores/auth/auth.store.js";
 import { normalizeEthiopianPhone } from "@/utils/phone.utils.js";
+import { impersonateUserRequest } from "@/services/api/auth.api.js";
 import toast from "react-hot-toast";
 
 const PAGE_SIZE = 20;
@@ -56,10 +58,19 @@ const DEFAULT_CREATE_FORM = {
 };
 
 export const UsersPage = () => {
-	const { isAdmin, isAuditor } = useAuth();
+	const navigate = useNavigate();
+	const {
+		user: currentUser,
+		isAdmin,
+		isSuperAdmin,
+		canImpersonate,
+		isAuditor,
+		isImpersonating,
+		impersonate,
+		stopImpersonation,
+	} = useAuth();
 	const [searchParams, setSearchParams] = useSearchParams();
 
-	// URL-backed pagination
 	const page = Math.max(1, Number(searchParams.get("page") || 1));
 
 	const setPage = (next) => {
@@ -79,14 +90,14 @@ export const UsersPage = () => {
 		deleteUser,
 	} = useUsers({ page, limit: PAGE_SIZE });
 
-	// Strict Admin-Only Authorization Guard
-	if (!isAdmin) {
+	if (!isAdmin && !isImpersonating) {
 		return <Navigate to={isAuditor ? "/audits" : "/dashboard"} replace />;
 	}
 
 	const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 	const [editingUser, setEditingUser] = useState(null);
 	const [deleteCandidate, setDeleteCandidate] = useState(null);
+	const [isImpersonatingLoading, setIsImpersonatingLoading] = useState(false);
 
 	const [showCreatePassword, setShowCreatePassword] = useState(false);
 	const [showEditPassword, setShowEditPassword] = useState(false);
@@ -121,7 +132,7 @@ export const UsersPage = () => {
 				updates: { active: !u.active },
 			});
 		} catch {
-			// Error handled in hook toast
+			// Handled in toast
 		}
 	};
 
@@ -168,7 +179,7 @@ export const UsersPage = () => {
 			setShowCreatePassword(false);
 			setCreateFormData(DEFAULT_CREATE_FORM);
 		} catch {
-			// Error handled by mutation hook toast
+			// Handled by toast
 		}
 	};
 
@@ -208,8 +219,77 @@ export const UsersPage = () => {
 			setEditingUser(null);
 			setShowEditPassword(false);
 		} catch {
-			// Handled by mutation toast
+			// Handled by toast
 		}
+	};
+
+	// Super Admin signs in as the target user
+	const handleImpersonate = async (targetUser) => {
+		if (targetUser.id === currentUser?.id) {
+			toast.error("You are already signed into this account");
+			return;
+		}
+
+		setIsImpersonatingLoading(true);
+		const toastId = toast.loading(`Signing in as ${targetUser.name}...`);
+
+		try {
+			const res = await impersonateUserRequest(targetUser.id);
+			const { token, user: impersonatedUserData, impersonator } = res.data;
+
+			const store = useAuthStore.getState();
+
+			if (typeof impersonate === "function") {
+				impersonate({
+					targetUser: impersonatedUserData,
+					token,
+					impersonator,
+				});
+			} else if (typeof store.impersonate === "function") {
+				store.impersonate({
+					targetUser: impersonatedUserData,
+					token,
+					impersonator,
+				});
+			} else {
+				store.setAuth({ user: impersonatedUserData, token });
+			}
+
+			toast.success(`Signed in on behalf of ${targetUser.name}`, {
+				id: toastId,
+			});
+
+			if (targetUser.role === "FIELD_AUDITOR") {
+				navigate("/audits");
+			} else {
+				navigate("/dashboard");
+			}
+		} catch (err) {
+			toast.error(
+				err?.response?.data?.message || err?.message || "Impersonation failed",
+				{
+					id: toastId,
+				},
+			);
+		} finally {
+			setIsImpersonatingLoading(false);
+		}
+	};
+
+	const formatRoleBadge = (r) => {
+		if (r === "SUPER_ADMIN")
+			return { label: "Aires Super Admin", style: "bg-[#A41821] text-white" };
+		if (r === "ADMIN")
+			return { label: "Aires Admin", style: "bg-slate-800 text-white" };
+		if (r === "MANAGER")
+			return {
+				label: "Queens Admin",
+				style: "bg-emerald-50 text-[#017C4D] border border-emerald-200",
+			};
+		return {
+			label: "Field Auditor",
+			style: "bg-blue-50 text-blue-700 border border-blue-200",
+		};
 	};
 
 	if (isLoading) {
@@ -227,15 +307,15 @@ export const UsersPage = () => {
 				<div>
 					<div className="flex items-center gap-2">
 						<h1 className="text-lg sm:text-xl font-black text-slate-900 tracking-tight">
-							Auditors &amp; Staff Management
+							User Access &amp; Role Management
 						</h1>
 						<span className="rounded-md bg-red-50 border border-red-200 px-2 py-0.5 text-[9px] sm:text-[10px] font-bold text-[#A41821] uppercase tracking-wider">
-							Admin Only
+							{isSuperAdmin ? "Aires Super Admin" : "Aires Administrator"}
 						</span>
 					</div>
 					<p className="text-xs text-slate-500 mt-0.5">
-						Manage system administrators, pricing managers, and field data
-						collectors
+						Aires Super Admin, Aires Operations Admins, Queens Client Admins,
+						and Field Auditors
 					</p>
 				</div>
 
@@ -260,96 +340,118 @@ export const UsersPage = () => {
 						<thead className="bg-slate-50 text-slate-500 border-b border-slate-100 uppercase tracking-wider font-semibold text-[10px]">
 							<tr>
 								<th className="px-4 py-3">Staff Member</th>
-								<th className="px-4 py-3">Role</th>
+								<th className="px-4 py-3">Role &amp; Organization</th>
 								<th className="px-4 py-3">Phone</th>
-								<th className="px-4 py-3">GPS Permission</th>
-								<th className="px-4 py-3">Field Records</th>
+								<th className="px-4 py-3">GPS Status</th>
+								<th className="px-4 py-3">Activity</th>
 								<th className="px-4 py-3">Status</th>
 								<th className="px-4 py-3 text-right">Actions</th>
 							</tr>
 						</thead>
 						<tbody className="divide-y divide-slate-100 text-slate-700">
-							{users.map((u) => (
-								<tr key={u.id} className="hover:bg-slate-50/75 transition">
-									<td className="px-4 py-3">
-										<div className="font-bold text-slate-900">{u.name}</div>
-										<span className="text-[11px] text-slate-400">
-											{u.email || "No email assigned"}
-										</span>
-									</td>
-									<td className="px-4 py-3">
-										<span
-											className={`inline-flex rounded-md px-2 py-0.5 text-[10px] font-bold ${
-												u.role === "ADMIN"
-													? "bg-slate-800 text-white"
-													: u.role === "MANAGER"
-														? "bg-emerald-50 text-[#017C4D] border border-emerald-200"
-														: "bg-red-50 text-[#A41821] border border-red-200"
-											}`}
-										>
-											{u.role.replace("_", " ")}
-										</span>
-									</td>
-									<td className="px-4 py-3 font-mono text-slate-600 font-semibold">
-										{u.phone}
-									</td>
+							{users.map((u) => {
+								const isSelf = u.id === currentUser?.id;
+								const badge = formatRoleBadge(u.role);
 
-									<td className="px-4 py-3">
-										<LocationPermissionBadge
-											role={u.role}
-											permission={u.locationPermission}
-										/>
-									</td>
-
-									<td className="px-4 py-3">
-										<span className="text-slate-600 font-medium">
-											{u.stats?.assignments || 0} assignments •{" "}
-											{u.stats?.createdAudits || 0} audits
-										</span>
-									</td>
-									<td className="px-4 py-3">
-										<span
-											className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${
-												u.active
-													? "bg-emerald-50 text-[#017C4D]"
-													: "bg-slate-100 text-slate-400"
-											}`}
-										>
+								return (
+									<tr key={u.id} className="hover:bg-slate-50/75 transition">
+										<td className="px-4 py-3">
+											<div className="font-bold text-slate-900 flex items-center gap-1.5">
+												<span>{u.name}</span>
+												{isSelf && (
+													<span className="rounded bg-slate-200 px-1 py-0.2 text-[9px] font-bold text-slate-700 font-mono">
+														YOU
+													</span>
+												)}
+											</div>
+											<span className="text-[11px] text-slate-400">
+												{u.email || "No email assigned"}
+											</span>
+										</td>
+										<td className="px-4 py-3">
 											<span
-												className={`h-1.5 w-1.5 rounded-full ${
-													u.active ? "bg-[#017C4D]" : "bg-slate-400"
-												}`}
+												className={`inline-flex rounded-md px-2 py-0.5 text-[10px] font-bold ${badge.style}`}
+											>
+												{badge.label}
+											</span>
+										</td>
+										<td className="px-4 py-3 font-mono text-slate-600 font-semibold">
+											{u.phone}
+										</td>
+
+										<td className="px-4 py-3">
+											<LocationPermissionBadge
+												role={u.role}
+												permission={u.locationPermission}
 											/>
-											{u.active ? "Active" : "Inactive"}
-										</span>
-									</td>
-									<td className="px-4 py-3 text-right space-x-2">
-										<button
-											type="button"
-											onClick={() => handleOpenEditModal(u)}
-											className="text-xs font-semibold text-slate-700 hover:text-[#A41821] transition cursor-pointer"
-										>
-											Edit
-										</button>
-										<span className="text-slate-300">|</span>
-										<button
-											type="button"
-											onClick={() => handleToggleActive(u)}
-											className="text-xs font-semibold text-slate-600 hover:text-slate-900 transition underline cursor-pointer"
-										>
-											{u.active ? "Deactivate" : "Activate"}
-										</button>
-										<span className="text-slate-300">|</span>
-										<button
-											type="button"
-											onClick={() => setDeleteCandidate(u)}
-											className="text-xs font-semibold text-red-600 hover:text-red-800 transition cursor-pointer"
-										>
-											Delete
-										</button>
-									</td>
-								</tr>
-							))}
+										</td>
+
+										<td className="px-4 py-3">
+											<span className="text-slate-600 font-medium">
+												{u.stats?.assignments || 0} assignments •{" "}
+												{u.stats?.createdAudits || 0} audits
+											</span>
+										</td>
+										<td className="px-4 py-3">
+											<span
+												className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${
+													u.active
+														? "bg-emerald-50 text-[#017C4D]"
+														: "bg-slate-100 text-slate-400"
+												}`}
+											>
+												<span
+													className={`h-1.5 w-1.5 rounded-full ${
+														u.active ? "bg-[#017C4D]" : "bg-slate-400"
+													}`}
+												/>
+												{u.active ? "Active" : "Inactive"}
+											</span>
+										</td>
+										<td className="px-4 py-3 text-right space-x-2">
+											{/* "Sign in as User" IS EXCLUSIVELY VISIBLE TO AIRES SUPER ADMIN */}
+											{canImpersonate && !isSelf && u.active && (
+												<>
+													<button
+														type="button"
+														disabled={isImpersonatingLoading}
+														onClick={() => handleImpersonate(u)}
+														className="text-xs font-bold text-[#017C4D] hover:underline cursor-pointer disabled:opacity-40"
+														title={`Sign into Aires-BI on behalf of ${u.name}`}
+													>
+														Sign in as User
+													</button>
+													<span className="text-slate-300">|</span>
+												</>
+											)}
+
+											<button
+												type="button"
+												onClick={() => handleOpenEditModal(u)}
+												className="text-xs font-semibold text-slate-700 hover:text-[#A41821] transition cursor-pointer"
+											>
+												Edit
+											</button>
+											<span className="text-slate-300">|</span>
+											<button
+												type="button"
+												onClick={() => handleToggleActive(u)}
+												className="text-xs font-semibold text-slate-600 hover:text-slate-900 transition underline cursor-pointer"
+											>
+												{u.active ? "Deactivate" : "Activate"}
+											</button>
+											<span className="text-slate-300">|</span>
+											<button
+												type="button"
+												onClick={() => setDeleteCandidate(u)}
+												className="text-xs font-semibold text-red-600 hover:text-red-800 transition cursor-pointer"
+											>
+												Delete
+											</button>
+										</td>
+									</tr>
+								);
+							})}
 						</tbody>
 					</table>
 				</div>
@@ -357,102 +459,122 @@ export const UsersPage = () => {
 
 			{/* Mobile Card List View */}
 			<div className="space-y-3 md:hidden">
-				{users.map((u) => (
-					<div
-						key={u.id}
-						className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs space-y-3 transition"
-					>
-						<div className="flex items-start justify-between gap-2">
-							<div className="min-w-0 flex-1">
-								<div className="font-bold text-slate-900 text-sm truncate">
-									{u.name}
-								</div>
-								<div className="text-[11px] text-slate-400 truncate">
-									{u.email || "No email assigned"}
-								</div>
-							</div>
+				{users.map((u) => {
+					const isSelf = u.id === currentUser?.id;
+					const badge = formatRoleBadge(u.role);
 
-							<div className="flex flex-col items-end gap-1 flex-none">
-								<span
-									className={`inline-flex rounded-md px-2 py-0.5 text-[9px] font-bold ${
-										u.role === "ADMIN"
-											? "bg-slate-800 text-white"
-											: u.role === "MANAGER"
-												? "bg-emerald-50 text-[#017C4D] border border-emerald-200"
-												: "bg-red-50 text-[#A41821] border border-red-200"
-									}`}
-								>
-									{u.role.replace("_", " ")}
-								</span>
-								<span
-									className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold ${
-										u.active
-											? "bg-emerald-50 text-[#017C4D]"
-											: "bg-slate-100 text-slate-400"
-									}`}
-								>
+					return (
+						<div
+							key={u.id}
+							className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs space-y-3 transition"
+						>
+							<div className="flex items-start justify-between gap-2">
+								<div className="min-w-0 flex-1">
+									<div className="font-bold text-slate-900 text-sm truncate flex items-center gap-1.5">
+										<span>{u.name}</span>
+										{isSelf && (
+											<span className="rounded bg-slate-200 px-1 py-0.2 text-[9px] font-bold text-slate-700 font-mono">
+												YOU
+											</span>
+										)}
+									</div>
+									<div className="text-[11px] text-slate-400 truncate">
+										{u.email || "No email assigned"}
+									</div>
+								</div>
+
+								<div className="flex flex-col items-end gap-1 flex-none">
 									<span
-										className={`h-1.5 w-1.5 rounded-full ${
-											u.active ? "bg-[#017C4D]" : "bg-slate-400"
+										className={`inline-flex rounded-md px-2 py-0.5 text-[9px] font-bold ${badge.style}`}
+									>
+										{badge.label}
+									</span>
+									<span
+										className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold ${
+											u.active
+												? "bg-emerald-50 text-[#017C4D]"
+												: "bg-slate-100 text-slate-400"
 										}`}
-									/>
-									{u.active ? "Active" : "Inactive"}
-								</span>
+									>
+										<span
+											className={`h-1.5 w-1.5 rounded-full ${
+												u.active ? "bg-[#017C4D]" : "bg-slate-400"
+											}`}
+										/>
+										{u.active ? "Active" : "Inactive"}
+									</span>
+								</div>
 							</div>
-						</div>
 
-						<div className="grid grid-cols-2 gap-2 text-xs bg-slate-50/70 rounded-xl p-2.5 border border-slate-100">
-							<div>
-								<span className="text-slate-400 block text-[9px] uppercase font-bold tracking-wider">
-									Phone
-								</span>
-								<span className="font-mono font-semibold text-slate-700">
-									{u.phone}
-								</span>
+							<div className="grid grid-cols-2 gap-2 text-xs bg-slate-50/70 rounded-xl p-2.5 border border-slate-100">
+								<div>
+									<span className="text-slate-400 block text-[9px] uppercase font-bold tracking-wider">
+										Phone
+									</span>
+									<span className="font-mono font-semibold text-slate-700">
+										{u.phone}
+									</span>
+								</div>
+								<div>
+									<span className="text-slate-400 block text-[9px] uppercase font-bold tracking-wider">
+										GPS Status
+									</span>
+									<div className="mt-0.5">
+										<LocationPermissionBadge
+											role={u.role}
+											permission={u.locationPermission}
+										/>
+									</div>
+								</div>
 							</div>
-							<div>
-								<span className="text-slate-400 block text-[9px] uppercase font-bold tracking-wider">
-									GPS Permission
-								</span>
-								<div className="mt-0.5">
-									<LocationPermissionBadge
-										role={u.role}
-										permission={u.locationPermission}
-									/>
+
+							<div className="text-[11px] text-slate-500 font-medium">
+								{u.stats?.assignments || 0} assignments •{" "}
+								{u.stats?.createdAudits || 0} audits
+							</div>
+
+							<div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100">
+								{/* "Sign in as User" IS EXCLUSIVELY VISIBLE TO AIRES SUPER ADMIN */}
+								{canImpersonate && !isSelf && u.active ? (
+									<button
+										type="button"
+										disabled={isImpersonatingLoading}
+										onClick={() => handleImpersonate(u)}
+										className="rounded-lg bg-emerald-50 border border-emerald-200 px-2.5 py-1.5 text-xs font-bold text-[#017C4D] hover:bg-emerald-100 transition cursor-pointer"
+									>
+										Sign in as User
+									</button>
+								) : (
+									<span />
+								)}
+
+								<div className="flex items-center gap-1.5">
+									<button
+										type="button"
+										onClick={() => handleOpenEditModal(u)}
+										className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition cursor-pointer"
+									>
+										Edit
+									</button>
+									<button
+										type="button"
+										onClick={() => handleToggleActive(u)}
+										className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition cursor-pointer"
+									>
+										{u.active ? "Deactivate" : "Activate"}
+									</button>
+									<button
+										type="button"
+										onClick={() => setDeleteCandidate(u)}
+										className="rounded-lg bg-red-50 border border-red-200 px-2.5 py-1.5 text-xs font-semibold text-[#A41821] hover:bg-red-100 transition cursor-pointer"
+									>
+										Delete
+									</button>
 								</div>
 							</div>
 						</div>
-
-						<div className="text-[11px] text-slate-500 font-medium">
-							{u.stats?.assignments || 0} assignments •{" "}
-							{u.stats?.createdAudits || 0} audits
-						</div>
-
-						<div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
-							<button
-								type="button"
-								onClick={() => handleOpenEditModal(u)}
-								className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition cursor-pointer"
-							>
-								Edit
-							</button>
-							<button
-								type="button"
-								onClick={() => handleToggleActive(u)}
-								className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition cursor-pointer"
-							>
-								{u.active ? "Deactivate" : "Activate"}
-							</button>
-							<button
-								type="button"
-								onClick={() => setDeleteCandidate(u)}
-								className="rounded-lg bg-red-50 border border-red-200 px-3 py-1.5 text-xs font-semibold text-[#A41821] hover:bg-red-100 transition cursor-pointer"
-							>
-								Delete
-							</button>
-						</div>
-					</div>
-				))}
+					);
+				})}
 			</div>
 
 			{/* Pagination footer */}
@@ -480,7 +602,6 @@ export const UsersPage = () => {
 							onClick={() => setPage(1)}
 							disabled={meta.page <= 1 || isFetching}
 							className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-							aria-label="First page"
 						>
 							«
 						</button>
@@ -492,35 +613,6 @@ export const UsersPage = () => {
 						>
 							Previous
 						</button>
-
-						{(() => {
-							const total = meta.totalPages;
-							const current = meta.page;
-							const span = 2;
-							const start = Math.max(1, current - span);
-							const end = Math.min(total, current + span);
-							const nums = [];
-							for (let i = start; i <= end; i += 1) nums.push(i);
-
-							return nums.map((num) => {
-								const active = num === current;
-								return (
-									<button
-										key={num}
-										type="button"
-										onClick={() => setPage(num)}
-										disabled={isFetching}
-										className={`min-w-[32px] rounded-lg border px-2 py-1.5 text-xs font-bold transition ${
-											active
-												? "border-[#A41821] bg-[#A41821] text-white shadow-xs"
-												: "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-										} disabled:cursor-not-allowed disabled:opacity-40`}
-									>
-										{num}
-									</button>
-								);
-							});
-						})()}
 
 						<button
 							type="button"
@@ -535,7 +627,6 @@ export const UsersPage = () => {
 							onClick={() => setPage(meta.totalPages)}
 							disabled={meta.page >= meta.totalPages || isFetching}
 							className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-							aria-label="Last page"
 						>
 							»
 						</button>
@@ -549,7 +640,7 @@ export const UsersPage = () => {
 					<div className="w-full max-w-md rounded-2xl bg-white p-5 sm:p-6 shadow-xl border border-slate-100 space-y-4 my-auto max-h-[90vh] flex flex-col">
 						<div className="flex items-center justify-between border-b border-slate-100 pb-3 flex-none">
 							<h2 className="text-base font-bold text-slate-900">
-								Add Staff / Auditor
+								Add Platform User
 							</h2>
 							<button
 								type="button"
@@ -584,11 +675,9 @@ export const UsersPage = () => {
 							</div>
 
 							<div>
-								<div className="flex items-center justify-between mb-1">
-									<label className="font-semibold text-slate-700">
-										Phone Number
-									</label>
-								</div>
+								<label className="block font-semibold text-slate-700 mb-1">
+									Phone Number
+								</label>
 								<input
 									type="tel"
 									placeholder="+251911223344"
@@ -644,45 +733,8 @@ export const UsersPage = () => {
 										tabIndex={-1}
 										onClick={() => setShowCreatePassword(!showCreatePassword)}
 										className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 transition cursor-pointer"
-										aria-label={
-											showCreatePassword ? "Hide password" : "Show password"
-										}
 									>
-										{showCreatePassword ? (
-											<svg
-												className="h-4 w-4"
-												fill="none"
-												viewBox="0 0 24 24"
-												stroke="currentColor"
-											>
-												<path
-													strokeLinecap="round"
-													strokeLinejoin="round"
-													strokeWidth={1.8}
-													d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l18 18"
-												/>
-											</svg>
-										) : (
-											<svg
-												className="h-4 w-4"
-												fill="none"
-												viewBox="0 0 24 24"
-												stroke="currentColor"
-											>
-												<path
-													strokeLinecap="round"
-													strokeLinejoin="round"
-													strokeWidth={1.8}
-													d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-												/>
-												<path
-													strokeLinecap="round"
-													strokeLinejoin="round"
-													strokeWidth={1.8}
-													d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
-												/>
-											</svg>
-										)}
+										{showCreatePassword ? "Hide" : "Show"}
 									</button>
 								</div>
 							</div>
@@ -702,8 +754,13 @@ export const UsersPage = () => {
 									className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm text-slate-800 focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] outline-hidden"
 								>
 									<option value="FIELD_AUDITOR">Field Auditor</option>
-									<option value="MANAGER">Pricing Manager</option>
-									<option value="ADMIN">Administrator</option>
+									<option value="MANAGER">Queens Admin (Client Admin)</option>
+									<option value="ADMIN">Aires Admin (Operations)</option>
+									{isSuperAdmin && (
+										<option value="SUPER_ADMIN">
+											Aires Super Admin (Full Control)
+										</option>
+									)}
 								</select>
 							</div>
 
@@ -769,14 +826,9 @@ export const UsersPage = () => {
 							</div>
 
 							<div>
-								<div className="flex items-center justify-between mb-1">
-									<label className="font-semibold text-slate-700">
-										Phone Number
-									</label>
-									<span className="text-[10px] text-slate-400 font-mono">
-										+251 9XXXXXXXX
-									</span>
-								</div>
+								<label className="block font-semibold text-slate-700 mb-1">
+									Phone Number
+								</label>
 								<input
 									type="tel"
 									required
@@ -807,14 +859,9 @@ export const UsersPage = () => {
 							</div>
 
 							<div>
-								<div className="flex items-center justify-between mb-1">
-									<label className="font-semibold text-slate-700">
-										Reset Password
-									</label>
-									<span className="text-[10px] text-slate-400">
-										Leave blank to keep current
-									</span>
-								</div>
+								<label className="block font-semibold text-slate-700 mb-1">
+									Reset Password (Leave blank to keep current)
+								</label>
 								<div className="relative">
 									<input
 										type={showEditPassword ? "text" : "password"}
@@ -833,45 +880,8 @@ export const UsersPage = () => {
 										tabIndex={-1}
 										onClick={() => setShowEditPassword(!showEditPassword)}
 										className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 transition cursor-pointer"
-										aria-label={
-											showEditPassword ? "Hide password" : "Show password"
-										}
 									>
-										{showEditPassword ? (
-											<svg
-												className="h-4 w-4"
-												fill="none"
-												viewBox="0 0 24 24"
-												stroke="currentColor"
-											>
-												<path
-													strokeLinecap="round"
-													strokeLinejoin="round"
-													strokeWidth={1.8}
-													d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l18 18"
-												/>
-											</svg>
-										) : (
-											<svg
-												className="h-4 w-4"
-												fill="none"
-												viewBox="0 0 24 24"
-												stroke="currentColor"
-											>
-												<path
-													strokeLinecap="round"
-													strokeLinejoin="round"
-													strokeWidth={1.8}
-													d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-												/>
-												<path
-													strokeLinecap="round"
-													strokeLinejoin="round"
-													strokeWidth={1.8}
-													d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
-												/>
-											</svg>
-										)}
+										{showEditPassword ? "Hide" : "Show"}
 									</button>
 								</div>
 							</div>
@@ -888,8 +898,13 @@ export const UsersPage = () => {
 									className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm text-slate-800 focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] outline-hidden"
 								>
 									<option value="FIELD_AUDITOR">Field Auditor</option>
-									<option value="MANAGER">Pricing Manager</option>
-									<option value="ADMIN">Administrator</option>
+									<option value="MANAGER">Queens Admin (Client Admin)</option>
+									<option value="ADMIN">Aires Admin (Operations)</option>
+									{isSuperAdmin && (
+										<option value="SUPER_ADMIN">
+											Aires Super Admin (Full Control)
+										</option>
+									)}
 								</select>
 							</div>
 
@@ -932,7 +947,7 @@ export const UsersPage = () => {
 				</div>
 			)}
 
-			{/* Confirmation Modal for User Deletion */}
+			{/* Deletion Confirmation Modal */}
 			{deleteCandidate && (
 				<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
 					<div className="w-full max-w-sm rounded-2xl bg-white p-5 sm:p-6 shadow-xl border border-slate-100 space-y-4 my-auto">
@@ -943,8 +958,7 @@ export const UsersPage = () => {
 							Are you sure you want to remove{" "}
 							<strong className="text-slate-900">{deleteCandidate.name}</strong>
 							? If this user has recorded field audits or observations, their
-							account will be deactivated instead of deleted to protect
-							historical data integrity.
+							account will be deactivated instead of deleted.
 						</p>
 						<div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
 							<button

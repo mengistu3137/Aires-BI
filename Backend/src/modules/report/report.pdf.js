@@ -8,6 +8,7 @@ import {
   formatDate,
   formatPrice,
   columnHeaderLabel,
+  formatProductName,
 } from "./report.utils.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -22,6 +23,7 @@ const C = {
   headerBlue: "#1F4E79",
   textDark: "#1F2937",
   muted: "#6B7280",
+  strikeMuted: "#94A3B8",
   border: "#CBD5E1",
   gridLine: "#E5E7EB",
   zebra: "#F8FAFC",
@@ -33,7 +35,6 @@ const C = {
   chartComp1: "#2D6A4F",
   chartComp2: "#D97706",
   chartComp3: "#0284C7",
-  // ── Aires brand tokens ──────────────────────────────────────────
   airesGreen: "#017C4D",
   airesOrange: "#FE7914",
   airesRed: "#A41821",
@@ -41,8 +42,6 @@ const C = {
 
 // ──────────────────────────────────────────────────────────────────
 // Aires logo — loaded once, cached in memory.
-// Falls back to null when the PNG isn't present so the header degrades
-// to a styled text wordmark instead of crashing.
 // ──────────────────────────────────────────────────────────────────
 
 const AIRES_LOGO_PATH = path.join(__dirname, "assets", "aires-logo.png");
@@ -57,10 +56,7 @@ const loadAiresLogo = () => {
   } catch {
     _airesLogoBuffer = null;
     console.warn(
-      `[report.pdf] Aires logo not found at ${AIRES_LOGO_PATH}. ` +
-      `Falling back to text wordmark. Run: ` +
-      `mkdir -p Backend/src/modules/report/assets && ` +
-      `cp Frontend/public/icons/icon-192.png Backend/src/modules/report/assets/aires-logo.png`,
+      `[report.pdf] Aires logo not found at ${AIRES_LOGO_PATH}. Falling back to text wordmark.`,
     );
   }
   return _airesLogoBuffer;
@@ -73,13 +69,6 @@ const loadAiresLogo = () => {
 const bottomLimit = (doc) => doc.page.height - doc.page.margins.bottom;
 const contentWidth = (doc) =>
   doc.page.width - doc.page.margins.left - doc.page.margins.right;
-
-// ──────────────────────────────────────────────────────────────────
-// Aires brand strip — three-stop gradient bar
-//   green ─────► orange ─────► red
-// Drawn as ~96 thin vertical rectangles so it renders smoothly without
-// needing an image asset.
-// ──────────────────────────────────────────────────────────────────
 
 const hexToRgb = (hex) => {
   const h = hex.replace("#", "");
@@ -105,19 +94,12 @@ const mixColor = (from, to, t) => {
 const rgbHex = ({ r, g, b }) =>
   "#" + [r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("");
 
-/**
- * Draws a 3-stop horizontal gradient bar.
- *   Stop 0 → C.airesGreen   (left)
- *   Stop 1 → C.airesOrange  (middle)
- *   Stop 2 → C.airesRed     (right)
- */
 const drawAiresGradientBar = (doc, x, y, width, height) => {
   const SEGMENTS = 96;
   const segW = width / SEGMENTS;
   for (let i = 0; i < SEGMENTS; i += 1) {
     const t = i / (SEGMENTS - 1);
     let color;
-    // Left → Right: RED ▸ ORANGE ▸ GREEN
     if (t <= 0.5) {
       color = rgbHex(mixColor(C.airesRed, C.airesOrange, t / 0.5));
     } else {
@@ -135,7 +117,7 @@ const drawAiresGradientBar = (doc, x, y, width, height) => {
 // Cover header (page 1 only)
 // ──────────────────────────────────────────────────────────────────
 
-const drawCoverHeader = (doc, model) => {
+const drawCoverHeader = (doc) => {
   const W = contentWidth(doc);
   const left = doc.page.margins.left;
   let y = doc.page.margins.top;
@@ -143,12 +125,10 @@ const drawCoverHeader = (doc, model) => {
   const logoBuffer = loadAiresLogo();
   const logoH = 40;
 
-  // ── Left: Aires logo (PNG) or text wordmark fallback ──────────
   if (logoBuffer) {
     try {
       doc.image(logoBuffer, left, y, { height: logoH });
     } catch {
-      // If pdfkit can't decode the image, fall back to text.
       doc
         .font("Helvetica-Bold")
         .fontSize(15)
@@ -156,7 +136,6 @@ const drawCoverHeader = (doc, model) => {
         .text("AIRES", left, y + 10, { lineBreak: false });
     }
   } else {
-    // Text wordmark — Green "AIRES" + Orange dot + Red "COMMUNICATION"
     doc
       .font("Helvetica-Bold")
       .fontSize(15)
@@ -174,7 +153,6 @@ const drawCoverHeader = (doc, model) => {
       .text("COMMUNICATION", left + 58, y + 14, { lineBreak: false });
   }
 
-  // ── Center: company name ──────────────────────────────────────
   doc
     .font("Helvetica-Bold")
     .fontSize(11)
@@ -185,7 +163,6 @@ const drawCoverHeader = (doc, model) => {
       lineBreak: false,
     });
 
-  // ── Right: badge text ────────────────────────────────────────
   doc
     .font("Helvetica")
     .fontSize(8)
@@ -197,8 +174,6 @@ const drawCoverHeader = (doc, model) => {
     });
 
   y += logoH + 8;
-
-  // ── Gradient bar under the header ────────────────────────────
   drawAiresGradientBar(doc, left, y, W, 3);
   y += 14;
 
@@ -212,7 +187,7 @@ const drawCoverHeader = (doc, model) => {
 const drawExecutiveCoverPage = (doc, model) => {
   const W = contentWidth(doc);
   const left = doc.page.margins.left;
-  let y = drawCoverHeader(doc, model);
+  let y = drawCoverHeader(doc);
 
   doc
     .font("Helvetica-Bold")
@@ -263,10 +238,6 @@ const drawExecutiveCoverPage = (doc, model) => {
 
   drawPriceComparisonChart(doc, model, left, y, W);
 };
-
-// ──────────────────────────────────────────────────────────────────
-// Price chart
-// ──────────────────────────────────────────────────────────────────
 
 const drawPriceComparisonChart = (doc, model, x0, y0, totalW) => {
   const chartTitle = `Price Benchmark Comparison Dashboard - ${formatDate(model.period.startDate)}`;
@@ -417,9 +388,24 @@ const drawCycleHeader = (doc, cycle, left, W, y) => {
   return y + h + 4;
 };
 
+const drawTableHeaderRow = (doc, tableCols, left, W, y, headerH) => {
+  doc.save().rect(left, y, W, headerH).fill(C.navy).restore();
+  doc.font("Helvetica-Bold").fontSize(8).fillColor(C.white);
+
+  let curX = left;
+  tableCols.forEach((col) => {
+    doc.text(col.label, curX + 3, y + 8, {
+      width: col.width - 6,
+      align: col.align,
+    });
+    curX += col.width;
+  });
+  return y + headerH;
+};
+
 const drawCycleTable = (doc, cycle, section, left, W, startY) => {
   const columns = cycle.columns;
-  const noW = 24;
+  const noW = 28;
   const catW = 70;
   const nameW = 140;
   const unitW = 40;
@@ -437,21 +423,8 @@ const drawCycleTable = (doc, cycle, section, left, W, startY) => {
     })),
   ];
 
-  let y = startY;
-
   const headerH = 26;
-  doc.save().rect(left, y, W, headerH).fill(C.navy).restore();
-  doc.font("Helvetica-Bold").fontSize(8).fillColor(C.white);
-
-  let curX = left;
-  tableCols.forEach((col) => {
-    doc.text(col.label, curX + 3, y + 8, {
-      width: col.width - 6,
-      align: col.align,
-    });
-    curX += col.width;
-  });
-  y += headerH;
+  let y = drawTableHeaderRow(doc, tableCols, left, W, startY, headerH);
 
   let counter = 1;
   let zebra = false;
@@ -462,17 +435,7 @@ const drawCycleTable = (doc, cycle, section, left, W, startY) => {
       doc.addPage();
       y = doc.page.margins.top;
       y = drawCycleHeader(doc, cycle, left, W, y);
-      doc.save().rect(left, y, W, headerH).fill(C.navy).restore();
-      doc.font("Helvetica-Bold").fontSize(8).fillColor(C.white);
-      curX = left;
-      tableCols.forEach((col) => {
-        doc.text(col.label, curX + 3, y + 8, {
-          width: col.width - 6,
-          align: col.align,
-        });
-        curX += col.width;
-      });
-      y += headerH;
+      y = drawTableHeaderRow(doc, tableCols, left, W, y, headerH);
     }
 
     doc.save().rect(left, y, W, catHeaderH).fill(C.zebra).restore();
@@ -484,22 +447,25 @@ const drawCycleTable = (doc, cycle, section, left, W, startY) => {
     y += catHeaderH;
 
     for (const prod of cat.products) {
-      const rowH = 18;
+      // ────────────────────────────────────────────────────────────
+      // Check if ANY surveyed competitor recorded a shelf substitute
+      // ────────────────────────────────────────────────────────────
+      const substituteRecord = Object.values(prod.cells || {}).find(
+        (c) =>
+          c &&
+          (c.availability === "OUT_OF_STOCK" || c.availability === "NOT_FOUND") &&
+          Boolean(c.substituteProduct?.trim()),
+      );
+
+      const hasSubstitute = Boolean(substituteRecord);
+      // Expand row height to 26pt if a substitute is rendered, else 18pt
+      const rowH = hasSubstitute ? 26 : 18;
+
       if (y + rowH > bottomLimit(doc) - 70) {
         doc.addPage();
         y = doc.page.margins.top;
         y = drawCycleHeader(doc, cycle, left, W, y);
-        doc.save().rect(left, y, W, headerH).fill(C.navy).restore();
-        doc.font("Helvetica-Bold").fontSize(8).fillColor(C.white);
-        curX = left;
-        tableCols.forEach((col) => {
-          doc.text(col.label, curX + 3, y + 8, {
-            width: col.width - 6,
-            align: col.align,
-          });
-          curX += col.width;
-        });
-        y += headerH;
+        y = drawTableHeaderRow(doc, tableCols, left, W, y, headerH);
       }
 
       if (zebra) {
@@ -516,17 +482,22 @@ const drawCycleTable = (doc, cycle, section, left, W, startY) => {
         .stroke()
         .restore();
 
-      curX = left;
+      let curX = left;
+
+      // ── Column 1: No. (SortedBy sequence index) ─────────────────
+      const seqNo = prod.sortOrder > 0 ? prod.sortOrder : counter;
+      counter += 1;
       doc
         .font("Helvetica")
         .fontSize(7.5)
         .fillColor(C.muted)
-        .text(String(counter++), curX + 2, y + 5, {
+        .text(String(seqNo), curX + 2, y + (hasSubstitute ? 8 : 5), {
           width: noW - 4,
           align: "center",
         });
       curX += noW;
 
+      // ── Column 2: Category ──────────────────────────────────────
       doc
         .font("Helvetica")
         .fontSize(7.5)
@@ -534,30 +505,90 @@ const drawCycleTable = (doc, cycle, section, left, W, startY) => {
         .text("", curX + 2, y + 5, { width: catW - 4, align: "left" });
       curX += catW;
 
-      doc
-        .font("Helvetica-Bold")
-        .fontSize(7.5)
-        .fillColor(C.textDark)
-        .text(prod.name, curX + 2, y + 5, {
-          width: nameW - 4,
-          align: "left",
-        });
+      // ── Column 3: Item Name (with Strikethrough & ⌊› Sub: Alternative) ─
+      const prodName = formatProductName(prod.name);
+
+      if (hasSubstitute) {
+        const subName = formatProductName(substituteRecord.substituteProduct);
+
+        // Line 1: Original Product Name (Struck through in muted gray)
+        doc
+          .font("Helvetica-Bold")
+          .fontSize(7)
+          .fillColor(C.strikeMuted)
+          .text(prodName, curX + 2, y + 3, {
+            width: nameW - 4,
+            align: "left",
+            lineBreak: false,
+          });
+
+        // Strikethrough line
+        const nameLen = Math.min(doc.widthOfString(prodName), nameW - 6);
+        const strikeY = y + 7.5;
+        doc
+          .save()
+          .lineWidth(0.8)
+          .strokeColor(C.strikeMuted)
+          .moveTo(curX + 2, strikeY)
+          .lineTo(curX + 2 + nameLen, strikeY)
+          .stroke()
+          .restore();
+
+        // Line 2: Elegant curved branch arrow vector
+        doc
+          .save()
+          .lineWidth(0.7)
+          .strokeColor(C.airesOrange)
+          .moveTo(curX + 4, y + 13)
+          .bezierCurveTo(curX + 4, y + 16, curX + 5, y + 17.5, curX + 9, y + 17.5)
+          .stroke()
+          // Arrowhead
+          .moveTo(curX + 7.5, y + 16)
+          .lineTo(curX + 9.5, y + 17.5)
+          .lineTo(curX + 7.5, y + 19)
+          .stroke()
+          .restore();
+
+        // Text label: Sub: [Name]
+        doc
+          .font("Helvetica-Bold")
+          .fontSize(6.5)
+          .fillColor(C.airesOrange)
+          .text(`Sub: ${subName}`, curX + 13, y + 14, {
+            width: nameW - 15,
+            align: "left",
+            lineBreak: false,
+          });
+      } else {
+        // Standard normal available item
+        doc
+          .font("Helvetica-Bold")
+          .fontSize(7.5)
+          .fillColor(C.textDark)
+          .text(prodName, curX + 2, y + 5, {
+            width: nameW - 4,
+            align: "left",
+          });
+      }
       curX += nameW;
 
+      // ── Column 4: Unit ──────────────────────────────────────────
       doc
         .font("Helvetica")
         .fontSize(7.5)
         .fillColor(C.muted)
-        .text(prod.unit, curX + 2, y + 5, {
+        .text(prod.unit, curX + 2, y + (hasSubstitute ? 8 : 5), {
           width: unitW - 4,
           align: "center",
         });
       curX += unitW;
 
+      // ── Competitor Columns ──────────────────────────────────────
       columns.forEach((col) => {
         const cell = prod.cells?.[col.key];
         let valStr = "Not found";
         let color = C.muted;
+        let isSubPrice = false;
 
         if (cell) {
           if (cell.availability === "AVAILABLE" && cell.price !== null) {
@@ -565,22 +596,48 @@ const drawCycleTable = (doc, cycle, section, left, W, startY) => {
             color = C.textDark;
             if (col.kind === "QUEENS") color = C.headerBlue;
           } else if (cell.availability === "OUT_OF_STOCK") {
-            valStr = "OUT OF STOCK";
-            color = "#B91C1C";
+            if (cell.substituteProduct && cell.price !== null) {
+              valStr = `${formatPrice(cell.price)} ETB`;
+              color = C.airesOrange;
+              isSubPrice = true;
+            } else {
+              valStr = "OUT OF STOCK";
+              color = "#B91C1C";
+            }
           } else if (cell.availability === "NOT_FOUND") {
-            valStr = "Not found";
-            color = C.muted;
+            if (cell.substituteProduct && cell.price !== null) {
+              valStr = `${formatPrice(cell.price)} ETB`;
+              color = C.airesOrange;
+              isSubPrice = true;
+            } else {
+              valStr = "Not found";
+              color = C.muted;
+            }
           }
         }
 
+        const cellY = hasSubstitute ? y + 4 : y + 5;
+
         doc
-          .font("Helvetica")
-          .fontSize(7.5)
+          .font(isSubPrice ? "Helvetica-Bold" : "Helvetica")
+          .fontSize(7)
           .fillColor(color)
-          .text(valStr, curX + 2, y + 5, {
+          .text(valStr, curX + 2, cellY, {
             width: compW - 6,
             align: "right",
           });
+
+        if (isSubPrice && hasSubstitute) {
+          doc
+            .font("Helvetica-Bold")
+            .fontSize(5.5)
+            .fillColor(C.airesOrange)
+            .text("SUB. PRICE", curX + 2, y + 14, {
+              width: compW - 6,
+              align: "right",
+            });
+        }
+
         curX += compW;
       });
 
@@ -603,23 +660,24 @@ const drawMatrixTable = (doc, section, startY) => {
     .text(`Master Competitor Pricing & Baseline Matrix — ${section.label}`, left, y);
   y += 18;
 
-  const cycles = section.cycles && section.cycles.length > 0
-    ? section.cycles
-    : [
-      {
-        period: {
-          id: "flat",
-          name: "Report Range",
-          status: null,
-          startDate: null,
-          endDate: null,
+  const cycles =
+    section.cycles && section.cycles.length > 0
+      ? section.cycles
+      : [
+        {
+          period: {
+            id: "flat",
+            name: "Report Range",
+            status: null,
+            startDate: null,
+            endDate: null,
+          },
+          label: "Report Range",
+          columns: section.columns,
+          categories: section.categories,
+          summary: section.summary,
         },
-        label: "Report Range",
-        columns: section.columns,
-        categories: section.categories,
-        summary: section.summary,
-      },
-    ];
+      ];
 
   for (let i = 0; i < cycles.length; i += 1) {
     const cycle = cycles[i];
@@ -686,15 +744,12 @@ const drawTopStripsAndFooters = (doc) => {
 
     const isFirstPage = i === range.start;
 
-    // ── Top gradient strip on pages 2+ ──────────────────────────
     if (!isFirstPage) {
       const stripY = doc.page.margins.top - 14;
       drawAiresGradientBar(doc, left, stripY, width, 2);
     }
 
-    // ── Footer: thin gradient bar + text ────────────────────────
     const y = doc.page.height - bottom + 16;
-
     drawAiresGradientBar(doc, left, y - 8, width, 1.5);
 
     doc.font("Helvetica").fontSize(7.5).fillColor(C.muted);

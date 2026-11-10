@@ -1,73 +1,118 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
+import { formatProductName } from "@/utils/formatters.js";
 import { formatPrice, formatCapturedAt } from "../utils/observation.utils.js";
 import { ObservationAvailabilityBadge } from "./ObservationAvailabilityBadge.jsx";
 import { ObservationReviewBadge } from "./ObservationReviewBadge.jsx";
 import { ObservationSyncBadge } from "./ObservationSyncBadge.jsx";
-import { formatProductName } from "@/utils/formatters.js";
 
 export const ObservationListTable = ({ observations = [] }) => {
-  const navigate = useNavigate();
+	const navigate = useNavigate();
 
-  if (observations.length === 0) {
-    return (
-      <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-6 py-10 text-center">
-        <p className="text-xs font-medium text-slate-400">No observations match your filters</p>
-      </div>
-    );
-  }
+	return (
+		<div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs">
+			<table className="w-full text-left text-xs">
+				<thead className="border-b border-slate-100 bg-slate-50/75 text-[10px] font-black uppercase tracking-wider text-slate-400">
+					<tr>
+						<th className="px-4 py-3">Product Item</th>
+						<th className="px-4 py-3">Store &amp; Competitor</th>
+						<th className="px-4 py-3 text-center">Status</th>
+						<th className="px-4 py-3 text-right">Price</th>
+						<th className="px-4 py-3 text-center">Review</th>
+						<th className="px-4 py-3 text-center">Sync</th>
+						<th className="px-4 py-3 text-right">Captured</th>
+					</tr>
+				</thead>
+				<tbody className="divide-y divide-slate-100">
+					{observations.map((obs) => {
+						const hasSubstitute = Boolean(obs.substituteProduct);
+						const isUnavailable =
+							obs.availability === "OUT_OF_STOCK" ||
+							obs.availability === "NOT_FOUND";
 
-  return (
-    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs">
-      <div className="overflow-x-auto">
-        <table className="w-full text-left text-xs">
-          <thead className="border-b border-slate-100 bg-slate-50 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-            <tr>
-              <th className="px-4 py-3">Product</th>
-              <th className="px-4 py-3">Store</th>
-              <th className="px-4 py-3">Auditor</th>
-              <th className="px-4 py-3">Availability</th>
-              <th className="px-4 py-3 text-right">Price</th>
-              <th className="px-4 py-3">Review</th>
-              <th className="px-4 py-3">Sync</th>
-              <th className="px-4 py-3">Captured</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100 text-slate-700">
-            {observations.map((o) => (
-              <tr
-                key={o.id}
-                className="cursor-pointer transition hover:bg-slate-50/75"
-                onClick={() => navigate(`/observations/${o.id}`)}
-              >
-                <td className="px-4 py-3">
-                  <div className="font-bold text-slate-800">
-                    {formatProductName(o.product?.name) || "—"}
-                  </div>
-                  {o.product?.sku && (
-                    <div className="text-[10px] text-slate-400">SKU {o.product.sku}</div>
-                  )}
-                </td>
-                <td className="px-4 py-3 text-slate-600">{o.audit?.store?.name || "—"}</td>
-                <td className="px-4 py-3 text-slate-600">{o.auditor?.name || "—"}</td>
-                <td className="px-4 py-3">
-                  <ObservationAvailabilityBadge availability={o.availability} />
-                </td>
-                <td className="px-4 py-3 text-right font-bold text-slate-800">
-                  {formatPrice(o.price)}
-                </td>
-                <td className="px-4 py-3">
-                  <ObservationReviewBadge status={o.review?.status} />
-                </td>
-                <td className="px-4 py-3">
-                  <ObservationSyncBadge status={o.sync?.status} />
-                </td>
-                <td className="px-4 py-3 text-slate-500">{formatCapturedAt(o.capturedAt)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
+						return (
+							<tr
+								key={obs.id}
+								onClick={() => navigate(`/observations/${obs.id}`)}
+								className="cursor-pointer transition hover:bg-slate-50/80 active:bg-slate-100"
+							>
+								{/* Product Item with Struck-Through & Underneath Substitute View */}
+								<td className="px-4 py-3">
+									<div className="space-y-0.5">
+										<p
+											className={`text-xs font-bold ${
+												isUnavailable && hasSubstitute
+													? "text-slate-400 line-through decoration-slate-400 decoration-1"
+													: "text-slate-900"
+											}`}
+										>
+											{formatProductName(obs.product?.name || "Unknown Product")}
+										</p>
+
+										{/* Display Underneath Substituted Product */}
+										{isUnavailable && hasSubstitute && (
+											<div className="flex items-center gap-1.5 pt-0.5 font-sans">
+												<span className="text-[10px] font-bold text-[#FE7914]">↳ Sub:</span>
+												<span className="rounded-md bg-amber-50 px-1.5 py-0.5 text-[11px] font-bold text-amber-900 border border-amber-200/70">
+													{obs.substituteProduct}
+												</span>
+											</div>
+										)}
+
+										<span className="block font-mono text-[10px] text-slate-400">
+											{obs.product?.barcode || obs.product?.sku || obs.productId}
+											{obs.product?.unit ? ` • ${obs.product.unit}` : ""}
+										</span>
+									</div>
+								</td>
+
+								<td className="px-4 py-3">
+									<p className="font-bold text-slate-800">
+										{obs.audit?.store?.name || "Store"}
+									</p>
+									<p className="font-mono text-[10px] text-slate-400">
+										{obs.audit?.store?.competitor?.name}
+										{obs.audit?.store?.area && ` • ${obs.audit.store.area}`}
+									</p>
+								</td>
+
+								<td className="px-4 py-3 text-center">
+									<ObservationAvailabilityBadge availability={obs.availability} />
+								</td>
+
+								<td className="px-4 py-3 text-right">
+									{obs.price !== null && obs.price !== undefined ? (
+										<div>
+											<span className="font-mono text-xs font-black text-slate-900">
+												{formatPrice(obs.price)}
+											</span>
+											{hasSubstitute && (
+												<span className="block text-[9px] font-bold uppercase tracking-wider text-[#FE7914]">
+													Sub. Price
+												</span>
+											)}
+										</div>
+									) : (
+										<span className="font-mono text-xs text-slate-400">—</span>
+									)}
+								</td>
+
+								<td className="px-4 py-3 text-center">
+									<ObservationReviewBadge status={obs.review?.status} />
+								</td>
+
+								<td className="px-4 py-3 text-center">
+									<ObservationSyncBadge status={obs.sync?.status} />
+								</td>
+
+								<td className="px-4 py-3 text-right font-mono text-[11px] text-slate-500">
+									{formatCapturedAt(obs.capturedAt)}
+								</td>
+							</tr>
+						);
+					})}
+				</tbody>
+			</table>
+		</div>
+	);
 };

@@ -1,26 +1,45 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth.js";
 import {
 	useAssignments,
 	useDeleteAssignment,
+	useArchiveStoreDispatch,
 } from "../hooks/useAssignments.js";
 import { StatusBadge } from "@/components/StatusBadge.jsx";
 import { Can } from "@/components/Can.jsx";
 import { SurveyAssignmentModal } from "../components/SurveyAssignmentModal.jsx";
 import { PeriodManagementModal } from "../components/PeriodManagementModal.jsx";
 import { ConfirmDeleteAssignmentModal } from "../components/ConfirmDeleteAssignmentModal.jsx";
+import { apiClient } from "@/services/client.js";
 import toast from "react-hot-toast";
 
 const STATUS_FILTERS = [
-	{ value: "", label: "All" },
+	{ value: "", label: "Active Dispatches" },
 	{ value: "NOT_STARTED", label: "Not started" },
 	{ value: "IN_PROGRESS", label: "In progress" },
 	{ value: "COMPLETED", label: "Completed" },
-	{ value: "CANCELLED", label: "Cancelled" },
+	{ value: "ARCHIVED", label: "Archived" },
 ];
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 50;
+
+// Resolve backend asset URL pointing authoritatively to the backend host
+const resolveAssetUrl = (url) => {
+	if (!url) return "";
+	if (url.startsWith("http://") || url.startsWith("https://")) return url;
+
+	const apiBase =
+		apiClient.defaults.baseURL ||
+		import.meta.env.VITE_API_URL ||
+		import.meta.env.VITE_API_BASE_URL ||
+		"https://biapi.airescommunications.com/api/v1";
+
+	const hostOrigin = apiBase.replace(/\/api(\/v1)?\/?$/, "");
+	const normalizedPath = url.startsWith("/") ? url : `/${url}`;
+
+	return `${hostOrigin}${normalizedPath}`;
+};
 
 const formatAssignedDate = (dateString) => {
 	if (!dateString) return "—";
@@ -35,10 +54,9 @@ const formatAssignedDate = (dateString) => {
 
 export const SurveyProgress = () => {
 	const navigate = useNavigate();
-	const { isAuditor, isQueensAdmin } = useAuth();
+	const {isAdmin,isAuditor } = useAuth();
 	const [searchParams, setSearchParams] = useSearchParams();
 
-	// URL-backed pagination (survives refresh + shareable)
 	const page = Math.max(1, Number(searchParams.get("page") || 1));
 	const statusFromUrl = searchParams.get("status") || "";
 
@@ -57,34 +75,33 @@ export const SurveyProgress = () => {
 		setSearchParams(nextParams, { replace: true });
 	};
 
-	// Server-side filters + pagination
-	const { data, isLoading, isError, error, refetch, isFetching } =
-		useAssignments({
-			page,
-			limit: PAGE_SIZE,
-			status: statusFromUrl || undefined,
-		});
+	const { data, isLoading, isError, refetch } = useAssignments({
+		page,
+		limit: PAGE_SIZE,
+		status: statusFromUrl || undefined,
+	});
 
 	const assignments = data?.assignments || [];
-	const meta = data?.meta || { page: 1, totalPages: 1, total: 0 };
 
 	const deleteAssignment = useDeleteAssignment();
+	const archiveDispatch = useArchiveStoreDispatch();
 
-	const [viewMode, setViewMode] = useState("STORE_DISPATCH"); // 'STORE_DISPATCH' | 'INDIVIDUAL_TASKS'
+	const [viewMode, setViewMode] = useState("STORE_DISPATCH");
 	const [isAssignmentModalOpen, setIsAssignmentModalOpen] = useState(false);
 	const [isPeriodModalOpen, setIsPeriodModalOpen] = useState(false);
-
-	// Both storeId AND surveyPeriodId tracked so editing targets the exact cycle
 	const [selectedStoreId, setSelectedStoreId] = useState(null);
-	const [selectedSurveyPeriodId, setSelectedSurveyPeriodId] = useState(null);
-
 	const [editingAssignment, setEditingAssignment] = useState(null);
 	const [deleteCandidate, setDeleteCandidate] = useState(null);
 	const [searchTerm, setSearchTerm] = useState("");
 
+	// Proof Gallery Grid & Fullscreen Carousel Lightbox State
+	const [activeProofGallery, setActiveProofGallery] = useState(null);
+	const [carouselPhotos, setCarouselPhotos] = useState(null);
+	const [carouselIndex, setCarouselIndex] = useState(0);
+
 	const statusFilter = statusFromUrl;
 
-	// Group assignments by Store + SurveyPeriod (distinguishes Weekly vs Daily dispatches)
+	// Group assignments by Store + SurveyPeriod and extract ALL attached evidence photos
 	const storeDispatches = useMemo(() => {
 		const groups = new Map();
 
@@ -103,6 +120,7 @@ export const SurveyProgress = () => {
 					assignments: [],
 					allProductIdsSet: new Set(),
 					totalObservationsCount: 0,
+					evidencePhotos: [],
 					assignedAt: asn.assignedAt,
 				});
 			}
@@ -110,7 +128,6 @@ export const SurveyProgress = () => {
 			const group = groups.get(groupKey);
 			group.assignments.push(asn);
 
-			// Collect all assigned product IDs for this store
 			if (Array.isArray(asn.items)) {
 				asn.items.forEach((it) => {
 					const pId = it.productId || it.id;
@@ -119,12 +136,41 @@ export const SurveyProgress = () => {
 			}
 
 			let asnObsCount = Number(asn.observedCount ?? asn.observationsCount ?? 0);
-			if (!asnObsCount && Array.isArray(asn.audits)) {
+
+			if (Array.isArray(asn.audits)) {
 				asn.audits.forEach((aud) => {
-					asnObsCount +=
-						aud._count?.observations ||
-						aud.observationsCount ||
-						(Array.isArray(aud.observations) ? aud.observations.length : 0);
+					// Fallback observation counter
+					if (!asnObsCount) {
+						asnObsCount +=
+							aud._count?.observations ||
+							aud.observationsCount ||
+							(Array.isArray(aud.observations) ? aud.observations.length : 0);
+					}
+
+					// Always extract observation proof photos into the dispatch gallery
+					if (Array.isArray(aud.observations)) {
+						aud.observations.forEach((obs) => {
+							if (obs.evidencePhotoUrl) {
+								const urls = String(obs.evidencePhotoUrl)
+									.split(",")
+									.map((u) => u.trim())
+									.filter(Boolean);
+
+								urls.forEach((u, uIdx) => {
+									group.evidencePhotos.push({
+										id: `${obs.id}_${uIdx}`,
+										url: u,
+										productName: obs.product?.name || "Observed Product",
+										price: obs.price ? Number(obs.price) : null,
+										availability: obs.availability || "AVAILABLE",
+										capturedAt: obs.capturedAt,
+										auditorName: asn.auditor?.name || "Field Auditor",
+										storeName: asn.store?.name || "Store",
+									});
+								});
+							}
+						});
+					}
 				});
 			} else if (!asnObsCount && asn._count?.observations) {
 				asnObsCount += asn._count.observations;
@@ -149,17 +195,25 @@ export const SurveyProgress = () => {
 			const percentDone =
 				totalProducts > 0 ? Math.round((observed / totalProducts) * 100) : 0;
 
+			const isArchived =
+				g.assignments.length > 0 &&
+				g.assignments.every((a) => a.status === "ARCHIVED");
+
 			const allCompleted =
 				g.assignments.length > 0 &&
 				g.assignments.every((a) => a.status === "COMPLETED");
+
 			const anyInProgress = g.assignments.some(
 				(a) => a.status === "IN_PROGRESS" || (a.observedCount || 0) > 0,
 			);
-			const overallStatus = allCompleted
-				? "COMPLETED"
-				: anyInProgress || observed > 0
-					? "IN_PROGRESS"
-					: "NOT_STARTED";
+
+			const overallStatus = isArchived
+				? "ARCHIVED"
+				: allCompleted
+					? "COMPLETED"
+					: anyInProgress || observed > 0
+						? "IN_PROGRESS"
+						: "NOT_STARTED";
 
 			return {
 				...g,
@@ -167,16 +221,25 @@ export const SurveyProgress = () => {
 				observedCount: observed,
 				percentDone,
 				overallStatus,
+				isArchived,
 			};
 		});
 	}, [assignments]);
 
-	// Filtering for Store Dispatches
+	// Filter dispatches by Active vs. Status vs. Search term
 	const filteredStoreDispatches = useMemo(() => {
 		let list = storeDispatches;
 
-		if (statusFilter) {
-			list = list.filter((d) => d.overallStatus === statusFilter);
+		if (statusFilter === "") {
+			// Active Dispatches: show all non-archived dispatches
+			list = list.filter((d) => !d.isArchived);
+		} else if (statusFilter === "ARCHIVED") {
+			// Archived: show only archived dispatches
+			list = list.filter((d) => d.isArchived || d.overallStatus === "ARCHIVED");
+		} else if (statusFilter) {
+			list = list.filter(
+				(d) => d.overallStatus === statusFilter && !d.isArchived,
+			);
 		}
 
 		if (searchTerm.trim()) {
@@ -184,8 +247,6 @@ export const SurveyProgress = () => {
 			list = list.filter((d) => {
 				const storeName = (d.store?.name || "").toLowerCase();
 				const area = (d.store?.area || d.store?.address || "").toLowerCase();
-				const cycleName = (d.surveyPeriod?.name || "").toLowerCase();
-				const cycleId = (d.surveyPeriodId || "").toLowerCase();
 				const auditors = d.assignments
 					.map((a) => a.auditor?.name || "")
 					.join(" ")
@@ -193,8 +254,6 @@ export const SurveyProgress = () => {
 				return (
 					storeName.includes(term) ||
 					area.includes(term) ||
-					cycleName.includes(term) ||
-					cycleId.includes(term) ||
 					auditors.includes(term)
 				);
 			});
@@ -203,46 +262,18 @@ export const SurveyProgress = () => {
 		return list;
 	}, [storeDispatches, statusFilter, searchTerm]);
 
-	// Filtering for Individual Assignments
-	const visibleAssignments = useMemo(() => {
-		let list = assignments;
-
-		if (statusFilter) {
-			list = list.filter((a) => a.status === statusFilter);
-		}
-
-		if (searchTerm.trim()) {
-			const term = searchTerm.toLowerCase();
-			list = list.filter((a) => {
-				const storeName = (a.store?.name || "").toLowerCase();
-				const area = (a.store?.area || a.store?.address || "").toLowerCase();
-				const auditorName = (a.auditor?.name || "").toLowerCase();
-				const cycleId = (a.surveyPeriod?.id || "").toLowerCase();
-				const cycleName = (a.surveyPeriod?.name || "").toLowerCase();
-				return (
-					storeName.includes(term) ||
-					area.includes(term) ||
-					auditorName.includes(term) ||
-					cycleId.includes(term) ||
-					cycleName.includes(term)
-				);
-			});
-		}
-
-		return list;
-	}, [assignments, statusFilter, searchTerm]);
-
 	const counts = useMemo(
 		() => ({
-			all: storeDispatches.length,
+			all: storeDispatches.filter((d) => !d.isArchived).length,
 			notStarted: storeDispatches.filter(
-				(d) => d.overallStatus === "NOT_STARTED",
+				(d) => d.overallStatus === "NOT_STARTED" && !d.isArchived,
 			).length,
 			inProgress: storeDispatches.filter(
-				(d) => d.overallStatus === "IN_PROGRESS",
+				(d) => d.overallStatus === "IN_PROGRESS" && !d.isArchived,
 			).length,
-			completed: storeDispatches.filter((d) => d.overallStatus === "COMPLETED")
-				.length,
+			completed: storeDispatches.filter(
+				(d) => d.overallStatus === "COMPLETED" && !d.isArchived,
+			).length,
 		}),
 		[storeDispatches],
 	);
@@ -252,7 +283,6 @@ export const SurveyProgress = () => {
 		try {
 			await deleteAssignment.mutateAsync(deleteCandidate.id);
 			setDeleteCandidate(null);
-			refetch();
 		} catch (err) {
 			toast.error(
 				err?.response?.data?.message || "Failed to delete assignment",
@@ -260,32 +290,29 @@ export const SurveyProgress = () => {
 		}
 	};
 
-	// Delete entire store dispatch (Requirement #4)
-	const handleDeleteStoreDispatch = async (dispatch) => {
-		const isCompleted = dispatch.overallStatus === "COMPLETED";
-		const promptMsg = isCompleted
-			? `Warning: This survey dispatch is COMPLETED. Deleting it will permanently remove ${dispatch.assignments.length} assignment task(s). Continue?`
-			: `Are you sure you want to delete the dispatch for "${dispatch.store?.name}" (${dispatch.surveyPeriod?.name || dispatch.surveyPeriodId})? This will remove ${dispatch.assignments.length} assigned task(s).`;
-
-		if (!window.confirm(promptMsg)) return;
-
+	const handleArchiveDispatch = async (dispatch) => {
 		try {
-			const promises = dispatch.assignments.map((a) =>
-				deleteAssignment.mutateAsync(a.id),
-			);
-			await Promise.all(promises);
-			toast.success("Store dispatch deleted successfully");
+			await archiveDispatch.mutateAsync({
+				storeId: dispatch.storeId,
+				surveyPeriodId: dispatch.surveyPeriodId,
+				archive: !dispatch.isArchived,
+			});
 			refetch();
-		} catch (err) {
-			toast.error(err?.response?.data?.message || "Failed to delete dispatch");
+		} catch {
+			// Handled by toast
 		}
 	};
 
-	const handleOpenDispatchModal = (storeId = null, surveyPeriodId = null) => {
+	const handleOpenDispatchModal = (storeId = null) => {
 		setSelectedStoreId(storeId);
-		setSelectedSurveyPeriodId(surveyPeriodId);
 		setEditingAssignment(null);
 		setIsAssignmentModalOpen(true);
+	};
+
+	// Open Carousel Lightbox at specific photo index
+	const handleOpenCarousel = (photos, startIndex = 0) => {
+		setCarouselPhotos(photos);
+		setCarouselIndex(startIndex);
 	};
 
 	return (
@@ -299,42 +326,41 @@ export const SurveyProgress = () => {
 					<p className="mt-0.5 text-xs text-slate-500">
 						{isAuditor
 							? "Your assigned store audits and target product checklists"
-							: isQueensAdmin
-								? "View store dispatches and audit checklists (Read Only)"
-								: "Monitor store dispatch completion and allocate tasks across multiple field auditors"}
+							: "Monitor store dispatch completion, view proof galleries, and allocate tasks"}
 					</p>
 				</div>
 
-				{/* Header Actions: Hidden for Queens Admin */}
-				<Can role={["ADMIN", "MANAGER"]}>
-					<div className="flex items-center gap-2">
-						<button
-							type="button"
-							onClick={() => setIsPeriodModalOpen(true)}
-							className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-xs font-bold text-slate-700 shadow-xs transition hover:bg-slate-50 active:scale-95"
-						>
-							Manage Cycles
-						</button>
-						<button
-							type="button"
-							onClick={() => handleOpenDispatchModal(null, null)}
-							className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-[#A41821] px-4 py-2.5 text-xs font-bold text-white shadow-xs transition hover:bg-[#7F1219] active:scale-95"
-						>
-							+ Dispatch Store Survey
-						</button>
-					</div>
+				<Can role={["ADMIN", "MANAGER", "SUPER_ADMIN"]}>
+					{isAdmin && (
+						<div className="flex items-center gap-2">
+							<button
+								type="button"
+								onClick={() => setIsPeriodModalOpen(true)}
+								className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-xs font-bold text-slate-700 shadow-xs transition hover:bg-slate-50 active:scale-95"
+							>
+								Manage Cycles
+							</button>
+							<button
+								type="button"
+								onClick={() => handleOpenDispatchModal(null)}
+								className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-[#A41821] px-4 py-2.5 text-xs font-bold text-white shadow-xs transition hover:bg-[#7F1219] active:scale-95"
+							>
+								+ Dispatch Store Survey
+							</button>
+						</div>
+					)}
 				</Can>
 			</div>
 
 			{/* KPI Summary */}
 			<div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-				<Kpi label="Store Dispatches" value={counts.all} tone="slate" />
+				<Kpi label="Active Dispatches" value={counts.all} tone="slate" />
 				<Kpi label="Not Started" value={counts.notStarted} tone="amber" />
 				<Kpi label="In Progress" value={counts.inProgress} tone="blue" />
 				<Kpi label="Completed" value={counts.completed} tone="emerald" />
 			</div>
 
-			{/* Search, Filters & View Toggle */}
+			{/* Search, Status Filters & View Toggle */}
 			<div className="space-y-3">
 				<div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
 					<div className="relative flex-1">
@@ -342,7 +368,7 @@ export const SurveyProgress = () => {
 							type="text"
 							value={searchTerm}
 							onChange={(e) => setSearchTerm(e.target.value)}
-							placeholder="Search store, area, survey cycle, or assigned auditor..."
+							placeholder="Search store name, area, or assigned auditor..."
 							className="w-full rounded-xl border border-slate-200 bg-slate-50/70 px-3.5 py-2.5 pl-9 text-xs font-medium text-slate-800 placeholder:text-slate-400 focus:border-[#A41821] focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-[#A41821]"
 						/>
 						<svg
@@ -360,7 +386,6 @@ export const SurveyProgress = () => {
 						</svg>
 					</div>
 
-					{/* View Mode Toggle (Management and Queens Admin) */}
 					{!isAuditor && (
 						<div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-slate-100 p-1 text-xs font-bold flex-none">
 							<button
@@ -372,7 +397,7 @@ export const SurveyProgress = () => {
 										: "text-slate-500 hover:text-slate-800"
 								}`}
 							>
-								Store Dispatches (Overall)
+								Store Dispatches ({filteredStoreDispatches.length})
 							</button>
 							<button
 								type="button"
@@ -389,7 +414,6 @@ export const SurveyProgress = () => {
 					)}
 				</div>
 
-				{/* Status Filters */}
 				<div className="flex flex-wrap gap-2">
 					{STATUS_FILTERS.map((f) => (
 						<button
@@ -415,33 +439,15 @@ export const SurveyProgress = () => {
 				</div>
 			)}
 
-			{/* Error */}
-			{isError && (
-				<div className="rounded-2xl border border-red-200 bg-red-50 p-4">
-					<p className="text-xs font-medium text-[#A41821]">
-						{error?.message || "Unable to load assignments"}
-					</p>
-					<button
-						type="button"
-						onClick={() => refetch()}
-						className="mt-2 cursor-pointer rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-semibold text-[#A41821] hover:bg-red-50"
-					>
-						Try again
-					</button>
-				</div>
-			)}
-
-			{/* Cards Content */}
+			{/* Content */}
 			{!isLoading && !isError && (
 				<>
 					{viewMode === "STORE_DISPATCH" && !isAuditor ? (
-						/* A. OVERALL STORE DISPATCH CARDS */
 						filteredStoreDispatches.length === 0 ? (
 							<EmptyState
 								statusFilter={statusFilter}
 								searchTerm={searchTerm}
-								onNew={() => handleOpenDispatchModal(null, null)}
-								isQueensAdmin={isQueensAdmin}
+								onNew={() => handleOpenDispatchModal(null)}
 							/>
 						) : (
 							<div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -449,48 +455,34 @@ export const SurveyProgress = () => {
 									<StoreDispatchCard
 										key={dispatch.id}
 										dispatch={dispatch}
-										isQueensAdmin={isQueensAdmin}
-										onManage={() =>
-											handleOpenDispatchModal(
-												dispatch.storeId,
-												dispatch.surveyPeriodId,
-											)
-										}
-										onDelete={() => handleDeleteStoreDispatch(dispatch)}
+										isAdmin={isAdmin}
+										onManage={() => handleOpenDispatchModal(dispatch.storeId)}
+										onArchive={() => handleArchiveDispatch(dispatch)}
+										isArchiving={archiveDispatch.isPending}
 										onViewAudits={() =>
 											navigate(`/audits?storeId=${dispatch.storeId}`)
 										}
+										onOpenProofGallery={() => setActiveProofGallery(dispatch)}
 									/>
 								))}
 							</div>
 						)
-					) : /* B. INDIVIDUAL AUDITOR ASSIGNMENTS */
-					visibleAssignments.length === 0 ? (
-						<EmptyState
-							statusFilter={statusFilter}
-							searchTerm={searchTerm}
-							onNew={() => handleOpenDispatchModal(null, null)}
-							isQueensAdmin={isQueensAdmin}
-						/>
 					) : (
 						<div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-							{visibleAssignments.map((assignment) => (
+							{assignments.map((assignment) => (
 								<AssignmentCard
 									key={assignment.id}
 									assignment={assignment}
 									isAuditor={isAuditor}
-									isQueensAdmin={isQueensAdmin}
 									onViewAudits={() =>
 										navigate(`/audits?assignmentId=${assignment.id}`)
 									}
 									onEdit={() => {
 										setEditingAssignment(assignment);
-										handleOpenDispatchModal(
-											assignment.storeId,
-											assignment.surveyPeriodId,
-										);
+										setIsAssignmentModalOpen(true);
 									}}
 									onDelete={() => setDeleteCandidate(assignment)}
+									onOpenProof={(photos) => handleOpenCarousel(photos, 0)}
 								/>
 							))}
 						</div>
@@ -498,116 +490,24 @@ export const SurveyProgress = () => {
 				</>
 			)}
 
-			{/* Pagination footer */}
-			{!isLoading && !isError && !isAuditor && meta.totalPages > 1 && (
-				<div className="flex flex-col items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-xs sm:flex-row">
-					<p className="text-[11px] font-semibold text-slate-500">
-						Page{" "}
-						<span className="font-mono font-bold text-slate-700">
-							{meta.page}
-						</span>{" "}
-						of{" "}
-						<span className="font-mono font-bold text-slate-700">
-							{meta.totalPages}
-						</span>{" "}
-						·{" "}
-						<span className="font-mono font-bold text-slate-700">
-							{meta.total}
-						</span>{" "}
-						total assignments
-					</p>
-
-					<div className="flex items-center gap-1.5">
-						<button
-							type="button"
-							onClick={() => setPage(1)}
-							disabled={meta.page <= 1 || isFetching}
-							className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-							aria-label="First page"
-						>
-							«
-						</button>
-						<button
-							type="button"
-							onClick={() => setPage(meta.page - 1)}
-							disabled={meta.page <= 1 || isFetching}
-							className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-						>
-							Previous
-						</button>
-
-						{(() => {
-							const total = meta.totalPages;
-							const current = meta.page;
-							const span = 2;
-							const start = Math.max(1, current - span);
-							const end = Math.min(total, current + span);
-							const nums = [];
-							for (let i = start; i <= end; i += 1) nums.push(i);
-
-							return nums.map((num) => {
-								const active = num === current;
-								return (
-									<button
-										key={num}
-										type="button"
-										onClick={() => setPage(num)}
-										disabled={isFetching}
-										className={`min-w-[32px] rounded-lg border px-2 py-1.5 text-xs font-bold transition ${
-											active
-												? "border-[#A41821] bg-[#A41821] text-white shadow-xs"
-												: "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-										} disabled:cursor-not-allowed disabled:opacity-40`}
-									>
-										{num}
-									</button>
-								);
-							});
-						})()}
-
-						<button
-							type="button"
-							onClick={() => setPage(meta.page + 1)}
-							disabled={meta.page >= meta.totalPages || isFetching}
-							className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-						>
-							Next
-						</button>
-						<button
-							type="button"
-							onClick={() => setPage(meta.totalPages)}
-							disabled={meta.page >= meta.totalPages || isFetching}
-							className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-							aria-label="Last page"
-						>
-							»
-						</button>
-					</div>
-				</div>
-			)}
-
-			{/* Dispatch Modal: passes both storeId AND surveyPeriodId */}
+			{/* Modals */}
 			<SurveyAssignmentModal
 				isOpen={isAssignmentModalOpen}
 				onClose={() => {
 					setIsAssignmentModalOpen(false);
 					setSelectedStoreId(null);
-					setSelectedSurveyPeriodId(null);
 					setEditingAssignment(null);
 					refetch();
 				}}
 				storeId={selectedStoreId}
-				surveyPeriodId={selectedSurveyPeriodId}
 				assignment={editingAssignment}
 			/>
 
-			{/* Period Management Modal */}
 			<PeriodManagementModal
 				isOpen={isPeriodModalOpen}
 				onClose={() => setIsPeriodModalOpen(false)}
 			/>
 
-			{/* Confirm Delete Modal */}
 			<ConfirmDeleteAssignmentModal
 				isOpen={Boolean(deleteCandidate)}
 				onClose={() => setDeleteCandidate(null)}
@@ -615,26 +515,49 @@ export const SurveyProgress = () => {
 				isPending={deleteAssignment.isPending}
 				assignment={deleteCandidate}
 			/>
+
+			{/* Dispatch Proof Image View Gallery Modal (Grid View) */}
+			{activeProofGallery && (
+				<ProofGalleryModal
+					dispatch={activeProofGallery}
+					onClose={() => setActiveProofGallery(null)}
+					onSelectProofIndex={(idx) => {
+						const photos = activeProofGallery.evidencePhotos || [];
+						setActiveProofGallery(null); // Switch from grid to fullscreen carousel
+						handleOpenCarousel(photos, idx);
+					}}
+				/>
+			)}
+
+			{/* Fullscreen Carousel Lightbox Modal (Swipe + Arrow Keys + Touch Supported) */}
+			{carouselPhotos && carouselPhotos.length > 0 && (
+				<LightboxModal
+					photos={carouselPhotos}
+					currentIndex={carouselIndex}
+					onIndexChange={setCarouselIndex}
+					onClose={() => setCarouselPhotos(null)}
+					resolveUrl={resolveAssetUrl}
+				/>
+			)}
 		</div>
 	);
 };
 
-/* Overall Store Dispatch Card Component */
+/* Overall Store Dispatch Card with Proof Gallery Preview */
 const StoreDispatchCard = ({
 	dispatch,
-	isQueensAdmin,
 	onManage,
-	onDelete,
+	onArchive,
+	  isAdmin,    
+	isArchiving,
 	onViewAudits,
+	onOpenProofGallery,
 }) => {
 	const store = dispatch.store || {};
 	const cycle = dispatch.surveyPeriod || {};
 	const isDone = dispatch.overallStatus === "COMPLETED";
-
-	// Distinguish Daily Fresh Corner cycle vs Weekly Ultra cycle
-	const isDailyCycle =
-		dispatch.surveyPeriodId?.includes("-DAILY-") ||
-		cycle.name?.toLowerCase().includes("daily");
+	const isArchived = dispatch.isArchived;
+	const photos = dispatch.evidencePhotos || [];
 
 	const statusAccent =
 		{
@@ -642,46 +565,38 @@ const StoreDispatchCard = ({
 			IN_PROGRESS: "bg-[#FE7914]",
 			COMPLETED: "bg-[#017C4D]",
 			CANCELLED: "bg-slate-400",
+			ARCHIVED: "bg-slate-500",
 		}[dispatch.overallStatus] || "bg-slate-300";
 
 	return (
-		<div className="flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs transition hover:border-slate-300 hover:shadow-sm">
+		<div
+			className={`flex flex-col overflow-hidden rounded-2xl border bg-white shadow-xs transition hover:shadow-sm ${
+				isArchived
+					? "border-slate-300 opacity-75"
+					: "border-slate-200 hover:border-slate-300"
+			}`}
+		>
 			<div className={`h-1.5 w-full ${statusAccent}`} />
 
-			<div className="flex flex-1 flex-col p-4 space-y-3">
-				{/* Header: Store Name + Status */}
+			<div className="flex flex-1 flex-col p-4 space-y-3.5">
+				{/* Header */}
 				<div className="flex items-start justify-between gap-2">
 					<div className="min-w-0 flex-1">
 						<h3 className="truncate text-base font-black text-slate-900">
 							{store.name || "Unknown Store"}
 						</h3>
 						<p className="mt-0.5 truncate text-[11px] text-slate-500 font-medium">
-							{store.area || store.address || "Addis Ababa"} • {store.type}
+							{store.area || store.address || "Addis Ababa"} • Cycle{" "}
+							{cycle.name || cycle.id || ""}
 						</p>
 					</div>
 					<StatusBadge status={dispatch.overallStatus} />
 				</div>
 
-				{/* Clear Cycle Identifier: Distinguishes Daily Fresh vs Weekly Ultra */}
-				<div className="flex items-center gap-1.5">
-					<span
-						className={`rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
-							isDailyCycle
-								? "bg-emerald-50 text-[#017C4D] border border-emerald-200"
-								: "bg-red-50 text-[#A41821] border border-red-200"
-						}`}
-					>
-						{isDailyCycle ? "Daily Fresh Survey" : "Weekly Survey Cycle"}
-					</span>
-					<span className="truncate font-mono text-[11px] font-semibold text-slate-600">
-						{cycle.name || dispatch.surveyPeriodId}
-					</span>
-				</div>
-
 				{/* Progress Bar */}
 				<div className="space-y-1.5 rounded-xl bg-slate-50/80 p-3 border border-slate-100">
 					<div className="flex items-center justify-between text-xs font-bold text-slate-700">
-						<span>Dispatch Progress:</span>
+						<span>Overall Progress:</span>
 						<span className="font-mono text-slate-900">
 							{dispatch.observedCount} / {dispatch.totalProducts} items
 						</span>
@@ -708,53 +623,351 @@ const StoreDispatchCard = ({
 					</div>
 				</div>
 
-				{/* Team on Duty */}
-				<div>
-					<span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
-						Auditors on Duty ({dispatch.assignments.length})
-					</span>
-					<div className="flex flex-wrap gap-1.5">
-						{dispatch.assignments.map((asn) => (
-							<span
-								key={asn.id}
-								className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 shadow-2xs"
-							>
-								<span className="h-1.5 w-1.5 rounded-full bg-[#017C4D]" />
-								{asn.auditor?.name} ({asn.items?.length || 0})
-							</span>
-						))}
+				{/* Team on Duty & Proof Count */}
+				<div className="flex items-center justify-between gap-2">
+					<div>
+						<span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+							Team ({dispatch.assignments.length})
+						</span>
+						<div className="flex flex-wrap gap-1">
+							{dispatch.assignments.map((asn) => (
+								<span
+									key={asn.id}
+									className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 shadow-2xs"
+								>
+									<span className="h-1.5 w-1.5 rounded-full bg-[#017C4D]" />
+									{asn.auditor?.name?.split(" ")[0]} ({asn.items?.length || 0})
+								</span>
+							))}
+						</div>
 					</div>
+
+					{/* Proof Gallery Button */}
+					{photos.length > 0 && (
+						<button
+							type="button"
+							onClick={onOpenProofGallery}
+							className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50/80 px-2.5 py-1 text-xs font-bold text-blue-700 transition hover:bg-blue-100"
+							title="View uploaded receipts and evidence photos"
+						>
+							<span>📷</span>
+							<span>Proof ({photos.length})</span>
+						</button>
+					)}
 				</div>
 
-				{/* Card Actions: View Visits for all, Edit/Delete hidden for Queens Admin */}
-				<div className="mt-auto flex items-center justify-between border-t border-slate-100 pt-3 text-xs font-semibold">
+				{/* Card Footer */}
+				<div className="mt-auto flex items-center justify-between border-t border-slate-100 pt-3 text-xs font-semibold gap-2">
 					<button
 						type="button"
 						onClick={onViewAudits}
 						className="text-slate-700 hover:text-slate-900 hover:underline cursor-pointer"
 					>
-						View Visits →
+						Visits →
 					</button>
 
-					{!isQueensAdmin && (
-						<div className="flex items-center gap-2">
+					<div className="flex items-center gap-2">
+						{photos.length > 0 && (
 							<button
 								type="button"
-								onClick={onDelete}
-								className="text-red-600 hover:text-red-800 hover:underline cursor-pointer text-xs"
-								title="Delete this store dispatch"
+								onClick={onOpenProofGallery}
+								className="text-blue-700 hover:underline font-bold text-xs cursor-pointer"
 							>
-								Delete
+								Photos ({photos.length})
+							</button>
+						)}
+
+						{/* Management buttons hidden for Queens Admin */}
+						{isAdmin && (
+							<>
+								<button
+									type="button"
+									onClick={onManage}
+									className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 transition cursor-pointer"
+								>
+									Manage
+								</button>
+
+								<button
+									type="button"
+									disabled={isArchiving}
+									onClick={onArchive}
+									className="rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition cursor-pointer disabled:opacity-50"
+								>
+									{isArchived ? "Unarchive" : "Archive"}
+								</button>
+							</>
+						)}
+					</div>
+				</div>
+			</div>
+		</div>
+	);
+};
+
+/* Proof Gallery Modal for a Dispatch (Grid view of all photos) */
+const ProofGalleryModal = ({ dispatch, onClose, onSelectProofIndex }) => {
+	const photos = dispatch.evidencePhotos || [];
+
+	return (
+		<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in">
+			<div className="w-full max-w-3xl rounded-2xl border border-slate-100 bg-white p-5 shadow-2xl flex flex-col max-h-[85vh]">
+				{/* Header */}
+				<div className="flex items-center justify-between border-b border-slate-100 pb-3 flex-none">
+					<div>
+						<h2 className="text-base font-black text-slate-900">
+							Dispatch Proof Gallery ({photos.length})
+						</h2>
+						<p className="text-xs text-slate-500 font-medium">
+							{dispatch.store?.name} • Receipts, shelf items, and substitute
+							proofs
+						</p>
+					</div>
+					<button
+						type="button"
+						onClick={onClose}
+						className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 cursor-pointer"
+					>
+						✕
+					</button>
+				</div>
+
+				{/* Photos Grid */}
+				<div className="flex-1 overflow-y-auto py-3">
+					{photos.length === 0 ? (
+						<div className="py-12 text-center text-xs text-slate-400">
+							No proof photos captured yet for this store dispatch.
+						</div>
+					) : (
+						<div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+							{photos.map((proof, idx) => (
+								<div
+									key={proof.id}
+									onClick={() => onSelectProofIndex(idx)}
+									className="group relative cursor-pointer overflow-hidden rounded-xl border border-slate-200 bg-slate-50 aspect-4/3 transition hover:shadow-md"
+								>
+									<img
+										src={resolveAssetUrl(proof.url)}
+										alt={proof.productName}
+										className="h-full w-full object-cover transition duration-200 group-hover:scale-105"
+										loading="lazy"
+										onError={(e) => {
+											if (!e.currentTarget.dataset.triedFallback) {
+												e.currentTarget.dataset.triedFallback = "true";
+												e.currentTarget.src = proof.url.startsWith("/")
+													? proof.url
+													: `/${proof.url}`;
+											}
+										}}
+									/>
+									<div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex flex-col justify-end p-2 text-white">
+										<span className="truncate text-xs font-bold leading-tight">
+											{proof.productName}
+										</span>
+										<span className="text-[10px] text-slate-300 font-mono">
+											{proof.price
+												? `${Number(proof.price).toFixed(2)} ETB`
+												: proof.availability}
+										</span>
+									</div>
+								</div>
+							))}
+						</div>
+					)}
+				</div>
+
+				{/* Footer */}
+				<div className="border-t border-slate-100 pt-3 flex justify-end flex-none">
+					<button
+						type="button"
+						onClick={onClose}
+						className="rounded-xl bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 cursor-pointer"
+					>
+						Close Gallery
+					</button>
+				</div>
+			</div>
+		</div>
+	);
+};
+
+/* Fullscreen Carousel Lightbox Modal with Swipe, Keyboard, and Touch Support */
+const LightboxModal = ({
+	photos = [],
+	currentIndex = 0,
+	onIndexChange,
+	onClose,
+	resolveUrl,
+}) => {
+	const [touchStartX, setTouchStartX] = useState(null);
+	const current = photos[currentIndex];
+	const total = photos.length;
+
+	const handleNext = useCallback(() => {
+		onIndexChange((prev) => (prev < total - 1 ? prev + 1 : 0));
+	}, [onIndexChange, total]);
+
+	const handlePrev = useCallback(() => {
+		onIndexChange((prev) => (prev > 0 ? prev - 1 : total - 1));
+	}, [onIndexChange, total]);
+
+	// Keyboard arrow & Escape navigation
+	useEffect(() => {
+		const handleKeyDown = (e) => {
+			if (e.key === "ArrowRight") handleNext();
+			else if (e.key === "ArrowLeft") handlePrev();
+			else if (e.key === "Escape") onClose();
+		};
+		window.addEventListener("keydown", handleKeyDown);
+		return () => window.removeEventListener("keydown", handleKeyDown);
+	}, [handleNext, handlePrev, onClose]);
+
+	// Prevent background scroll while lightbox is open
+	useEffect(() => {
+		document.body.style.overflow = "hidden";
+		return () => {
+			document.body.style.overflow = "unset";
+		};
+	}, []);
+
+	// Touch swipe gestures
+	const onTouchStart = (e) => {
+		setTouchStartX(e.touches[0].clientX);
+	};
+
+	const onTouchEnd = (e) => {
+		if (touchStartX === null) return;
+		const touchEndX = e.changedTouches[0].clientX;
+		const deltaX = touchStartX - touchEndX;
+
+		if (deltaX > 50) {
+			handleNext(); // Swiped left -> Next photo
+		} else if (deltaX < -50) {
+			handlePrev(); // Swiped right -> Previous photo
+		}
+		setTouchStartX(null);
+	};
+
+	if (!current) return null;
+
+	return (
+		<div
+			className="fixed inset-0 z-60 flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-2 sm:p-4 select-none animate-in fade-in duration-150"
+			onClick={onClose}
+		>
+			<div
+				className="relative max-h-[92vh] w-full max-w-3xl overflow-hidden rounded-2xl bg-black shadow-2xl flex flex-col"
+				onClick={(e) => e.stopPropagation()}
+				onTouchStart={onTouchStart}
+				onTouchEnd={onTouchEnd}
+			>
+				{/* Top Floating Header */}
+				<div className="flex items-center justify-between p-3.5 bg-gradient-to-b from-black/80 to-transparent z-10 text-white">
+					<div className="flex items-center gap-2">
+						<span className="rounded-md bg-white/20 px-2 py-0.5 font-mono text-[11px] font-bold">
+							{currentIndex + 1} / {total}
+						</span>
+						<span className="text-xs font-bold truncate max-w-[200px] sm:max-w-md">
+							{current.productName}
+						</span>
+					</div>
+
+					<button
+						type="button"
+						onClick={onClose}
+						className="rounded-full bg-white/20 hover:bg-white/30 p-1.5 text-white cursor-pointer transition"
+						title="Close (Esc)"
+					>
+						✕
+					</button>
+				</div>
+
+				{/* Center Main Image Canvas */}
+				<div className="relative flex-1 flex items-center justify-center min-h-[50vh] max-h-[72vh] p-2 bg-black">
+					<img
+						key={current.url}
+						src={resolveUrl(current.url)}
+						alt={current.productName}
+						className="max-h-[70vh] w-auto max-w-full object-contain mx-auto transition duration-150 animate-in fade-in"
+						onError={(e) => {
+							if (!e.currentTarget.dataset.triedFallback) {
+								e.currentTarget.dataset.triedFallback = "true";
+								e.currentTarget.src = current.url.startsWith("/")
+									? current.url
+									: `/${current.url}`;
+							}
+						}}
+					/>
+
+					{/* Desktop Left/Right Navigation Chevrons */}
+					{total > 1 && (
+						<>
+							<button
+								type="button"
+								onClick={(e) => {
+									e.stopPropagation();
+									handlePrev();
+								}}
+								className="absolute left-3 top-1/2 -translate-y-1/2 rounded-full bg-black/60 hover:bg-white hover:text-black text-white p-2.5 transition cursor-pointer shadow-lg z-20 hidden sm:flex items-center justify-center"
+								title="Previous photo (Left Arrow)"
+							>
+								◀
+							</button>
+
+							<button
+								type="button"
+								onClick={(e) => {
+									e.stopPropagation();
+									handleNext();
+								}}
+								className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-black/60 hover:bg-white hover:text-black text-white p-2.5 transition cursor-pointer shadow-lg z-20 hidden sm:flex items-center justify-center"
+								title="Next photo (Right Arrow)"
+							>
+								▶
+							</button>
+						</>
+					)}
+				</div>
+
+				{/* Bottom Metadata & Mobile Navigation Bar */}
+				<div className="p-3 bg-black/90 border-t border-white/10 text-white flex flex-col sm:flex-row items-center justify-between gap-2 text-xs">
+					<div className="text-center sm:text-left">
+						<span className="font-mono text-emerald-400 font-bold text-sm block">
+							{current.price
+								? `${Number(current.price).toFixed(2)} ETB`
+								: current.availability}
+						</span>
+						<p className="text-[10px] text-slate-400 font-mono">
+							Auditor: {current.auditorName || "Field Auditor"} • Captured{" "}
+							{current.capturedAt
+								? new Date(current.capturedAt).toLocaleString()
+								: "Recently"}
+						</p>
+					</div>
+
+					{/* Mobile Step Buttons */}
+					{total > 1 && (
+						<div className="flex items-center gap-2 sm:hidden w-full justify-between pt-1">
+							<button
+								type="button"
+								onClick={handlePrev}
+								className="flex-1 rounded-lg bg-white/15 py-1.5 font-bold text-white text-xs"
+							>
+								◀ Prev
 							</button>
 							<button
 								type="button"
-								onClick={onManage}
-								className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 transition cursor-pointer"
+								onClick={handleNext}
+								className="flex-1 rounded-lg bg-white/15 py-1.5 font-bold text-white text-xs"
 							>
-								Manage Dispatch
+								Next ▶
 							</button>
 						</div>
 					)}
+
+					<div className="hidden sm:block text-[10px] text-slate-400 font-mono">
+						Swipe or use ← / → arrow keys
+					</div>
 				</div>
 			</div>
 		</div>
@@ -764,19 +977,53 @@ const StoreDispatchCard = ({
 const AssignmentCard = ({
 	assignment,
 	isAuditor,
-	isQueensAdmin,
 	onViewAudits,
 	onEdit,
 	onDelete,
+	onOpenProof,
 }) => {
 	const store = assignment.store || {};
 	const auditor = assignment.auditor || {};
 	const cycle = assignment.surveyPeriod || {};
 
 	const canEdit = assignment.status === "NOT_STARTED";
-	const canDelete = assignment.status === "NOT_STARTED";
+	const canDelete =
+		assignment.status === "NOT_STARTED" && (assignment.auditsCount ?? 0) <= 1;
+
 	const productCount =
 		assignment.totalItemsCount ?? assignment.items?.length ?? 0;
+
+	// Extract photos from assignment audits
+	const assignmentPhotos = useMemo(() => {
+		const photos = [];
+		if (Array.isArray(assignment.audits)) {
+			assignment.audits.forEach((aud) => {
+				if (Array.isArray(aud.observations)) {
+					aud.observations.forEach((obs) => {
+						if (obs.evidencePhotoUrl) {
+							const urls = String(obs.evidencePhotoUrl)
+								.split(",")
+								.map((u) => u.trim())
+								.filter(Boolean);
+							urls.forEach((u, uIdx) => {
+								photos.push({
+									id: `${obs.id}_${uIdx}`,
+									url: u,
+									productName: obs.product?.name || "Product",
+									price: obs.price ? Number(obs.price) : null,
+									availability: obs.availability || "AVAILABLE",
+									capturedAt: obs.capturedAt,
+									auditorName: assignment.auditor?.name || "Field Auditor",
+									storeName: assignment.store?.name || "Store",
+								});
+							});
+						}
+					});
+				}
+			});
+		}
+		return photos;
+	}, [assignment]);
 
 	const statusAccent =
 		{
@@ -784,6 +1031,7 @@ const AssignmentCard = ({
 			IN_PROGRESS: "bg-[#FE7914]",
 			COMPLETED: "bg-[#017C4D]",
 			CANCELLED: "bg-slate-400",
+			ARCHIVED: "bg-slate-500",
 		}[assignment.status] || "bg-slate-300";
 
 	return (
@@ -824,6 +1072,18 @@ const AssignmentCard = ({
 						</span>
 						products
 					</span>
+
+					{assignmentPhotos.length > 0 && (
+						<button
+							type="button"
+							onClick={() => onOpenProof(assignmentPhotos)}
+							className="inline-flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 py-0.5 font-bold text-blue-700 hover:bg-blue-100 cursor-pointer"
+						>
+							<span>📷</span>
+							<span>Proof ({assignmentPhotos.length})</span>
+						</button>
+					)}
+
 					{assignment.assignedAt && (
 						<span className="text-slate-400">
 							Assigned {formatAssignedDate(assignment.assignedAt)}
@@ -837,11 +1097,10 @@ const AssignmentCard = ({
 						onClick={onViewAudits}
 						className="inline-flex cursor-pointer items-center gap-1 text-xs font-semibold text-slate-700 hover:text-slate-900 hover:underline"
 					>
-						View audits →
+						View Audits →
 					</button>
 
-					{/* CRUD Buttons: Hidden for Auditors and Queens Admin */}
-					{!isAuditor && !isQueensAdmin && (
+					{!isAuditor && (
 						<div className="flex items-center gap-3 text-xs font-semibold">
 							<button
 								type="button"
@@ -867,7 +1126,7 @@ const AssignmentCard = ({
 	);
 };
 
-const EmptyState = ({ statusFilter, searchTerm, onNew, isQueensAdmin }) => (
+const EmptyState = ({ statusFilter, searchTerm, onNew }) => (
 	<div className="rounded-2xl border border-dashed border-slate-200 bg-white px-6 py-12 text-center">
 		<div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-slate-100 text-slate-400">
 			<svg
@@ -887,24 +1146,22 @@ const EmptyState = ({ statusFilter, searchTerm, onNew, isQueensAdmin }) => (
 		<h3 className="mt-4 text-sm font-bold text-slate-800">
 			{statusFilter || searchTerm
 				? "No dispatches match your filters"
-				: "No store dispatches yet"}
+				: "No active store dispatches"}
 		</h3>
 		<p className="mx-auto mt-1 max-w-sm text-xs text-slate-500">
 			{statusFilter || searchTerm
 				? "Try adjusting your search query or filters."
 				: "Dispatch a new survey assignment to begin tracking store progress."}
 		</p>
-		{!isQueensAdmin && (
-			<div className="mt-4">
-				<button
-					type="button"
-					onClick={onNew}
-					className="rounded-xl bg-[#A41821] px-4 py-2 text-xs font-bold text-white shadow-xs"
-				>
-					+ Dispatch Store Survey
-				</button>
-			</div>
-		)}
+		<div className="mt-4">
+			<button
+				type="button"
+				onClick={onNew}
+				className="rounded-xl bg-[#A41821] px-4 py-2 text-xs font-bold text-white shadow-xs cursor-pointer"
+			>
+				+ Dispatch Store Survey
+			</button>
+		</div>
 	</div>
 );
 
