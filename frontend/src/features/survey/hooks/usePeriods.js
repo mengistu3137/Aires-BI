@@ -5,6 +5,8 @@ import {
   getAllPeriodsRequest,
   createPeriodRequest,
   updatePeriodStatusRequest,
+  updatePeriodRequest,
+  deletePeriodRequest,
 } from "@/services/api/period.api.js";
 
 /**
@@ -57,6 +59,44 @@ export const useCreatePeriod = () => {
 };
 
 /**
+ * Update an existing survey period (name, dates, status).
+ * Backend: PUT /survey-periods/:id
+ */
+export const useUpdatePeriod = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ id, ...data }) => updatePeriodRequest(id, data),
+    onSuccess: (data) => {
+      toast.success(data?.message || "Survey cycle updated successfully");
+      queryClient.invalidateQueries({ queryKey: ["surveyPeriods"] });
+    },
+    onError: (err) => {
+      toast.error(err?.response?.data?.message || err?.message || "Failed to update survey period");
+    },
+  });
+};
+
+/**
+ * Delete a survey period.
+ * Backend: DELETE /survey-periods/:id
+ */
+export const useDeletePeriod = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id) => deletePeriodRequest(id),
+    onSuccess: (data) => {
+      toast.success(data?.message || "Survey cycle deleted successfully");
+      queryClient.invalidateQueries({ queryKey: ["surveyPeriods"] });
+    },
+    onError: (err) => {
+      toast.error(err?.response?.data?.message || err?.message || "Failed to delete survey period");
+    },
+  });
+};
+
+/**
  * Update survey period status (e.g. OPEN <-> CLOSED).
  * Backend: PATCH /survey-periods/:id
  */
@@ -76,12 +116,14 @@ export const useUpdatePeriodStatus = () => {
 };
 
 /**
- * Composite hook: exports activePeriod, periods, createPeriod, and updateStatus.
+ * Composite hook: exports activePeriod, periods, and mutation methods.
  */
 export const usePeriods = () => {
   const activeQuery = useActivePeriod();
   const allQuery = useAllPeriods();
   const createPeriodMutation = useCreatePeriod();
+  const updatePeriodMutation = useUpdatePeriod();
+  const deletePeriodMutation = useDeletePeriod();
   const updateStatusMutation = useUpdatePeriodStatus();
 
   return {
@@ -89,9 +131,16 @@ export const usePeriods = () => {
     periods: allQuery.data || [],
     isLoading: activeQuery.isLoading || allQuery.isLoading,
     isError: activeQuery.isError || allQuery.isError,
+
     createPeriod: createPeriodMutation.mutateAsync,
     isCreating: createPeriodMutation.isPending,
-    // Fix: Export updateStatus function
+
+    updatePeriod: updatePeriodMutation.mutateAsync,
+    isUpdating: updatePeriodMutation.isPending,
+
+    deletePeriod: deletePeriodMutation.mutateAsync,
+    isDeleting: deletePeriodMutation.isPending,
+
     updateStatus: updateStatusMutation.mutateAsync,
     isUpdatingStatus: updateStatusMutation.isPending,
   };

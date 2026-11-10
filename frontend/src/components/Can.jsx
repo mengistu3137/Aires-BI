@@ -1,24 +1,19 @@
-
 import React from "react";
 import { useAuth } from "@/hooks/useAuth.js";
 import { hasPermission } from "@/permissions/permissions.js";
 
 /**
  * Declarative component for role and permission authorization checks
- *
- * Usage:
- * <Can permission="EXPORT_DATA">
- *   <button>Export to Excel</button>
- * </Can>
- *
- * <Can role={["ADMIN", "MANAGER"]}>
- *   <ManagerControls />
- * </Can>
  */
 export const Can = ({ permission, role, children, fallback = null }) => {
-	const { role: currentRole, isAuthenticated } = useAuth();
+	const { role: currentRole, isAuthenticated, isQueensAdmin } = useAuth();
 
 	if (!isAuthenticated || !currentRole) {
+		return fallback;
+	}
+
+	// Queens Admin role is strictly view-only: all CRUD and manager controls are hidden
+	if (isQueensAdmin) {
 		return fallback;
 	}
 
