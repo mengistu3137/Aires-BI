@@ -51,8 +51,106 @@ const ASSIGNMENT_INCLUDE_RELATIONS = {
   },
 };
 /**
- * Toggles or sets archive status for all assignments in a store dispatch cycle.
+ * Atomic update for a store dispatch.
+ * 1. Cycle Migration: moves assignments, audits, and observations to the new cycle.
+ * 2. Auto-heals duplicates: cleans up empty unstarted duplicate records in the target cycle.
+ * 3. Auditor Reassignment: allowed for uncompleted dispatches; locked on COMPLETED.
  */
+export const updateDispatchCycle = async ({
+  storeId,
+  currentSurveyPeriodId,
+  newSurveyPeriodId,
+  newAuditorId,
+}) => {
+  if (!storeId || !currentSurveyPeriodId) {
+    throw new ApiError(400, "storeId and currentSurveyPeriodId are required.");
+  }
+
+  const targetCycleId = newSurveyPeriodId || currentSurveyPeriodId;
+
+  return prisma.$transaction(async (tx) => {
+    // 1. Move cycle if changed
+    if (newSurveyPeriodId && newSurveyPeriodId !== currentSurveyPeriodId) {
+      const targetPeriod = await tx.surveyPeriod.findUnique({
+        where: { id: newSurveyPeriodId },
+      });
+      if (!targetPeriod) {
+        throw new ApiError(404, `Target survey cycle '${newSurveyPeriodId}' not found.`);
+      }
+
+      // Check for empty/unstarted duplicate in the new cycle (e.g. from prior failed attempt) and clean it up
+      const existingInNew = await tx.surveyAssignment.findMany({
+        where: { storeId, surveyPeriodId: newSurveyPeriodId },
+        include: {
+          audits: {
+            include: { _count: { select: { observations: true } } },
+          },
+        },
+      });
+
+      for (const dup of existingInNew) {
+        const obsCount = dup.audits.reduce((acc, a) => acc + (a._count?.observations || 0), 0);
+        if (obsCount === 0 && dup.status === "NOT_STARTED") {
+          await tx.audit.deleteMany({ where: { assignmentId: dup.id } });
+          await tx.assignmentItem.deleteMany({ where: { assignmentId: dup.id } });
+          await tx.surveyAssignment.delete({ where: { id: dup.id } });
+        } else {
+          throw new ApiError(409, "Target survey cycle already has an active dispatch with observations for this store.");
+        }
+      }
+
+      // Move assignments
+      await tx.surveyAssignment.updateMany({
+        where: { storeId, surveyPeriodId: currentSurveyPeriodId },
+        data: { surveyPeriodId: newSurveyPeriodId },
+      });
+
+      // Move linked audits
+      await tx.audit.updateMany({
+        where: { storeId, surveyPeriodId: currentSurveyPeriodId },
+        data: { surveyPeriodId: newSurveyPeriodId },
+      });
+    }
+
+    // 2. Reassign auditor if requested (allowed if NOT COMPLETED)
+    if (newAuditorId) {
+      const newAuditor = await tx.user.findUnique({
+        where: { id: newAuditorId, active: true, role: "FIELD_AUDITOR" },
+      });
+      if (!newAuditor) {
+        throw new ApiError(400, "Selected user is not an active FIELD_AUDITOR.");
+      }
+
+      const assignmentsToUpdate = await tx.surveyAssignment.findMany({
+        where: { storeId, surveyPeriodId: targetCycleId },
+      });
+
+      for (const asn of assignmentsToUpdate) {
+        if (asn.status === "COMPLETED") {
+          throw new ApiError(409, "Cannot reassign auditor on a COMPLETED dispatch. Audit proof is already verified.");
+        }
+
+        await tx.surveyAssignment.update({
+          where: { id: asn.id },
+          data: { auditorId: newAuditorId },
+        });
+
+        await tx.audit.updateMany({
+          where: {
+            assignmentId: asn.id,
+            status: { in: ["NOT_STARTED", "IN_PROGRESS"] },
+          },
+          data: { auditorId: newAuditorId },
+        });
+      }
+    }
+
+    return {
+      success: true,
+      message: "Dispatch updated successfully.",
+    };
+  });
+};
 export const archiveStoreDispatch = async ({ storeId, surveyPeriodId, archive = true }) => {
   const nextStatus = archive ? "ARCHIVED" : "COMPLETED";
 
@@ -910,5 +1008,6 @@ export const assignmentService = {
   getStoreAllocations,
   updateStoreAllocations,
   getStoreProgress,
-  archiveStoreDispatch
+  archiveStoreDispatch,
+  updateDispatchCycle
 };

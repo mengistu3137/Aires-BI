@@ -8,13 +8,26 @@ import {
   deleteAssignmentRequest,
   createBatchAssignmentRequest,
   updateStoreAllocationsRequest,
-  archiveStoreDispatchRequest
+  archiveStoreDispatchRequest,
+  updateDispatchCycleRequest
 } from "@/services/api/assignment.api.js";
 import { useAuth } from "@/hooks/useAuth.js";
 import toast from "react-hot-toast";
 
 
-
+export const useUpdateDispatchCycle = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: updateDispatchCycleRequest,
+    onSuccess: (data) => {
+      toast.success(data?.message || "Dispatch cycle updated successfully");
+      queryClient.invalidateQueries({ queryKey: ["assignments"] });
+    },
+    onError: (err) => {
+      toast.error(err?.response?.data?.message || err?.message || "Failed to update dispatch cycle");
+    },
+  });
+};
 
 export const useArchiveStoreDispatch = () => {
   const queryClient = useQueryClient();
