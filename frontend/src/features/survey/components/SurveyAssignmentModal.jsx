@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, {
+	useState,
+	useEffect,
+	useMemo,
+	useCallback,
+	useRef,
+} from "react";
 import { useStores } from "../hooks/useStores.js";
 import {
 	useCreateBatchAssignment,
@@ -11,15 +17,8 @@ import { getStoreAllocationsRequest } from "@/services/api/assignment.api.js";
 import { formatProductName } from "@/utils/formatters.js";
 import toast from "react-hot-toast";
 
-const TRACK_ORDER = {
-	DAILY: 0,
-	WEEKLY: 1,
-	MONTHLY: 2,
-	BI_YEARLY: 3,
-};
-
 /**
- * Computes equal slices across total items for N auditors
+ * Computes equal slices across total items for N field auditors
  */
 const calculateEqualSlices = (totalItems, count) => {
 	if (totalItems <= 0 || count <= 0) return [];
@@ -37,7 +36,7 @@ const calculateEqualSlices = (totalItems, count) => {
 
 		slices.push({
 			sliceIndex: i,
-			fromNumber: start + 1,
+			fromNumber: len > 0 ? start + 1 : 0,
 			toNumber: end,
 			count: len,
 			startIndex: start,
@@ -48,87 +47,49 @@ const calculateEqualSlices = (totalItems, count) => {
 	return slices;
 };
 
-/**
- * Synchronizes allocation ranges and item counts with the active product pool
- */
-const syncAllocationsWithCount = (currentAllocations, activeCount) => {
-	if (!currentAllocations || currentAllocations.length === 0) return [];
-	if (activeCount <= 0) {
-		return currentAllocations.map((a) => ({
-			...a,
-			fromNumber: 0,
-			toNumber: 0,
-			count: 0,
-		}));
-	}
-
-	const slices = calculateEqualSlices(activeCount, currentAllocations.length);
-	return currentAllocations.map((item, idx) => ({
-		...item,
-		fromNumber: slices[idx]?.fromNumber || 1,
-		toNumber: slices[idx]?.toNumber || activeCount,
-		count: slices[idx]?.count || activeCount,
-	}));
-};
-
-/**
- * Robust track resolution matching the imported database frequency
- */
-const getProductTrack = (p) => {
-	const freq = String(p.frequency || "").toUpperCase();
-	if (
-		freq === "DAILY" ||
-		freq === "WEEKLY" ||
-		freq === "MONTHLY" ||
-		freq === "BI_YEARLY"
-	) {
-		return freq;
-	}
-
-	const cat = String(p.category || "").toLowerCase();
-	if (cat.includes("fresh")) return "DAILY";
-	if (cat.includes("ultra")) return "WEEKLY";
-	if (cat.includes("sensitive") && !cat.includes("non")) return "MONTHLY";
-	return "BI_YEARLY";
-};
-
-/**
- * Strict Excel sequence sort by sortOrder (1..N)
- */
-const sortBySortOrder = (items = []) =>
-	[...items].sort((a, b) => {
-		const aSeq = a.sortOrder ?? 999999;
-		const bSeq = b.sortOrder ?? 999999;
-		if (aSeq !== bSeq) return aSeq - bSeq;
-		return String(a.name || "").localeCompare(String(b.name || ""));
-	});
-
 export const SurveyAssignmentModal = ({
 	isOpen,
 	onClose,
 	storeId: initialStoreId = null,
+	surveyPeriodId: initialSurveyPeriodId = null,
 }) => {
-	// Query active stores only using existing hook
-	const { stores = [], isLoading: storesLoading } = useStores({
-		active: "true",
-	});
+	const { stores = [], isLoading: storesLoading } = useStores();
 	const { users = [] } = useUsers();
 	const { products = [], isLoading: productsLoading } = useProducts();
 	const { activePeriod, periods = [] } = usePeriods();
+
+	const createBatch = useCreateBatchAssignment();
+	const updateAllocations = useUpdateStoreAllocations();
 
 	const openPeriods = useMemo(
 		() => (periods || []).filter((p) => p.status === "OPEN"),
 		[periods],
 	);
 
-	// Filter out any deactivated stores
-	const activeStores = useMemo(
-		() => stores.filter((s) => s.active !== false),
-		[stores],
-	);
+	// Group daily cycles under their respective weekly parent cycles
+	const { weeklyPeriods, dailyByWeekly } = useMemo(() => {
+		const weekly = [];
+		const dailyMap = {};
 
-	const createBatch = useCreateBatchAssignment();
-	const updateAllocations = useUpdateStoreAllocations();
+		openPeriods.forEach((p) => {
+			const isDaily =
+				p.id.includes("-DAILY-") || p.name?.toLowerCase().includes("daily");
+
+			if (isDaily) {
+				const parentKey = p.id.split("-DAILY-")[0];
+				if (!dailyMap[parentKey]) dailyMap[parentKey] = [];
+				dailyMap[parentKey].push(p);
+			} else {
+				weekly.push(p);
+			}
+		});
+
+		Object.keys(dailyMap).forEach((k) => {
+			dailyMap[k].sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
+		});
+
+		return { weeklyPeriods: weekly, dailyByWeekly: dailyMap };
+	}, [openPeriods]);
 
 	const auditors = useMemo(
 		() =>
@@ -141,11 +102,16 @@ export const SurveyAssignmentModal = ({
 	const [surveyPeriodId, setSurveyPeriodId] = useState("");
 	const [storeId, setStoreId] = useState("");
 
-	// Product selection pool
+	// Custom collapsible cycle dropdown state
+	const [isCycleDropdownOpen, setIsCycleDropdownOpen] = useState(false);
+	const [expandedWeeklyCycles, setExpandedWeeklyCycles] = useState({});
+	const dropdownRef = useRef(null);
+
+	// Product selection pool: Start completely empty (0 selected) by default
 	const [selectedProductIds, setSelectedProductIds] = useState([]);
 
-	// Product Checklist Tab: 'ALL' | 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'BI_YEARLY'
-	const [activeProductTab, setActiveProductTab] = useState("WEEKLY");
+	// Tabs: 'ALL' | 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'BI_YEARLY'
+	const [activeProductTab, setActiveProductTab] = useState("ALL");
 	const [checklistSearch, setChecklistSearch] = useState("");
 
 	// Multi-Auditor Allocation State
@@ -153,63 +119,34 @@ export const SurveyAssignmentModal = ({
 	const [isEditMode, setIsEditMode] = useState(false);
 	const [isLoadingExisting, setIsLoadingExisting] = useState(false);
 
-	// Auto-select first active store and period on open
-	useEffect(() => {
-		if (!isOpen) return;
-		setSurveyPeriodId(activePeriod?.id || openPeriods[0]?.id || "");
-		if (activeStores.length > 0) {
-			const candidateId =
-				initialStoreId && activeStores.some((s) => s.id === initialStoreId)
-					? initialStoreId
-					: activeStores[0]?.id || "";
-			setStoreId(candidateId);
-		}
-	}, [isOpen, activePeriod, openPeriods, initialStoreId, activeStores]);
-
-	// ────────────────────────────────────────────────────────────
-	// 4 TRACK POOLS — SORTED STRICTLY BY EXCEL SEQUENCE (sortOrder)
-	// ────────────────────────────────────────────────────────────
+	// ─── Survey Tracks (Exact p.frequency from Item Master) ──────────
 	const dailyFreshProducts = useMemo(
-		() =>
-			sortBySortOrder(products.filter((p) => getProductTrack(p) === "DAILY")),
+		() => products.filter((p) => p.frequency === "DAILY"),
 		[products],
 	);
 
-	const weeklyUltraProducts = useMemo(
-		() =>
-			sortBySortOrder(products.filter((p) => getProductTrack(p) === "WEEKLY")),
+	const weeklyProducts = useMemo(
+		() => products.filter((p) => p.frequency === "WEEKLY"),
 		[products],
 	);
 
-	const monthlySensitiveProducts = useMemo(
-		() =>
-			sortBySortOrder(products.filter((p) => getProductTrack(p) === "MONTHLY")),
+	const monthlyProducts = useMemo(
+		() => products.filter((p) => p.frequency === "MONTHLY"),
 		[products],
 	);
 
 	const biYearlyProducts = useMemo(
 		() =>
-			sortBySortOrder(
-				products.filter((p) => getProductTrack(p) === "BI_YEARLY"),
+			products.filter(
+				(p) =>
+					p.frequency === "BI_YEARLY" ||
+					(!p.frequency &&
+						p.frequency !== "DAILY" &&
+						p.frequency !== "WEEKLY" &&
+						p.frequency !== "MONTHLY"),
 			),
 		[products],
 	);
-
-	// All products sorted hierarchically: Daily (1..20) -> Weekly (1..100) -> Sensitive (1..500) -> Non-Sensitive (1..2804)
-	const allProductsSorted = useMemo(() => {
-		return [...products].sort((a, b) => {
-			const freqA = getProductTrack(a);
-			const freqB = getProductTrack(b);
-			const diffFreq = (TRACK_ORDER[freqA] ?? 9) - (TRACK_ORDER[freqB] ?? 9);
-			if (diffFreq !== 0) return diffFreq;
-
-			const aSeq = a.sortOrder ?? 999999;
-			const bSeq = b.sortOrder ?? 999999;
-			if (aSeq !== bSeq) return aSeq - bSeq;
-
-			return String(a.name || "").localeCompare(String(b.name || ""));
-		});
-	}, [products]);
 
 	// Active Selected Counts per Track
 	const selectedDailyCount = useMemo(
@@ -221,16 +158,14 @@ export const SurveyAssignmentModal = ({
 
 	const selectedWeeklyCount = useMemo(
 		() =>
-			weeklyUltraProducts.filter((p) => selectedProductIds.includes(p.id))
-				.length,
-		[weeklyUltraProducts, selectedProductIds],
+			weeklyProducts.filter((p) => selectedProductIds.includes(p.id)).length,
+		[weeklyProducts, selectedProductIds],
 	);
 
 	const selectedMonthlyCount = useMemo(
 		() =>
-			monthlySensitiveProducts.filter((p) => selectedProductIds.includes(p.id))
-				.length,
-		[monthlySensitiveProducts, selectedProductIds],
+			monthlyProducts.filter((p) => selectedProductIds.includes(p.id)).length,
+		[monthlyProducts, selectedProductIds],
 	);
 
 	const selectedBiYearlyCount = useMemo(
@@ -239,28 +174,88 @@ export const SurveyAssignmentModal = ({
 		[biYearlyProducts, selectedProductIds],
 	);
 
-	// Pre-select weekly ultra-sensitive products by default for standard weekly cycles
+	// Recalibrates auditor allocation slices
+	const updateAllocationsForCount = useCallback(
+		(newCount, currentAllocations) => {
+			if (!currentAllocations || currentAllocations.length === 0)
+				return currentAllocations;
+
+			if (newCount === 0) {
+				return currentAllocations.map((a) => ({
+					...a,
+					fromNumber: 0,
+					toNumber: 0,
+					count: 0,
+				}));
+			}
+
+			const slices = calculateEqualSlices(newCount, currentAllocations.length);
+			return currentAllocations.map((a, idx) => ({
+				...a,
+				fromNumber: slices[idx]?.fromNumber || 1,
+				toNumber: slices[idx]?.toNumber || newCount,
+				count: slices[idx]?.count || newCount,
+			}));
+		},
+		[],
+	);
+
+	// Reset state when modal opens or closes
 	useEffect(() => {
-		if (!isOpen || isEditMode) return;
-		if (products.length > 0 && selectedProductIds.length === 0) {
-			const defaults =
-				weeklyUltraProducts.length > 0
-					? weeklyUltraProducts.map((p) => p.id)
-					: products.map((p) => p.id);
-			setSelectedProductIds(defaults);
-			setAllocations((prev) => syncAllocationsWithCount(prev, defaults.length));
+		if (!isOpen) {
+			setSelectedProductIds([]);
+			setActiveProductTab("ALL");
+			setChecklistSearch("");
+			setAllocations([]);
+			setIsEditMode(false);
+			setIsCycleDropdownOpen(false);
+			return;
+		}
+
+		const defaultCycleId =
+			initialSurveyPeriodId || activePeriod?.id || openPeriods[0]?.id || "";
+
+		setSurveyPeriodId(defaultCycleId);
+		setStoreId(initialStoreId || stores[0]?.id || "");
+
+		// Clean new dispatch: start completely unselected
+		if (!initialStoreId) {
+			setSelectedProductIds([]);
+			setIsEditMode(false);
 		}
 	}, [
 		isOpen,
-		products,
-		isEditMode,
-		weeklyUltraProducts,
-		selectedProductIds.length,
+		activePeriod,
+		openPeriods,
+		initialStoreId,
+		initialSurveyPeriodId,
+		stores,
 	]);
 
-	// Load existing allocations or preserve configured auditor on store change
+	// Close dropdown when clicking outside
+	useEffect(() => {
+		const handleClickOutside = (e) => {
+			if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+				setIsCycleDropdownOpen(false);
+			}
+		};
+		document.addEventListener("mousedown", handleClickOutside);
+		return () => document.removeEventListener("mousedown", handleClickOutside);
+	}, []);
+
+	const productsRef = useRef(products);
+	productsRef.current = products;
+
+	// Load existing allocations ONLY when editing an existing dispatch
 	useEffect(() => {
 		if (!isOpen || !storeId || !surveyPeriodId) return;
+
+		// If brand-new dispatch, do not load or pre-select prior allocations
+		if (!initialStoreId) {
+			setIsEditMode(false);
+			setSelectedProductIds([]);
+			return;
+		}
 
 		let isMounted = true;
 		setIsLoadingExisting(true);
@@ -275,23 +270,22 @@ export const SurveyAssignmentModal = ({
 					const allAssignedIds = Array.from(
 						new Set(existing.flatMap((asn) => asn.productIds || [])),
 					);
+					setSelectedProductIds(allAssignedIds);
 
-					if (allAssignedIds.length > 0) {
-						setSelectedProductIds(allAssignedIds);
-					}
-
-					let currentStart = 1;
+					const currentProducts = productsRef.current || [];
 					const mapped = existing.map((asn) => {
-						const count = asn.productIds?.length || 0;
-						const fromNumber = currentStart;
-						const toNumber = Math.max(fromNumber, currentStart + count - 1);
-						currentStart = toNumber + 1;
+						const firstIdx = currentProducts.findIndex(
+							(p) => p.id === asn.productIds[0],
+						);
+						const lastIdx = currentProducts.findIndex(
+							(p) => p.id === asn.productIds[asn.productIds.length - 1],
+						);
 
 						return {
 							auditorId: asn.auditorId,
-							fromNumber: count > 0 ? fromNumber : 1,
-							toNumber: count > 0 ? toNumber : 1,
-							count,
+							fromNumber: firstIdx !== -1 ? firstIdx + 1 : 1,
+							toNumber: lastIdx !== -1 ? lastIdx + 1 : asn.productIds.length,
+							count: asn.productIds.length,
 							observedCount: asn.observedCount || 0,
 							assignmentId: asn.assignmentId,
 							status: asn.status || "NOT_STARTED",
@@ -300,19 +294,7 @@ export const SurveyAssignmentModal = ({
 					setAllocations(mapped);
 				} else {
 					setIsEditMode(false);
-					setAllocations((prevAllocations) => {
-						const activeAuditorList =
-							prevAllocations.length > 0
-								? prevAllocations
-								: auditors.slice(0, Math.min(1, auditors.length)).map((a) => ({
-										auditorId: a.id,
-										observedCount: 0,
-										status: "NOT_STARTED",
-									}));
-
-						const activeCount = selectedProductIds.length || products.length;
-						return syncAllocationsWithCount(activeAuditorList, activeCount);
-					});
+					setSelectedProductIds([]);
 				}
 			})
 			.catch(() => {
@@ -325,94 +307,103 @@ export const SurveyAssignmentModal = ({
 		return () => {
 			isMounted = false;
 		};
-	}, [isOpen, storeId, surveyPeriodId]);
+	}, [isOpen, storeId, surveyPeriodId, initialStoreId]);
 
-	// Product selection handlers with immediate auditor range synchronization
-	const handleToggleProduct = useCallback((productId) => {
+	// Product Selection Handlers
+	const handleToggleProduct = (productId) => {
 		setSelectedProductIds((prev) => {
 			const next = prev.includes(productId)
 				? prev.filter((id) => id !== productId)
 				: [...prev, productId];
-			setAllocations((prevAlloc) =>
-				syncAllocationsWithCount(prevAlloc, next.length),
-			);
+			setAllocations((cur) => updateAllocationsForCount(next.length, cur));
 			return next;
 		});
-	}, []);
+	};
 
-	const handleSelectAllGlobal = useCallback(() => {
-		setSelectedProductIds((prev) => {
-			const next =
-				prev.length === products.length ? [] : products.map((p) => p.id);
-			setAllocations((prevAlloc) =>
-				syncAllocationsWithCount(prevAlloc, next.length),
-			);
-			return next;
-		});
-	}, [products]);
+	const handleSelectAllGlobal = () => {
+		if (selectedProductIds.length === products.length) {
+			setSelectedProductIds([]);
+			setAllocations((cur) => updateAllocationsForCount(0, cur));
+			toast.success("Deselected all products");
+		} else {
+			const allIds = products.map((p) => p.id);
+			setSelectedProductIds(allIds);
+			setAllocations((cur) => updateAllocationsForCount(allIds.length, cur));
+			toast.success(`Selected all ${allIds.length} products`);
+		}
+	};
 
-	const handleToggleCategory = useCallback(
-		(trackProducts) => {
-			const trackIds = trackProducts.map((p) => p.id);
-			const allSelected = trackIds.every((id) =>
-				selectedProductIds.includes(id),
-			);
+	// Track Deselection: If ANY items in this track are selected, DESELECT them!
+	const handleToggleCategory = (trackProducts, trackLabel) => {
+		const trackIds = trackProducts.map((p) => p.id);
+		if (trackIds.length === 0) return;
 
-			let next;
-			if (allSelected) {
-				next = selectedProductIds.filter((id) => !trackIds.includes(id));
-				toast.success(`Deselected ${trackIds.length} items`);
-			} else {
-				next = Array.from(new Set([...selectedProductIds, ...trackIds]));
-				toast.success(`Selected all ${trackIds.length} items`);
-			}
+		const selectedInTrack = trackIds.filter((id) =>
+			selectedProductIds.includes(id),
+		);
 
-			setSelectedProductIds(next);
-			setAllocations((prevAlloc) =>
-				syncAllocationsWithCount(prevAlloc, next.length),
-			);
-		},
-		[selectedProductIds],
-	);
+		if (selectedInTrack.length > 0) {
+			setSelectedProductIds((prev) => {
+				const next = prev.filter((id) => !trackIds.includes(id));
+				setAllocations((cur) => updateAllocationsForCount(next.length, cur));
+				return next;
+			});
+			toast.success(`Deselected ${selectedInTrack.length} ${trackLabel} items`);
+		} else {
+			setSelectedProductIds((prev) => {
+				const next = Array.from(new Set([...prev, ...trackIds]));
+				setAllocations((cur) => updateAllocationsForCount(next.length, cur));
+				return next;
+			});
+			toast.success(`Selected all ${trackIds.length} ${trackLabel} items`);
+		}
+	};
 
-	const handleRebalanceEqually = useCallback(() => {
+	const handleRebalanceEqually = () => {
 		if (allocations.length === 0 || selectedProductIds.length === 0) return;
+		const slices = calculateEqualSlices(
+			selectedProductIds.length,
+			allocations.length,
+		);
+
 		setAllocations((prev) =>
-			syncAllocationsWithCount(prev, selectedProductIds.length),
+			prev.map((item, idx) => ({
+				...item,
+				fromNumber: slices[idx]?.fromNumber || 1,
+				toNumber: slices[idx]?.toNumber || selectedProductIds.length,
+				count: slices[idx]?.count || selectedProductIds.length,
+			})),
 		);
 		toast.success("Re-balanced ranges across active selected items");
-	}, [allocations.length, selectedProductIds.length]);
+	};
 
-	const handleToggleAuditor = useCallback(
-		(auditorIdToToggle) => {
-			const exists = allocations.find((a) => a.auditorId === auditorIdToToggle);
-			let updated;
+	const handleToggleAuditor = (auditorIdToToggle) => {
+		const exists = allocations.find((a) => a.auditorId === auditorIdToToggle);
+		let updated;
 
-			if (exists) {
-				updated = allocations.filter((a) => a.auditorId !== auditorIdToToggle);
-			} else {
-				updated = [
-					...allocations,
-					{
-						auditorId: auditorIdToToggle,
-						fromNumber: 1,
-						toNumber: selectedProductIds.length,
-						count: selectedProductIds.length,
-						observedCount: 0,
-						status: "NOT_STARTED",
-					},
-				];
-			}
+		if (exists) {
+			updated = allocations.filter((a) => a.auditorId !== auditorIdToToggle);
+		} else {
+			updated = [
+				...allocations,
+				{
+					auditorId: auditorIdToToggle,
+					fromNumber: 0,
+					toNumber: 0,
+					count: 0,
+					observedCount: 0,
+					status: "NOT_STARTED",
+				},
+			];
+		}
 
-			setAllocations(
-				syncAllocationsWithCount(updated, selectedProductIds.length),
-			);
-		},
-		[allocations, selectedProductIds.length],
-	);
+		setAllocations(
+			updateAllocationsForCount(selectedProductIds.length, updated),
+		);
+	};
 
-	const handleRangeChange = useCallback((auditorIdToEdit, field, val) => {
-		const parsed = parseInt(val, 10) || 0;
+	const handleRangeChange = (auditorIdToEdit, field, val) => {
+		const parsed = Math.max(0, parseInt(val, 10) || 0);
 		setAllocations((prev) =>
 			prev.map((a) => {
 				if (a.auditorId !== auditorIdToEdit) return a;
@@ -421,46 +412,42 @@ export const SurveyAssignmentModal = ({
 				return {
 					...a,
 					[field]: parsed,
-					count: Math.max(0, to - from + 1),
+					count: to >= from && from > 0 ? to - from + 1 : 0,
 				};
 			}),
 		);
-	}, []);
+	};
 
-	// Active Tab items (strictly sorted by sortOrder)
-	const currentTabPool = useMemo(() => {
-		switch (activeProductTab) {
-			case "DAILY":
-				return dailyFreshProducts;
-			case "WEEKLY":
-				return weeklyUltraProducts;
-			case "MONTHLY":
-				return monthlySensitiveProducts;
-			case "BI_YEARLY":
-				return biYearlyProducts;
-			default:
-				return allProductsSorted;
-		}
-	}, [
-		activeProductTab,
-		dailyFreshProducts,
-		weeklyUltraProducts,
-		monthlySensitiveProducts,
-		biYearlyProducts,
-		allProductsSorted,
-	]);
-
-	// Filtered products list for checklist render (maintains sequence)
+	// Filtered products list for checklist view
 	const displayedChecklist = useMemo(() => {
-		if (!checklistSearch.trim()) return currentTabPool;
+		let list = products;
+		if (activeProductTab === "DAILY") {
+			list = dailyFreshProducts;
+		} else if (activeProductTab === "WEEKLY") {
+			list = weeklyProducts;
+		} else if (activeProductTab === "MONTHLY") {
+			list = monthlyProducts;
+		} else if (activeProductTab === "BI_YEARLY") {
+			list = biYearlyProducts;
+		}
+
+		if (!checklistSearch.trim()) return list;
 		const term = checklistSearch.toLowerCase().trim();
-		return currentTabPool.filter(
+		return list.filter(
 			(p) =>
 				p.name?.toLowerCase().includes(term) ||
 				p.sku?.toLowerCase().includes(term) ||
 				p.barcode?.toLowerCase().includes(term),
 		);
-	}, [currentTabPool, checklistSearch]);
+	}, [
+		products,
+		dailyFreshProducts,
+		weeklyProducts,
+		monthlyProducts,
+		biYearlyProducts,
+		activeProductTab,
+		checklistSearch,
+	]);
 
 	const handleSubmit = async (e) => {
 		e.preventDefault();
@@ -473,30 +460,11 @@ export const SurveyAssignmentModal = ({
 		if (selectedProductIds.length === 0)
 			return toast.error("Please select at least one product to audit");
 
-		// Sort the active pool by track and sortOrder before dividing into ranges
-		const activeProductsPool = products
-			.filter((p) => selectedProductIds.includes(p.id))
-			.sort((a, b) => {
-				const freqA = getProductTrack(a);
-				const freqB = getProductTrack(b);
-				const diffFreq = (TRACK_ORDER[freqA] ?? 9) - (TRACK_ORDER[freqB] ?? 9);
-				if (diffFreq !== 0) return diffFreq;
-
-				const aSeq = a.sortOrder ?? 999999;
-				const bSeq = b.sortOrder ?? 999999;
-				if (aSeq !== bSeq) return aSeq - bSeq;
-
-				return String(a.name || "").localeCompare(String(b.name || ""));
-			});
+		const activeProductsPool = products.filter((p) =>
+			selectedProductIds.includes(p.id),
+		);
 
 		const formattedAllocations = allocations.map((alloc) => {
-			if (allocations.length === 1) {
-				return {
-					auditorId: alloc.auditorId,
-					productIds: activeProductsPool.map((p) => p.id),
-				};
-			}
-
 			const from = Math.max(1, alloc.fromNumber || 1);
 			const to = Math.min(
 				activeProductsPool.length,
@@ -533,16 +501,17 @@ export const SurveyAssignmentModal = ({
 			}
 			onClose();
 		} catch {
-			// Error toasts handled by mutation hooks
+			// Mutation hook handles error
 		}
 	};
 
 	if (!isOpen) return null;
 
-	const selectedStore = activeStores.find((s) => s.id === storeId);
+	const selectedStore = stores.find((s) => s.id === storeId);
+	const selectedCycleObj = openPeriods.find((p) => p.id === surveyPeriodId);
 
 	return (
-		<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-xs">
+		<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-xs animate-in fade-in">
 			<div className="flex max-h-[92vh] w-full max-w-2xl flex-col space-y-4 rounded-2xl border border-slate-100 bg-white p-5 sm:p-6 shadow-2xl">
 				{/* Header */}
 				<div className="flex flex-none items-center justify-between border-b border-slate-100 pb-3">
@@ -556,7 +525,7 @@ export const SurveyAssignmentModal = ({
 							</span>
 						</div>
 						<p className="mt-0.5 text-xs text-slate-500">
-							Select tracking tracks, allocate ranges, and assign field auditors
+							Select survey track, products, and allocate ranges to auditors
 						</p>
 					</div>
 					<button
@@ -572,28 +541,134 @@ export const SurveyAssignmentModal = ({
 					onSubmit={handleSubmit}
 					className="flex-1 space-y-4 overflow-y-auto pr-1 text-xs"
 				>
-					{/* 1. Cycle & Store Selection */}
+					{/* 1. Cycle & Store Selection (Custom Collapsible Cycle Selector) */}
 					<div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-						<div>
+						<div className="relative" ref={dropdownRef}>
 							<label className="mb-1 block font-bold text-slate-700">
-								Survey Cycle
+								Survey Cycle (Click to expand daily streams)
 							</label>
-							<select
-								value={surveyPeriodId}
-								onChange={(e) => setSurveyPeriodId(e.target.value)}
-								className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 font-mono text-xs font-bold text-slate-800 outline-hidden focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] cursor-pointer"
+
+							<button
+								type="button"
+								onClick={() => setIsCycleDropdownOpen(!isCycleDropdownOpen)}
+								className="w-full flex items-center justify-between rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-800 focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] cursor-pointer text-left shadow-2xs"
 							>
-								{openPeriods.map((p) => (
-									<option key={p.id} value={p.id}>
-										{p.name} (OPEN)
-									</option>
-								))}
-							</select>
+								<span className="truncate">
+									{selectedCycleObj?.name || "Select a survey cycle..."}
+								</span>
+								<span className="text-slate-400 text-xs ml-1 flex-none">
+									{isCycleDropdownOpen ? "▲" : "▼"}
+								</span>
+							</button>
+
+							{/* Dropdown with Accordion Daily Streams */}
+							{isCycleDropdownOpen && (
+								<div className="absolute left-0 right-0 top-full mt-1 max-h-64 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl z-30 space-y-1">
+									{weeklyPeriods.length === 0 ? (
+										<p className="p-2 text-center text-slate-400">
+											No open cycles available
+										</p>
+									) : (
+										weeklyPeriods.map((wp) => {
+											const dailyList = dailyByWeekly[wp.id] || [];
+											const isExpanded = Boolean(expandedWeeklyCycles[wp.id]);
+											const isWeeklySelected = surveyPeriodId === wp.id;
+
+											return (
+												<div
+													key={wp.id}
+													className="rounded-lg border border-slate-100 bg-slate-50/50 overflow-hidden"
+												>
+													<div className="flex items-center justify-between p-2 hover:bg-slate-100/80 transition">
+														{/* Extending Arrow Button */}
+														{dailyList.length > 0 && (
+															<button
+																type="button"
+																onClick={(e) => {
+																	e.stopPropagation();
+																	setExpandedWeeklyCycles((prev) => ({
+																		...prev,
+																		[wp.id]: !prev[wp.id],
+																	}));
+																}}
+																className="mr-2 flex h-5 w-5 items-center justify-center rounded bg-slate-200/70 text-slate-600 hover:bg-slate-300 text-[10px] font-bold cursor-pointer transition flex-none"
+																title={
+																	isExpanded
+																		? "Collapse daily cycles"
+																		: "Expand 7 daily cycles"
+																}
+															>
+																{isExpanded ? "▼" : "▶"}
+															</button>
+														)}
+
+														<div
+															onClick={() => {
+																setSurveyPeriodId(wp.id);
+																setActiveProductTab("WEEKLY");
+																setIsCycleDropdownOpen(false);
+															}}
+															className="flex-1 cursor-pointer min-w-0"
+														>
+															<span
+																className={`text-xs font-bold block truncate ${isWeeklySelected ? "text-[#A41821]" : "text-slate-800"}`}
+															>
+																{isWeeklySelected ? "✓ " : ""}
+																{wp.name}
+															</span>
+															{dailyList.length > 0 && (
+																<span className="text-[10px] text-emerald-700 font-semibold">
+																	({dailyList.length} daily streams)
+																</span>
+															)}
+														</div>
+													</div>
+
+													{/* Collapsible Daily Cycles */}
+													{isExpanded && dailyList.length > 0 && (
+														<div className="border-t border-slate-200 bg-white py-1 pl-6 pr-2 space-y-1 animate-in fade-in">
+															{dailyList.map((dp) => {
+																const isDailySelected =
+																	surveyPeriodId === dp.id;
+
+																return (
+																	<button
+																		key={dp.id}
+																		type="button"
+																		onClick={() => {
+																			setSurveyPeriodId(dp.id);
+																			setActiveProductTab("DAILY");
+																			setIsCycleDropdownOpen(false);
+																		}}
+																		className={`w-full flex items-center justify-between px-2.5 py-1 rounded-md text-left text-[11px] transition cursor-pointer ${
+																			isDailySelected
+																				? "bg-emerald-50 text-[#017C4D] font-bold"
+																				: "text-slate-600 hover:bg-slate-50"
+																		}`}
+																	>
+																		<span className="truncate">
+																			↳ {dp.name}
+																		</span>
+																		<span className="text-[9px] font-mono text-slate-400">
+																			Daily
+																		</span>
+																	</button>
+																);
+															})}
+														</div>
+													)}
+												</div>
+											);
+										})
+									)}
+								</div>
+							)}
 						</div>
 
+						{/* Store Selector */}
 						<div>
 							<label className="mb-1 block font-bold text-slate-700">
-								Target Store
+								Target Store Location
 							</label>
 							<select
 								value={storeId}
@@ -601,7 +676,7 @@ export const SurveyAssignmentModal = ({
 								disabled={storesLoading || isLoadingExisting}
 								className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-800 outline-hidden focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] cursor-pointer disabled:bg-slate-100 disabled:cursor-not-allowed"
 							>
-								{activeStores.map((s) => (
+								{stores.map((s) => (
 									<option key={s.id} value={s.id}>
 										{s.name} ({s.type})
 									</option>
@@ -612,16 +687,16 @@ export const SurveyAssignmentModal = ({
 
 					{selectedStore && (
 						<p className="font-mono text-[11px] text-slate-400">
-							GPS anchor: Lat {Number(selectedStore.latitude).toFixed(5)}, Lon{" "}
+							GPS Anchor: Lat {Number(selectedStore.latitude).toFixed(5)}, Lon{" "}
 							{Number(selectedStore.longitude).toFixed(5)}
 						</p>
 					)}
 
-					{/* 2. 4-Track Product Selection Tabs */}
+					{/* 2. SELECT SURVEY TRACK & PRODUCTS (Matches ProductsPage.jsx: 20 / 100 / 500 / 2804) */}
 					<div className="space-y-2.5 rounded-2xl border border-slate-200 bg-white p-3.5 shadow-2xs">
 						<div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-							<span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-								Select Survey Track &amp; Products
+							<span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+								SELECT SURVEY TRACK &amp; PRODUCTS
 							</span>
 
 							<button
@@ -635,12 +710,13 @@ export const SurveyAssignmentModal = ({
 							</button>
 						</div>
 
-						{/* 4 Tracks Navigation Tabs */}
-						<div className="grid grid-cols-2 sm:grid-cols-5 gap-1 rounded-xl border border-slate-200 bg-slate-100 p-1">
+						{/* Survey Track Navigation Tabs */}
+						{/* AFTER (Hides horizontal scrollbar completely while staying touch/wheel scrollable) */}
+						<div className="flex items-center gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-slate-100 p-1 no-scrollbar">
 							<button
 								type="button"
 								onClick={() => setActiveProductTab("ALL")}
-								className={`rounded-lg px-2 py-1.5 text-[11px] font-bold transition cursor-pointer text-center ${
+								className={`rounded-lg px-2.5 py-1.5 text-xs font-bold transition whitespace-nowrap cursor-pointer ${
 									activeProductTab === "ALL"
 										? "bg-white text-slate-900 shadow-2xs"
 										: "text-slate-600 hover:text-slate-900"
@@ -652,7 +728,7 @@ export const SurveyAssignmentModal = ({
 							<button
 								type="button"
 								onClick={() => setActiveProductTab("DAILY")}
-								className={`rounded-lg px-2 py-1.5 text-[11px] font-bold transition cursor-pointer text-center ${
+								className={`rounded-lg px-2.5 py-1.5 text-xs font-bold transition whitespace-nowrap cursor-pointer ${
 									activeProductTab === "DAILY"
 										? "bg-[#017C4D] text-white shadow-2xs"
 										: "text-slate-600 hover:text-slate-900"
@@ -664,33 +740,31 @@ export const SurveyAssignmentModal = ({
 							<button
 								type="button"
 								onClick={() => setActiveProductTab("WEEKLY")}
-								className={`rounded-lg px-2 py-1.5 text-[11px] font-bold transition cursor-pointer text-center ${
+								className={`rounded-lg px-2.5 py-1.5 text-xs font-bold transition whitespace-nowrap cursor-pointer ${
 									activeProductTab === "WEEKLY"
 										? "bg-[#A41821] text-white shadow-2xs"
 										: "text-slate-600 hover:text-slate-900"
 								}`}
 							>
-								Weekly Ultra ({selectedWeeklyCount}/{weeklyUltraProducts.length}
-								)
+								Weekly Ultra ({selectedWeeklyCount}/{weeklyProducts.length})
 							</button>
 
 							<button
 								type="button"
 								onClick={() => setActiveProductTab("MONTHLY")}
-								className={`rounded-lg px-2 py-1.5 text-[11px] font-bold transition cursor-pointer text-center ${
+								className={`rounded-lg px-2.5 py-1.5 text-xs font-bold transition whitespace-nowrap cursor-pointer ${
 									activeProductTab === "MONTHLY"
 										? "bg-[#FE7914] text-white shadow-2xs"
 										: "text-slate-600 hover:text-slate-900"
 								}`}
 							>
-								Monthly ({selectedMonthlyCount}/
-								{monthlySensitiveProducts.length})
+								Monthly ({selectedMonthlyCount}/{monthlyProducts.length})
 							</button>
 
 							<button
 								type="button"
 								onClick={() => setActiveProductTab("BI_YEARLY")}
-								className={`rounded-lg px-2 py-1.5 text-[11px] font-bold transition cursor-pointer text-center col-span-2 sm:col-span-1 ${
+								className={`rounded-lg px-2.5 py-1.5 text-xs font-bold transition whitespace-nowrap cursor-pointer ${
 									activeProductTab === "BI_YEARLY"
 										? "bg-slate-800 text-white shadow-2xs"
 										: "text-slate-600 hover:text-slate-900"
@@ -700,20 +774,81 @@ export const SurveyAssignmentModal = ({
 							</button>
 						</div>
 
-						{/* Track Toolbar */}
+						{/* Track Bulk Action & Search */}
 						<div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pt-1">
-							{activeProductTab !== "ALL" ? (
+							{activeProductTab === "DAILY" && (
 								<button
 									type="button"
-									onClick={() => handleToggleCategory(currentTabPool)}
-									className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 cursor-pointer shadow-2xs"
+									onClick={() =>
+										handleToggleCategory(dailyFreshProducts, "Daily Fresh")
+									}
+									className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold border transition cursor-pointer ${
+										selectedDailyCount > 0
+											? "border-red-200 bg-red-50 text-[#A41821] hover:bg-red-100"
+											: "border-emerald-200 bg-emerald-50 text-[#017C4D] hover:bg-emerald-100"
+									}`}
 								>
-									{currentTabPool.length > 0 &&
-									currentTabPool.every((p) => selectedProductIds.includes(p.id))
-										? `✕ Deselect Entire Track (${currentTabPool.length})`
-										: `✓ Select Entire Track (${currentTabPool.length})`}
+									{selectedDailyCount > 0
+										? `✕ Deselect Entire Track (${selectedDailyCount})`
+										: `✓ Select All Daily Fresh (${dailyFreshProducts.length})`}
 								</button>
-							) : (
+							)}
+
+							{activeProductTab === "WEEKLY" && (
+								<button
+									type="button"
+									onClick={() =>
+										handleToggleCategory(weeklyProducts, "Weekly Ultra")
+									}
+									className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold border transition cursor-pointer ${
+										selectedWeeklyCount > 0
+											? "border-red-200 bg-red-50 text-[#A41821] hover:bg-red-100"
+											: "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+									}`}
+								>
+									{selectedWeeklyCount > 0
+										? `✕ Deselect Entire Track (${selectedWeeklyCount})`
+										: `✓ Select All Weekly Ultra (${weeklyProducts.length})`}
+								</button>
+							)}
+
+							{activeProductTab === "MONTHLY" && (
+								<button
+									type="button"
+									onClick={() =>
+										handleToggleCategory(monthlyProducts, "Monthly")
+									}
+									className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold border transition cursor-pointer ${
+										selectedMonthlyCount > 0
+											? "border-red-200 bg-red-50 text-[#A41821] hover:bg-red-100"
+											: "border-amber-200 bg-amber-50 text-[#FE7914] hover:bg-amber-100"
+									}`}
+								>
+									{selectedMonthlyCount > 0
+										? `✕ Deselect Entire Track (${selectedMonthlyCount})`
+										: `✓ Select All Monthly (${monthlyProducts.length})`}
+								</button>
+							)}
+
+							{activeProductTab === "BI_YEARLY" && (
+								<button
+									type="button"
+									onClick={() =>
+										handleToggleCategory(biYearlyProducts, "Bi-Yearly")
+									}
+									className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold border transition cursor-pointer ${
+										selectedBiYearlyCount > 0
+											? "border-red-200 bg-red-50 text-[#A41821] hover:bg-red-100"
+											: "border-slate-300 bg-white text-slate-800 hover:bg-slate-100"
+									}`}
+								>
+									{selectedBiYearlyCount > 0
+										? `✕ Deselect Entire Track (${selectedBiYearlyCount})`
+										: `✓ Select All Bi-Yearly (${biYearlyProducts.length})`}
+								</button>
+							)}
+
+							{activeProductTab === "ALL" && (
 								<span className="text-[11px] font-semibold text-slate-500">
 									Showing {products.length} products
 								</span>
@@ -740,26 +875,40 @@ export const SurveyAssignmentModal = ({
 						</div>
 
 						{/* Checklist Scroll Container */}
-						<div className="max-h-48 space-y-1 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50/50 p-2">
+						<div className="max-h-44 space-y-1 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50/50 p-2">
 							{productsLoading ? (
 								<p className="py-4 text-center text-xs text-slate-400">
 									Loading catalog...
 								</p>
 							) : displayedChecklist.length === 0 ? (
 								<p className="py-4 text-center text-xs text-slate-400">
-									No products match this track or filter.
+									No products match filter.
 								</p>
 							) : (
 								displayedChecklist.map((p, idx) => {
 									const isChecked = selectedProductIds.includes(p.id);
-									const track = getProductTrack(p);
 
-									const badgeStyles = {
-										DAILY: "bg-emerald-50 text-[#017C4D] border-emerald-200",
-										WEEKLY: "bg-red-50 text-[#A41821] border-red-200",
-										MONTHLY: "bg-orange-50 text-[#D45F06] border-orange-200",
-										BI_YEARLY: "bg-slate-100 text-slate-700 border-slate-300",
-									}[track];
+									const trackBadge = {
+										DAILY: {
+											label: "DAILY FRESH",
+											bg: "bg-emerald-50 text-[#017C4D] border-emerald-100",
+										},
+										WEEKLY: {
+											label: "WEEKLY",
+											bg: "bg-red-50 text-[#A41821] border-red-100",
+										},
+										MONTHLY: {
+											label: "MONTHLY",
+											bg: "bg-amber-50 text-[#FE7914] border-amber-100",
+										},
+										BI_YEARLY: {
+											label: "BI-YEARLY",
+											bg: "bg-slate-100 text-slate-700 border-slate-200",
+										},
+									}[p.frequency] || {
+										label: "BI-YEARLY",
+										bg: "bg-slate-100 text-slate-700 border-slate-200",
+									};
 
 									return (
 										<label
@@ -777,9 +926,8 @@ export const SurveyAssignmentModal = ({
 													onChange={() => handleToggleProduct(p.id)}
 													className="cursor-pointer rounded border-slate-300 text-[#A41821] focus:ring-[#A41821]"
 												/>
-												{/* Exact Excel sequence index: 1..20, 1..100, 1..500, 1..2804 */}
-												<span className="font-mono text-[10px] font-bold text-slate-700">
-													#{p.sortOrder ?? idx + 1}
+												<span className="font-mono text-[10px] text-slate-400">
+													#{idx + 1}
 												</span>
 												<span className="truncate">
 													{formatProductName(p.name)} ({p.unit})
@@ -787,9 +935,9 @@ export const SurveyAssignmentModal = ({
 											</div>
 											<div className="flex items-center gap-2 flex-none">
 												<span
-													className={`rounded border px-1.5 py-0.2 text-[9px] font-bold uppercase tracking-wider ${badgeStyles}`}
+													className={`rounded px-1.5 py-0.2 text-[9px] font-bold uppercase tracking-wider border ${trackBadge.bg}`}
 												>
-													{track.replace("_", "-")}
+													{trackBadge.label}
 												</span>
 												<span className="font-mono text-[10px] text-slate-400 hidden sm:inline">
 													{p.barcode || p.sku || p.id}
@@ -802,21 +950,20 @@ export const SurveyAssignmentModal = ({
 						</div>
 					</div>
 
-					{/* 3. Auditor Allocations Section */}
+					{/* 3. AUDITOR ALLOCATIONS SECTION */}
 					<div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/70 p-3">
 						<div className="flex items-center justify-between gap-2">
 							<span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
 								Auditors on Duty ({allocations.length} Selected)
 							</span>
 
-							{allocations.length > 1 && (
+							{allocations.length > 1 && selectedProductIds.length > 0 && (
 								<button
 									type="button"
 									onClick={handleRebalanceEqually}
 									className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-emerald-200/90 bg-emerald-50/80 px-2 py-0.5 text-[10px] font-bold text-[#017C4D] shadow-2xs transition-all duration-150 hover:border-[#017C4D] hover:bg-[#017C4D] hover:text-white active:scale-95"
-									title={`Distribute ${selectedProductIds.length} items equally across ${allocations.length} auditors`}
 								>
-									<span>Re-balance ({selectedProductIds.length} Items)</span>
+									Re-balance ({selectedProductIds.length} Items)
 								</button>
 							)}
 						</div>
@@ -867,7 +1014,7 @@ export const SurveyAssignmentModal = ({
 											<span className="text-[10px] text-slate-500">Item #</span>
 											<input
 												type="number"
-												min="1"
+												min="0"
 												max={selectedProductIds.length || 1}
 												value={alloc.fromNumber}
 												onChange={(e) =>
@@ -882,7 +1029,7 @@ export const SurveyAssignmentModal = ({
 											<span className="text-[10px] text-slate-500">to #</span>
 											<input
 												type="number"
-												min="1"
+												min="0"
 												max={selectedProductIds.length || 1}
 												value={alloc.toNumber}
 												onChange={(e) =>
@@ -935,8 +1082,8 @@ export const SurveyAssignmentModal = ({
 							{createBatch.isPending || updateAllocations.isPending
 								? "Processing Dispatch..."
 								: isEditMode
-									? `Save Store Dispatch (${selectedProductIds.length} Items)`
-									: `Dispatch ${selectedProductIds.length} Items to ${allocations.length} Auditor${allocations.length > 1 ? "s" : ""}`}
+									? "Save Store Dispatch"
+									: `Dispatch ${selectedProductIds.length} Items to ${allocations.length} Auditors`}
 						</button>
 					</div>
 				</form>
