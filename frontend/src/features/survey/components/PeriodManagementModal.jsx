@@ -372,7 +372,7 @@ export const PeriodManagementModal = ({ isOpen, onClose }) => {
 															className="text-[10px] font-bold px-2 py-1 rounded-lg border border-emerald-300 bg-emerald-50 text-[#017C4D] hover:bg-emerald-100 transition cursor-pointer"
 															title="Generate missing daily cycles for this week"
 														>
-															{isHealing ? "Healing..." : "⚡ Heal"}
+															{isHealing ? "Healing..." : " Heal"}
 														</button>
 													)}
 
