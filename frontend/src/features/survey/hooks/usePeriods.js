@@ -5,6 +5,8 @@ import {
   getAllPeriodsRequest,
   createPeriodRequest,
   updatePeriodStatusRequest,
+  updatePeriodRequest,
+  deletePeriodRequest,
 } from "@/services/api/period.api.js";
 
 /**
@@ -57,6 +59,42 @@ export const useCreatePeriod = () => {
 };
 
 /**
+ * Update an existing survey period and heal its daily streams.
+ * Backend: PUT /survey-periods/:id
+ */
+export const useUpdatePeriod = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ id, ...data }) => updatePeriodRequest(id, data),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["surveyPeriods"] });
+    },
+    onError: (err) => {
+      toast.error(err?.response?.data?.message || err?.message || "Failed to update survey cycle");
+    },
+  });
+};
+
+/**
+ * Delete a survey period.
+ * Backend: DELETE /survey-periods/:id
+ */
+export const useDeletePeriod = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id) => deletePeriodRequest(id),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["surveyPeriods"] });
+    },
+    onError: (err) => {
+      toast.error(err?.response?.data?.message || err?.message || "Failed to delete survey cycle");
+    },
+  });
+};
+
+/**
  * Update survey period status (e.g. OPEN <-> CLOSED).
  * Backend: PATCH /survey-periods/:id
  */
@@ -76,12 +114,14 @@ export const useUpdatePeriodStatus = () => {
 };
 
 /**
- * Composite hook: exports activePeriod, periods, createPeriod, and updateStatus.
+ * Composite hook: exports activePeriod, periods, createPeriod, updatePeriod, deletePeriod, and updateStatus.
  */
 export const usePeriods = () => {
   const activeQuery = useActivePeriod();
   const allQuery = useAllPeriods();
   const createPeriodMutation = useCreatePeriod();
+  const updatePeriodMutation = useUpdatePeriod();
+  const deletePeriodMutation = useDeletePeriod();
   const updateStatusMutation = useUpdatePeriodStatus();
 
   return {
@@ -89,9 +129,18 @@ export const usePeriods = () => {
     periods: allQuery.data || [],
     isLoading: activeQuery.isLoading || allQuery.isLoading,
     isError: activeQuery.isError || allQuery.isError,
+
     createPeriod: createPeriodMutation.mutateAsync,
     isCreating: createPeriodMutation.isPending,
-    // Fix: Export updateStatus function
+
+    // Exported for PeriodManagementModal
+    updatePeriod: updatePeriodMutation.mutateAsync,
+    isUpdating: updatePeriodMutation.isPending,
+
+    // Exported for PeriodManagementModal
+    deletePeriod: deletePeriodMutation.mutateAsync,
+    isDeleting: deletePeriodMutation.isPending,
+
     updateStatus: updateStatusMutation.mutateAsync,
     isUpdatingStatus: updateStatusMutation.isPending,
   };

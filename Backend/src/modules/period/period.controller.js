@@ -36,10 +36,30 @@ export const create = async (req, res, next) => {
     }
 };
 
+// PUT /api/v1/survey-periods/:id (Updates and heals the daily cycles)
+export const update = async (req, res, next) => {
+    try {
+        const period = await periodService.update(req.params.id, req.body);
+        res.status(200).json({ status: "success", message: "Survey period updated and healed", data: { period } });
+    } catch (error) {
+        next(error);
+    }
+};
+
 export const updateStatus = async (req, res, next) => {
     try {
         const period = await periodService.updateStatus(req.params.id, req.body.status);
         res.status(200).json({ status: "success", message: `Period status updated to ${req.body.status}`, data: { period } });
+    } catch (error) {
+        next(error);
+    }
+};
+
+// DELETE /api/v1/survey-periods/:id
+export const remove = async (req, res, next) => {
+    try {
+        const result = await periodService.remove(req.params.id);
+        res.status(200).json({ status: "success", message: result.message, data: result });
     } catch (error) {
         next(error);
     }
@@ -50,5 +70,7 @@ export const periodController = {
     getActive,
     getById,
     create,
+    update,
     updateStatus,
+    remove,
 };

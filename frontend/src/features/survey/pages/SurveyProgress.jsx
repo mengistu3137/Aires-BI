@@ -10,7 +10,7 @@ import { StatusBadge } from "@/components/StatusBadge.jsx";
 import { Can } from "@/components/Can.jsx";
 import { SurveyAssignmentModal } from "../components/SurveyAssignmentModal.jsx";
 import { PeriodManagementModal } from "../components/PeriodManagementModal.jsx";
-import { ConfirmDeleteAssignmentModal } from "../components/ConfirmDeleteAssignmentModal.jsx";
+import { ConfirmDialog } from "@/components/ConfirmDialog.jsx";
 import { apiClient } from "@/services/client.js";
 import toast from "react-hot-toast";
 
@@ -24,7 +24,6 @@ const STATUS_FILTERS = [
 
 const PAGE_SIZE = 50;
 
-// Resolve backend asset URL pointing authoritatively to the backend host
 const resolveAssetUrl = (url) => {
 	if (!url) return "";
 	if (url.startsWith("http://") || url.startsWith("https://")) return url;
@@ -54,7 +53,7 @@ const formatAssignedDate = (dateString) => {
 
 export const SurveyProgress = () => {
 	const navigate = useNavigate();
-	const {isAdmin,isAuditor } = useAuth();
+	const { isAdmin, isAuditor, isQueensAdmin } = useAuth();
 	const [searchParams, setSearchParams] = useSearchParams();
 
 	const page = Math.max(1, Number(searchParams.get("page") || 1));
@@ -89,19 +88,23 @@ export const SurveyProgress = () => {
 	const [viewMode, setViewMode] = useState("STORE_DISPATCH");
 	const [isAssignmentModalOpen, setIsAssignmentModalOpen] = useState(false);
 	const [isPeriodModalOpen, setIsPeriodModalOpen] = useState(false);
+
 	const [selectedStoreId, setSelectedStoreId] = useState(null);
+	const [selectedSurveyPeriodId, setSelectedSurveyPeriodId] = useState(null);
+
 	const [editingAssignment, setEditingAssignment] = useState(null);
 	const [deleteCandidate, setDeleteCandidate] = useState(null);
+	const [isDeletingMultiple, setIsDeletingMultiple] = useState(false);
 	const [searchTerm, setSearchTerm] = useState("");
 
-	// Proof Gallery Grid & Fullscreen Carousel Lightbox State
+	// Proof Gallery & Fullscreen Lightbox State
 	const [activeProofGallery, setActiveProofGallery] = useState(null);
 	const [carouselPhotos, setCarouselPhotos] = useState(null);
 	const [carouselIndex, setCarouselIndex] = useState(0);
 
 	const statusFilter = statusFromUrl;
 
-	// Group assignments by Store + SurveyPeriod and extract ALL attached evidence photos
+	// Group assignments by Store + SurveyPeriod
 	const storeDispatches = useMemo(() => {
 		const groups = new Map();
 
@@ -139,7 +142,6 @@ export const SurveyProgress = () => {
 
 			if (Array.isArray(asn.audits)) {
 				asn.audits.forEach((aud) => {
-					// Fallback observation counter
 					if (!asnObsCount) {
 						asnObsCount +=
 							aud._count?.observations ||
@@ -147,7 +149,6 @@ export const SurveyProgress = () => {
 							(Array.isArray(aud.observations) ? aud.observations.length : 0);
 					}
 
-					// Always extract observation proof photos into the dispatch gallery
 					if (Array.isArray(aud.observations)) {
 						aud.observations.forEach((obs) => {
 							if (obs.evidencePhotoUrl) {
@@ -226,15 +227,12 @@ export const SurveyProgress = () => {
 		});
 	}, [assignments]);
 
-	// Filter dispatches by Active vs. Status vs. Search term
 	const filteredStoreDispatches = useMemo(() => {
 		let list = storeDispatches;
 
 		if (statusFilter === "") {
-			// Active Dispatches: show all non-archived dispatches
 			list = list.filter((d) => !d.isArchived);
 		} else if (statusFilter === "ARCHIVED") {
-			// Archived: show only archived dispatches
 			list = list.filter((d) => d.isArchived || d.overallStatus === "ARCHIVED");
 		} else if (statusFilter) {
 			list = list.filter(
@@ -247,6 +245,8 @@ export const SurveyProgress = () => {
 			list = list.filter((d) => {
 				const storeName = (d.store?.name || "").toLowerCase();
 				const area = (d.store?.area || d.store?.address || "").toLowerCase();
+				const cycleName = (d.surveyPeriod?.name || "").toLowerCase();
+				const cycleId = (d.surveyPeriodId || "").toLowerCase();
 				const auditors = d.assignments
 					.map((a) => a.auditor?.name || "")
 					.join(" ")
@@ -254,6 +254,8 @@ export const SurveyProgress = () => {
 				return (
 					storeName.includes(term) ||
 					area.includes(term) ||
+					cycleName.includes(term) ||
+					cycleId.includes(term) ||
 					auditors.includes(term)
 				);
 			});
@@ -278,15 +280,31 @@ export const SurveyProgress = () => {
 		[storeDispatches],
 	);
 
+	// Confirmation handler via ConfirmDialog (No window.confirm!)
 	const handleConfirmDelete = async () => {
 		if (!deleteCandidate) return;
+
 		try {
-			await deleteAssignment.mutateAsync(deleteCandidate.id);
+			if (deleteCandidate.isDispatch) {
+				setIsDeletingMultiple(true);
+				const promises = (deleteCandidate.assignments || []).map((a) =>
+					deleteAssignment.mutateAsync(a.id),
+				);
+				await Promise.all(promises);
+				toast.success("Store dispatch deleted successfully");
+			} else {
+				await deleteAssignment.mutateAsync(deleteCandidate.id);
+				toast.success("Assignment deleted successfully");
+			}
+
 			setDeleteCandidate(null);
+			refetch();
 		} catch (err) {
 			toast.error(
 				err?.response?.data?.message || "Failed to delete assignment",
 			);
+		} finally {
+			setIsDeletingMultiple(false);
 		}
 	};
 
@@ -303,17 +321,19 @@ export const SurveyProgress = () => {
 		}
 	};
 
-	const handleOpenDispatchModal = (storeId = null) => {
+	const handleOpenDispatchModal = (storeId = null, surveyPeriodId = null) => {
 		setSelectedStoreId(storeId);
+		setSelectedSurveyPeriodId(surveyPeriodId);
 		setEditingAssignment(null);
 		setIsAssignmentModalOpen(true);
 	};
 
-	// Open Carousel Lightbox at specific photo index
 	const handleOpenCarousel = (photos, startIndex = 0) => {
 		setCarouselPhotos(photos);
 		setCarouselIndex(startIndex);
 	};
+
+	const canManage = isAdmin && !isQueensAdmin;
 
 	return (
 		<div className="mx-auto max-w-6xl space-y-6 pb-12">
@@ -326,12 +346,14 @@ export const SurveyProgress = () => {
 					<p className="mt-0.5 text-xs text-slate-500">
 						{isAuditor
 							? "Your assigned store audits and target product checklists"
-							: "Monitor store dispatch completion, view proof galleries, and allocate tasks"}
+							: isQueensAdmin
+								? "View store dispatches and audit checklists (Read Only)"
+								: "Monitor store dispatch completion, view proof galleries, and allocate tasks"}
 					</p>
 				</div>
 
 				<Can role={["ADMIN", "MANAGER", "SUPER_ADMIN"]}>
-					{isAdmin && (
+					{canManage && (
 						<div className="flex items-center gap-2">
 							<button
 								type="button"
@@ -342,7 +364,7 @@ export const SurveyProgress = () => {
 							</button>
 							<button
 								type="button"
-								onClick={() => handleOpenDispatchModal(null)}
+								onClick={() => handleOpenDispatchModal(null, null)}
 								className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-[#A41821] px-4 py-2.5 text-xs font-bold text-white shadow-xs transition hover:bg-[#7F1219] active:scale-95"
 							>
 								+ Dispatch Store Survey
@@ -360,7 +382,7 @@ export const SurveyProgress = () => {
 				<Kpi label="Completed" value={counts.completed} tone="emerald" />
 			</div>
 
-			{/* Search, Status Filters & View Toggle */}
+			{/* Search, Filters & View Toggle */}
 			<div className="space-y-3">
 				<div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
 					<div className="relative flex-1">
@@ -368,7 +390,7 @@ export const SurveyProgress = () => {
 							type="text"
 							value={searchTerm}
 							onChange={(e) => setSearchTerm(e.target.value)}
-							placeholder="Search store name, area, or assigned auditor..."
+							placeholder="Search store name, area, survey cycle, or assigned auditor..."
 							className="w-full rounded-xl border border-slate-200 bg-slate-50/70 px-3.5 py-2.5 pl-9 text-xs font-medium text-slate-800 placeholder:text-slate-400 focus:border-[#A41821] focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-[#A41821]"
 						/>
 						<svg
@@ -439,7 +461,7 @@ export const SurveyProgress = () => {
 				</div>
 			)}
 
-			{/* Content */}
+			{/* Cards Content */}
 			{!isLoading && !isError && (
 				<>
 					{viewMode === "STORE_DISPATCH" && !isAuditor ? (
@@ -447,7 +469,8 @@ export const SurveyProgress = () => {
 							<EmptyState
 								statusFilter={statusFilter}
 								searchTerm={searchTerm}
-								onNew={() => handleOpenDispatchModal(null)}
+								canManage={canManage}
+								onNew={() => handleOpenDispatchModal(null, null)}
 							/>
 						) : (
 							<div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -455,8 +478,19 @@ export const SurveyProgress = () => {
 									<StoreDispatchCard
 										key={dispatch.id}
 										dispatch={dispatch}
-										isAdmin={isAdmin}
-										onManage={() => handleOpenDispatchModal(dispatch.storeId)}
+										canManage={canManage}
+										onManage={() =>
+											handleOpenDispatchModal(
+												dispatch.storeId,
+												dispatch.surveyPeriodId,
+											)
+										}
+										onDelete={() =>
+											setDeleteCandidate({
+												...dispatch,
+												isDispatch: true,
+											})
+										}
 										onArchive={() => handleArchiveDispatch(dispatch)}
 										isArchiving={archiveDispatch.isPending}
 										onViewAudits={() =>
@@ -474,12 +508,16 @@ export const SurveyProgress = () => {
 									key={assignment.id}
 									assignment={assignment}
 									isAuditor={isAuditor}
+									canManage={canManage}
 									onViewAudits={() =>
 										navigate(`/audits?assignmentId=${assignment.id}`)
 									}
 									onEdit={() => {
 										setEditingAssignment(assignment);
-										setIsAssignmentModalOpen(true);
+										handleOpenDispatchModal(
+											assignment.storeId,
+											assignment.surveyPeriodId,
+										);
 									}}
 									onDelete={() => setDeleteCandidate(assignment)}
 									onOpenProof={(photos) => handleOpenCarousel(photos, 0)}
@@ -496,10 +534,12 @@ export const SurveyProgress = () => {
 				onClose={() => {
 					setIsAssignmentModalOpen(false);
 					setSelectedStoreId(null);
+					setSelectedSurveyPeriodId(null);
 					setEditingAssignment(null);
 					refetch();
 				}}
 				storeId={selectedStoreId}
+				surveyPeriodId={selectedSurveyPeriodId}
 				assignment={editingAssignment}
 			/>
 
@@ -508,28 +548,44 @@ export const SurveyProgress = () => {
 				onClose={() => setIsPeriodModalOpen(false)}
 			/>
 
-			<ConfirmDeleteAssignmentModal
-				isOpen={Boolean(deleteCandidate)}
-				onClose={() => setDeleteCandidate(null)}
+			{/* Reusable ConfirmDialog Component (No window.confirm!) */}
+			<ConfirmDialog
+				open={Boolean(deleteCandidate)}
+				title={
+					deleteCandidate?.isDispatch
+						? `Delete dispatch for ${deleteCandidate?.store?.name || "this store"}?`
+						: "Delete assignment?"
+				}
+				message={
+					deleteCandidate?.isDispatch
+						? `You are about to permanently delete the unstarted survey dispatch for "${deleteCandidate?.store?.name}" (${deleteCandidate?.surveyPeriod?.name || deleteCandidate?.surveyPeriodId}). This will remove all ${deleteCandidate?.assignments?.length || 0} assigned auditor task(s).`
+						: `You are about to delete the unstarted assignment for "${deleteCandidate?.store?.name}" assigned to "${deleteCandidate?.auditor?.name || "the auditor"}".`
+				}
+				details="Only dispatches with no field observations or started audits can be deleted. This action cannot be undone."
+				confirmLabel={
+					deleteCandidate?.isDispatch ? "Delete Dispatch" : "Delete Assignment"
+				}
+				cancelLabel="Cancel"
+				variant="danger"
+				isConfirming={deleteAssignment.isPending || isDeletingMultiple}
+				onCancel={() => setDeleteCandidate(null)}
 				onConfirm={handleConfirmDelete}
-				isPending={deleteAssignment.isPending}
-				assignment={deleteCandidate}
 			/>
 
-			{/* Dispatch Proof Image View Gallery Modal (Grid View) */}
+			{/* Proof Gallery Grid Modal */}
 			{activeProofGallery && (
 				<ProofGalleryModal
 					dispatch={activeProofGallery}
 					onClose={() => setActiveProofGallery(null)}
 					onSelectProofIndex={(idx) => {
 						const photos = activeProofGallery.evidencePhotos || [];
-						setActiveProofGallery(null); // Switch from grid to fullscreen carousel
+						setActiveProofGallery(null);
 						handleOpenCarousel(photos, idx);
 					}}
 				/>
 			)}
 
-			{/* Fullscreen Carousel Lightbox Modal (Swipe + Arrow Keys + Touch Supported) */}
+			{/* Fullscreen Carousel Lightbox Modal */}
 			{carouselPhotos && carouselPhotos.length > 0 && (
 				<LightboxModal
 					photos={carouselPhotos}
@@ -543,12 +599,13 @@ export const SurveyProgress = () => {
 	);
 };
 
-/* Overall Store Dispatch Card with Proof Gallery Preview */
+/* Overall Store Dispatch Card with Dynamic Delete vs Archive */
 const StoreDispatchCard = ({
 	dispatch,
+	canManage,
 	onManage,
+	onDelete,
 	onArchive,
-	  isAdmin,    
 	isArchiving,
 	onViewAudits,
 	onOpenProofGallery,
@@ -558,6 +615,18 @@ const StoreDispatchCard = ({
 	const isDone = dispatch.overallStatus === "COMPLETED";
 	const isArchived = dispatch.isArchived;
 	const photos = dispatch.evidencePhotos || [];
+
+	const isDailyCycle =
+		dispatch.surveyPeriodId?.includes("-DAILY-") ||
+		cycle.name?.toLowerCase().includes("daily");
+
+	// Dynamic Delete vs Archive determination
+	const hasActivity =
+		dispatch.observedCount > 0 ||
+		dispatch.overallStatus === "IN_PROGRESS" ||
+		dispatch.overallStatus === "COMPLETED";
+
+	const canDelete = !hasActivity && !isArchived;
 
 	const statusAccent =
 		{
@@ -586,17 +655,24 @@ const StoreDispatchCard = ({
 							{store.name || "Unknown Store"}
 						</h3>
 						<p className="mt-0.5 truncate text-[11px] text-slate-500 font-medium">
-							{store.area || store.address || "Addis Ababa"} • Cycle{" "}
-							{cycle.name || cycle.id || ""}
+							{store.area || store.address || "Addis Ababa"} • {store.type}
 						</p>
 					</div>
 					<StatusBadge status={dispatch.overallStatus} />
 				</div>
 
+				{/* Stream Badge Identifier */}
+				<div className="flex items-center gap-1.5">
+					
+					<span className="truncate font-mono text-[11px] font-semibold text-slate-600">
+						{cycle.name || dispatch.surveyPeriodId}
+					</span>
+				</div>
+
 				{/* Progress Bar */}
 				<div className="space-y-1.5 rounded-xl bg-slate-50/80 p-3 border border-slate-100">
 					<div className="flex items-center justify-between text-xs font-bold text-slate-700">
-						<span>Overall Progress:</span>
+						<span>Progress:</span>
 						<span className="font-mono text-slate-900">
 							{dispatch.observedCount} / {dispatch.totalProducts} items
 						</span>
@@ -623,7 +699,7 @@ const StoreDispatchCard = ({
 					</div>
 				</div>
 
-				{/* Team on Duty & Proof Count */}
+				{/* Team on Duty & Proof Button */}
 				<div className="flex items-center justify-between gap-2">
 					<div>
 						<span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
@@ -642,7 +718,6 @@ const StoreDispatchCard = ({
 						</div>
 					</div>
 
-					{/* Proof Gallery Button */}
 					{photos.length > 0 && (
 						<button
 							type="button"
@@ -656,7 +731,7 @@ const StoreDispatchCard = ({
 					)}
 				</div>
 
-				{/* Card Footer */}
+				{/* Card Footer: Dynamic Delete vs Archive */}
 				<div className="mt-auto flex items-center justify-between border-t border-slate-100 pt-3 text-xs font-semibold gap-2">
 					<button
 						type="button"
@@ -677,24 +752,45 @@ const StoreDispatchCard = ({
 							</button>
 						)}
 
-						{/* Management buttons hidden for Queens Admin */}
-						{isAdmin && (
+						{canManage && (
 							<>
+								{/* Dynamic Delete vs Archive Button */}
+								{isArchived ? (
+									<button
+										type="button"
+										disabled={isArchiving}
+										onClick={onArchive}
+										className="rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition cursor-pointer disabled:opacity-50"
+									>
+										Unarchive
+									</button>
+								) : canDelete ? (
+									<button
+										type="button"
+										onClick={onDelete}
+										className="text-red-600 hover:text-red-800 hover:underline text-xs font-bold cursor-pointer px-1 py-1"
+										title="Dispatch has no audit activity; delete permanently"
+									>
+										Delete
+									</button>
+								) : (
+									<button
+										type="button"
+										disabled={isArchiving}
+										onClick={onArchive}
+										className="rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition cursor-pointer disabled:opacity-50"
+										title="Dispatch has audit observations; archive to preserve history"
+									>
+										Archive
+									</button>
+								)}
+
 								<button
 									type="button"
 									onClick={onManage}
 									className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 transition cursor-pointer"
 								>
 									Manage
-								</button>
-
-								<button
-									type="button"
-									disabled={isArchiving}
-									onClick={onArchive}
-									className="rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition cursor-pointer disabled:opacity-50"
-								>
-									{isArchived ? "Unarchive" : "Archive"}
 								</button>
 							</>
 						)}
@@ -705,278 +801,10 @@ const StoreDispatchCard = ({
 	);
 };
 
-/* Proof Gallery Modal for a Dispatch (Grid view of all photos) */
-const ProofGalleryModal = ({ dispatch, onClose, onSelectProofIndex }) => {
-	const photos = dispatch.evidencePhotos || [];
-
-	return (
-		<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in">
-			<div className="w-full max-w-3xl rounded-2xl border border-slate-100 bg-white p-5 shadow-2xl flex flex-col max-h-[85vh]">
-				{/* Header */}
-				<div className="flex items-center justify-between border-b border-slate-100 pb-3 flex-none">
-					<div>
-						<h2 className="text-base font-black text-slate-900">
-							Dispatch Proof Gallery ({photos.length})
-						</h2>
-						<p className="text-xs text-slate-500 font-medium">
-							{dispatch.store?.name} • Receipts, shelf items, and substitute
-							proofs
-						</p>
-					</div>
-					<button
-						type="button"
-						onClick={onClose}
-						className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 cursor-pointer"
-					>
-						✕
-					</button>
-				</div>
-
-				{/* Photos Grid */}
-				<div className="flex-1 overflow-y-auto py-3">
-					{photos.length === 0 ? (
-						<div className="py-12 text-center text-xs text-slate-400">
-							No proof photos captured yet for this store dispatch.
-						</div>
-					) : (
-						<div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
-							{photos.map((proof, idx) => (
-								<div
-									key={proof.id}
-									onClick={() => onSelectProofIndex(idx)}
-									className="group relative cursor-pointer overflow-hidden rounded-xl border border-slate-200 bg-slate-50 aspect-4/3 transition hover:shadow-md"
-								>
-									<img
-										src={resolveAssetUrl(proof.url)}
-										alt={proof.productName}
-										className="h-full w-full object-cover transition duration-200 group-hover:scale-105"
-										loading="lazy"
-										onError={(e) => {
-											if (!e.currentTarget.dataset.triedFallback) {
-												e.currentTarget.dataset.triedFallback = "true";
-												e.currentTarget.src = proof.url.startsWith("/")
-													? proof.url
-													: `/${proof.url}`;
-											}
-										}}
-									/>
-									<div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex flex-col justify-end p-2 text-white">
-										<span className="truncate text-xs font-bold leading-tight">
-											{proof.productName}
-										</span>
-										<span className="text-[10px] text-slate-300 font-mono">
-											{proof.price
-												? `${Number(proof.price).toFixed(2)} ETB`
-												: proof.availability}
-										</span>
-									</div>
-								</div>
-							))}
-						</div>
-					)}
-				</div>
-
-				{/* Footer */}
-				<div className="border-t border-slate-100 pt-3 flex justify-end flex-none">
-					<button
-						type="button"
-						onClick={onClose}
-						className="rounded-xl bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 cursor-pointer"
-					>
-						Close Gallery
-					</button>
-				</div>
-			</div>
-		</div>
-	);
-};
-
-/* Fullscreen Carousel Lightbox Modal with Swipe, Keyboard, and Touch Support */
-const LightboxModal = ({
-	photos = [],
-	currentIndex = 0,
-	onIndexChange,
-	onClose,
-	resolveUrl,
-}) => {
-	const [touchStartX, setTouchStartX] = useState(null);
-	const current = photos[currentIndex];
-	const total = photos.length;
-
-	const handleNext = useCallback(() => {
-		onIndexChange((prev) => (prev < total - 1 ? prev + 1 : 0));
-	}, [onIndexChange, total]);
-
-	const handlePrev = useCallback(() => {
-		onIndexChange((prev) => (prev > 0 ? prev - 1 : total - 1));
-	}, [onIndexChange, total]);
-
-	// Keyboard arrow & Escape navigation
-	useEffect(() => {
-		const handleKeyDown = (e) => {
-			if (e.key === "ArrowRight") handleNext();
-			else if (e.key === "ArrowLeft") handlePrev();
-			else if (e.key === "Escape") onClose();
-		};
-		window.addEventListener("keydown", handleKeyDown);
-		return () => window.removeEventListener("keydown", handleKeyDown);
-	}, [handleNext, handlePrev, onClose]);
-
-	// Prevent background scroll while lightbox is open
-	useEffect(() => {
-		document.body.style.overflow = "hidden";
-		return () => {
-			document.body.style.overflow = "unset";
-		};
-	}, []);
-
-	// Touch swipe gestures
-	const onTouchStart = (e) => {
-		setTouchStartX(e.touches[0].clientX);
-	};
-
-	const onTouchEnd = (e) => {
-		if (touchStartX === null) return;
-		const touchEndX = e.changedTouches[0].clientX;
-		const deltaX = touchStartX - touchEndX;
-
-		if (deltaX > 50) {
-			handleNext(); // Swiped left -> Next photo
-		} else if (deltaX < -50) {
-			handlePrev(); // Swiped right -> Previous photo
-		}
-		setTouchStartX(null);
-	};
-
-	if (!current) return null;
-
-	return (
-		<div
-			className="fixed inset-0 z-60 flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-2 sm:p-4 select-none animate-in fade-in duration-150"
-			onClick={onClose}
-		>
-			<div
-				className="relative max-h-[92vh] w-full max-w-3xl overflow-hidden rounded-2xl bg-black shadow-2xl flex flex-col"
-				onClick={(e) => e.stopPropagation()}
-				onTouchStart={onTouchStart}
-				onTouchEnd={onTouchEnd}
-			>
-				{/* Top Floating Header */}
-				<div className="flex items-center justify-between p-3.5 bg-gradient-to-b from-black/80 to-transparent z-10 text-white">
-					<div className="flex items-center gap-2">
-						<span className="rounded-md bg-white/20 px-2 py-0.5 font-mono text-[11px] font-bold">
-							{currentIndex + 1} / {total}
-						</span>
-						<span className="text-xs font-bold truncate max-w-[200px] sm:max-w-md">
-							{current.productName}
-						</span>
-					</div>
-
-					<button
-						type="button"
-						onClick={onClose}
-						className="rounded-full bg-white/20 hover:bg-white/30 p-1.5 text-white cursor-pointer transition"
-						title="Close (Esc)"
-					>
-						✕
-					</button>
-				</div>
-
-				{/* Center Main Image Canvas */}
-				<div className="relative flex-1 flex items-center justify-center min-h-[50vh] max-h-[72vh] p-2 bg-black">
-					<img
-						key={current.url}
-						src={resolveUrl(current.url)}
-						alt={current.productName}
-						className="max-h-[70vh] w-auto max-w-full object-contain mx-auto transition duration-150 animate-in fade-in"
-						onError={(e) => {
-							if (!e.currentTarget.dataset.triedFallback) {
-								e.currentTarget.dataset.triedFallback = "true";
-								e.currentTarget.src = current.url.startsWith("/")
-									? current.url
-									: `/${current.url}`;
-							}
-						}}
-					/>
-
-					{/* Desktop Left/Right Navigation Chevrons */}
-					{total > 1 && (
-						<>
-							<button
-								type="button"
-								onClick={(e) => {
-									e.stopPropagation();
-									handlePrev();
-								}}
-								className="absolute left-3 top-1/2 -translate-y-1/2 rounded-full bg-black/60 hover:bg-white hover:text-black text-white p-2.5 transition cursor-pointer shadow-lg z-20 hidden sm:flex items-center justify-center"
-								title="Previous photo (Left Arrow)"
-							>
-								◀
-							</button>
-
-							<button
-								type="button"
-								onClick={(e) => {
-									e.stopPropagation();
-									handleNext();
-								}}
-								className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-black/60 hover:bg-white hover:text-black text-white p-2.5 transition cursor-pointer shadow-lg z-20 hidden sm:flex items-center justify-center"
-								title="Next photo (Right Arrow)"
-							>
-								▶
-							</button>
-						</>
-					)}
-				</div>
-
-				{/* Bottom Metadata & Mobile Navigation Bar */}
-				<div className="p-3 bg-black/90 border-t border-white/10 text-white flex flex-col sm:flex-row items-center justify-between gap-2 text-xs">
-					<div className="text-center sm:text-left">
-						<span className="font-mono text-emerald-400 font-bold text-sm block">
-							{current.price
-								? `${Number(current.price).toFixed(2)} ETB`
-								: current.availability}
-						</span>
-						<p className="text-[10px] text-slate-400 font-mono">
-							Auditor: {current.auditorName || "Field Auditor"} • Captured{" "}
-							{current.capturedAt
-								? new Date(current.capturedAt).toLocaleString()
-								: "Recently"}
-						</p>
-					</div>
-
-					{/* Mobile Step Buttons */}
-					{total > 1 && (
-						<div className="flex items-center gap-2 sm:hidden w-full justify-between pt-1">
-							<button
-								type="button"
-								onClick={handlePrev}
-								className="flex-1 rounded-lg bg-white/15 py-1.5 font-bold text-white text-xs"
-							>
-								◀ Prev
-							</button>
-							<button
-								type="button"
-								onClick={handleNext}
-								className="flex-1 rounded-lg bg-white/15 py-1.5 font-bold text-white text-xs"
-							>
-								Next ▶
-							</button>
-						</div>
-					)}
-
-					<div className="hidden sm:block text-[10px] text-slate-400 font-mono">
-						Swipe or use ← / → arrow keys
-					</div>
-				</div>
-			</div>
-		</div>
-	);
-};
-
 const AssignmentCard = ({
 	assignment,
 	isAuditor,
+	canManage,
 	onViewAudits,
 	onEdit,
 	onDelete,
@@ -993,7 +821,6 @@ const AssignmentCard = ({
 	const productCount =
 		assignment.totalItemsCount ?? assignment.items?.length ?? 0;
 
-	// Extract photos from assignment audits
 	const assignmentPhotos = useMemo(() => {
 		const photos = [];
 		if (Array.isArray(assignment.audits)) {
@@ -1100,7 +927,7 @@ const AssignmentCard = ({
 						View Audits →
 					</button>
 
-					{!isAuditor && (
+					{!isAuditor && canManage && (
 						<div className="flex items-center gap-3 text-xs font-semibold">
 							<button
 								type="button"
@@ -1126,7 +953,7 @@ const AssignmentCard = ({
 	);
 };
 
-const EmptyState = ({ statusFilter, searchTerm, onNew }) => (
+const EmptyState = ({ statusFilter, searchTerm, onNew, canManage }) => (
 	<div className="rounded-2xl border border-dashed border-slate-200 bg-white px-6 py-12 text-center">
 		<div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-slate-100 text-slate-400">
 			<svg
@@ -1153,15 +980,17 @@ const EmptyState = ({ statusFilter, searchTerm, onNew }) => (
 				? "Try adjusting your search query or filters."
 				: "Dispatch a new survey assignment to begin tracking store progress."}
 		</p>
-		<div className="mt-4">
-			<button
-				type="button"
-				onClick={onNew}
-				className="rounded-xl bg-[#A41821] px-4 py-2 text-xs font-bold text-white shadow-xs cursor-pointer"
-			>
-				+ Dispatch Store Survey
-			</button>
-		</div>
+		{canManage && (
+			<div className="mt-4">
+				<button
+					type="button"
+					onClick={onNew}
+					className="rounded-xl bg-[#A41821] px-4 py-2 text-xs font-bold text-white shadow-xs cursor-pointer hover:bg-[#7F1219]"
+				>
+					+ Dispatch Store Survey
+				</button>
+			</div>
+		)}
 	</div>
 );
 
@@ -1192,6 +1021,264 @@ const Kpi = ({ label, value, tone }) => {
 				{label}
 			</p>
 			<p className="mt-1 text-xl font-black">{value}</p>
+		</div>
+	);
+};
+
+/* Proof Gallery Grid Modal */
+const ProofGalleryModal = ({ dispatch, onClose, onSelectProofIndex }) => {
+	const photos = dispatch.evidencePhotos || [];
+
+	return (
+		<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in">
+			<div className="w-full max-w-3xl rounded-2xl border border-slate-100 bg-white p-5 shadow-2xl flex flex-col max-h-[85vh]">
+				<div className="flex items-center justify-between border-b border-slate-100 pb-3 flex-none">
+					<div>
+						<h2 className="text-base font-black text-slate-900">
+							Dispatch Proof Gallery ({photos.length})
+						</h2>
+						<p className="text-xs text-slate-500 font-medium">
+							{dispatch.store?.name} • Receipts, shelf items, and substitute
+							proofs
+						</p>
+					</div>
+					<button
+						type="button"
+						onClick={onClose}
+						className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 cursor-pointer"
+					>
+						✕
+					</button>
+				</div>
+
+				<div className="flex-1 overflow-y-auto py-3">
+					{photos.length === 0 ? (
+						<div className="py-12 text-center text-xs text-slate-400">
+							No proof photos captured yet for this store dispatch.
+						</div>
+					) : (
+						<div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+							{photos.map((proof, idx) => (
+								<div
+									key={proof.id}
+									onClick={() => onSelectProofIndex(idx)}
+									className="group relative cursor-pointer overflow-hidden rounded-xl border border-slate-200 bg-slate-50 aspect-4/3 transition hover:shadow-md"
+								>
+									<img
+										src={resolveAssetUrl(proof.url)}
+										alt={proof.productName}
+										className="h-full w-full object-cover transition duration-200 group-hover:scale-105"
+										loading="lazy"
+										onError={(e) => {
+											if (!e.currentTarget.dataset.triedFallback) {
+												e.currentTarget.dataset.triedFallback = "true";
+												e.currentTarget.src = proof.url.startsWith("/")
+													? proof.url
+													: `/${proof.url}`;
+											}
+										}}
+									/>
+									<div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex flex-col justify-end p-2 text-white">
+										<span className="truncate text-xs font-bold leading-tight">
+											{proof.productName}
+										</span>
+										<span className="text-[10px] text-slate-300 font-mono">
+											{proof.price
+												? `${Number(proof.price).toFixed(2)} ETB`
+												: proof.availability}
+										</span>
+									</div>
+								</div>
+							))}
+						</div>
+					)}
+				</div>
+
+				<div className="border-t border-slate-100 pt-3 flex justify-end flex-none">
+					<button
+						type="button"
+						onClick={onClose}
+						className="rounded-xl bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 cursor-pointer"
+					>
+						Close Gallery
+					</button>
+				</div>
+			</div>
+		</div>
+	);
+};
+
+/* Fullscreen Carousel Lightbox Modal */
+const LightboxModal = ({
+	photos = [],
+	currentIndex = 0,
+	onIndexChange,
+	onClose,
+	resolveUrl,
+}) => {
+	const [touchStartX, setTouchStartX] = useState(null);
+	const current = photos[currentIndex];
+	const total = photos.length;
+
+	const handleNext = useCallback(() => {
+		onIndexChange((prev) => (prev < total - 1 ? prev + 1 : 0));
+	}, [onIndexChange, total]);
+
+	const handlePrev = useCallback(() => {
+		onIndexChange((prev) => (prev > 0 ? prev - 1 : total - 1));
+	}, [onIndexChange, total]);
+
+	useEffect(() => {
+		const handleKeyDown = (e) => {
+			if (e.key === "ArrowRight") handleNext();
+			else if (e.key === "ArrowLeft") handlePrev();
+			else if (e.key === "Escape") onClose();
+		};
+		window.addEventListener("keydown", handleKeyDown);
+		return () => window.removeEventListener("keydown", handleKeyDown);
+	}, [handleNext, handlePrev, onClose]);
+
+	useEffect(() => {
+		document.body.style.overflow = "hidden";
+		return () => {
+			document.body.style.overflow = "unset";
+		};
+	}, []);
+
+	const onTouchStart = (e) => {
+		setTouchStartX(e.touches[0].clientX);
+	};
+
+	const onTouchEnd = (e) => {
+		if (touchStartX === null) return;
+		const touchEndX = e.changedTouches[0].clientX;
+		const deltaX = touchStartX - touchEndX;
+
+		if (deltaX > 50) {
+			handleNext();
+		} else if (deltaX < -50) {
+			handlePrev();
+		}
+		setTouchStartX(null);
+	};
+
+	if (!current) return null;
+
+	return (
+		<div
+			className="fixed inset-0 z-60 flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-2 sm:p-4 select-none animate-in fade-in duration-150"
+			onClick={onClose}
+		>
+			<div
+				className="relative max-h-[92vh] w-full max-w-3xl overflow-hidden rounded-2xl bg-black shadow-2xl flex flex-col"
+				onClick={(e) => e.stopPropagation()}
+				onTouchStart={onTouchStart}
+				onTouchEnd={onTouchEnd}
+			>
+				<div className="flex items-center justify-between p-3.5 bg-gradient-to-b from-black/80 to-transparent z-10 text-white">
+					<div className="flex items-center gap-2">
+						<span className="rounded-md bg-white/20 px-2 py-0.5 font-mono text-[11px] font-bold">
+							{currentIndex + 1} / {total}
+						</span>
+						<span className="text-xs font-bold truncate max-w-[200px] sm:max-w-md">
+							{current.productName}
+						</span>
+					</div>
+
+					<button
+						type="button"
+						onClick={onClose}
+						className="rounded-full bg-white/20 hover:bg-white/30 p-1.5 text-white cursor-pointer transition"
+						title="Close (Esc)"
+					>
+						✕
+					</button>
+				</div>
+
+				<div className="relative flex-1 flex items-center justify-center min-h-[50vh] max-h-[72vh] p-2 bg-black">
+					<img
+						key={current.url}
+						src={resolveUrl(current.url)}
+						alt={current.productName}
+						className="max-h-[70vh] w-auto max-w-full object-contain mx-auto transition duration-150 animate-in fade-in"
+						onError={(e) => {
+							if (!e.currentTarget.dataset.triedFallback) {
+								e.currentTarget.dataset.triedFallback = "true";
+								e.currentTarget.src = current.url.startsWith("/")
+									? current.url
+									: `/${current.url}`;
+							}
+						}}
+					/>
+
+					{total > 1 && (
+						<>
+							<button
+								type="button"
+								onClick={(e) => {
+									e.stopPropagation();
+									handlePrev();
+								}}
+								className="absolute left-3 top-1/2 -translate-y-1/2 rounded-full bg-black/60 hover:bg-white hover:text-black text-white p-2.5 transition cursor-pointer shadow-lg z-20 hidden sm:flex items-center justify-center"
+								title="Previous photo (Left Arrow)"
+							>
+								◀
+							</button>
+
+							<button
+								type="button"
+								onClick={(e) => {
+									e.stopPropagation();
+									handleNext();
+								}}
+								className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-black/60 hover:bg-white hover:text-black text-white p-2.5 transition cursor-pointer shadow-lg z-20 hidden sm:flex items-center justify-center"
+								title="Next photo (Right Arrow)"
+							>
+								▶
+							</button>
+						</>
+					)}
+				</div>
+
+				<div className="p-3 bg-black/90 border-t border-white/10 text-white flex flex-col sm:flex-row items-center justify-between gap-2 text-xs">
+					<div className="text-center sm:text-left">
+						<span className="font-mono text-emerald-400 font-bold text-sm block">
+							{current.price
+								? `${Number(current.price).toFixed(2)} ETB`
+								: current.availability}
+						</span>
+						<p className="text-[10px] text-slate-400 font-mono">
+							Auditor: {current.auditorName || "Field Auditor"} • Captured{" "}
+							{current.capturedAt
+								? new Date(current.capturedAt).toLocaleString()
+								: "Recently"}
+						</p>
+					</div>
+
+					{total > 1 && (
+						<div className="flex items-center gap-2 sm:hidden w-full justify-between pt-1">
+							<button
+								type="button"
+								onClick={handlePrev}
+								className="flex-1 rounded-lg bg-white/15 py-1.5 font-bold text-white text-xs"
+							>
+								◀ Prev
+							</button>
+							<button
+								type="button"
+								onClick={handleNext}
+								className="flex-1 rounded-lg bg-white/15 py-1.5 font-bold text-white text-xs"
+							>
+								Next ▶
+							</button>
+						</div>
+					)}
+
+					<div className="hidden sm:block text-[10px] text-slate-400 font-mono">
+						Swipe or use ← / → arrow keys
+					</div>
+				</div>
+			</div>
 		</div>
 	);
 };

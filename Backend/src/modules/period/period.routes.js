@@ -1,27 +1,19 @@
 import { Router } from "express";
-import * as periodController from "./period.controller.js";
+import { periodController } from "./period.controller.js";
 import { authenticate, restrictTo } from "../../middlewares/auth.middleware.js";
-import { validate } from "../../middlewares/validate.middleware.js";
-import { createPeriodSchema, updatePeriodStatusSchema } from "./period.validation.js";
 
 const router = Router();
 
 router.use(authenticate);
 
 router.get("/active", periodController.getActive);
+router.get("/:id", periodController.getById);
+router.get("/", periodController.getAll);
 
-router
-    .route("/")
-    .get(periodController.getAll)
-    .post(restrictTo("ADMIN", "MANAGER"), validate(createPeriodSchema), periodController.create);
-
-router
-    .route("/:id")
-    .get(periodController.getById)
-    .patch(
-        restrictTo("ADMIN", "MANAGER"),
-        validate(updatePeriodStatusSchema),
-        periodController.updateStatus
-    );
+router.post("/", restrictTo("ADMIN", "MANAGER"), periodController.create);
+// This resolves the 404 when updating or healing a cycle:
+router.put("/:id", restrictTo("ADMIN", "MANAGER"), periodController.update);
+router.patch("/:id", restrictTo("ADMIN", "MANAGER"), periodController.updateStatus);
+router.delete("/:id", restrictTo("ADMIN", "MANAGER"), periodController.remove);
 
 export default router;
