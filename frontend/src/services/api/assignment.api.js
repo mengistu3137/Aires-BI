@@ -1,5 +1,8 @@
 import { apiClient } from "@/services/client.js";
-
+export const updateDispatchCycleRequest = async (data) => {
+  const response = await apiClient.patch("/assignments/dispatch/cycle", data);
+  return response.data;
+};
 export const archiveStoreDispatchRequest = async ({ storeId, surveyPeriodId, archive = true }) => {
   const response = await apiClient.post(
     `/assignments/store/${storeId}/period/${surveyPeriodId}/archive`,

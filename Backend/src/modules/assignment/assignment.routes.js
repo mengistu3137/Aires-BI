@@ -72,6 +72,7 @@ router.patch(
   validate(combinedUpdateSchema),
   assignmentController.update,
 );
+router.patch("/dispatch/cycle", authenticate, restrictTo("ADMIN", "MANAGER"), assignmentController.updateDispatchCycle);
 
 router.delete(
   "/:id",

@@ -491,6 +491,11 @@ export const SurveyAssignmentModal = ({
 				initialStoreId && initialStoreId !== storeId
 					? initialStoreId
 					: undefined,
+			// Send previousSurveyPeriodId so the backend migrates the existing completed dispatch
+			previousSurveyPeriodId:
+				initialSurveyPeriodId && initialSurveyPeriodId !== surveyPeriodId
+					? initialSurveyPeriodId
+					: undefined,
 		};
 
 		try {
@@ -520,9 +525,7 @@ export const SurveyAssignmentModal = ({
 							<h2 className="text-base font-black text-slate-900">
 								{isEditMode ? "Manage Store Dispatch" : "Dispatch Store Survey"}
 							</h2>
-							<span className="rounded-md bg-emerald-50 border border-emerald-200 px-2 py-0.5 font-mono text-[10px] font-bold text-[#017C4D]">
-								{selectedProductIds.length}/{products.length} Products Active
-							</span>
+							
 						</div>
 						<p className="mt-0.5 text-xs text-slate-500">
 							Select survey track, products, and allocate ranges to auditors

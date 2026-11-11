@@ -13,6 +13,7 @@ import { PeriodManagementModal } from "../components/PeriodManagementModal.jsx";
 import { ConfirmDialog } from "@/components/ConfirmDialog.jsx";
 import { apiClient } from "@/services/client.js";
 import toast from "react-hot-toast";
+import { EditDispatchModal } from "../components/EditDispatchModal.jsx";
 
 const STATUS_FILTERS = [
 	{ value: "", label: "Active Dispatches" },
@@ -101,7 +102,7 @@ export const SurveyProgress = () => {
 	const [activeProofGallery, setActiveProofGallery] = useState(null);
 	const [carouselPhotos, setCarouselPhotos] = useState(null);
 	const [carouselIndex, setCarouselIndex] = useState(0);
-
+const [editingDispatch, setEditingDispatch] = useState(null);
 	const statusFilter = statusFromUrl;
 
 	// Group assignments by Store + SurveyPeriod
@@ -479,6 +480,7 @@ export const SurveyProgress = () => {
 										key={dispatch.id}
 										dispatch={dispatch}
 										canManage={canManage}
+										onEdit={() => setEditingDispatch(dispatch)}
 										onManage={() =>
 											handleOpenDispatchModal(
 												dispatch.storeId,
@@ -595,6 +597,12 @@ export const SurveyProgress = () => {
 					resolveUrl={resolveAssetUrl}
 				/>
 			)}
+
+			<EditDispatchModal
+				isOpen={Boolean(editingDispatch)}
+				onClose={() => setEditingDispatch(null)}
+				dispatch={editingDispatch}
+			/>
 		</div>
 	);
 };
@@ -603,6 +611,7 @@ export const SurveyProgress = () => {
 const StoreDispatchCard = ({
 	dispatch,
 	canManage,
+	onEdit,
 	onManage,
 	onDelete,
 	onArchive,
@@ -663,7 +672,6 @@ const StoreDispatchCard = ({
 
 				{/* Stream Badge Identifier */}
 				<div className="flex items-center gap-1.5">
-					
 					<span className="truncate font-mono text-[11px] font-semibold text-slate-600">
 						{cycle.name || dispatch.surveyPeriodId}
 					</span>
@@ -754,7 +762,7 @@ const StoreDispatchCard = ({
 
 						{canManage && (
 							<>
-								{/* Dynamic Delete vs Archive Button */}
+								{/* Dynamic Delete vs Archive */}
 								{isArchived ? (
 									<button
 										type="button"
@@ -769,7 +777,7 @@ const StoreDispatchCard = ({
 										type="button"
 										onClick={onDelete}
 										className="text-red-600 hover:text-red-800 hover:underline text-xs font-bold cursor-pointer px-1 py-1"
-										title="Dispatch has no audit activity; delete permanently"
+										title="Delete unstarted dispatch"
 									>
 										Delete
 									</button>
@@ -779,16 +787,27 @@ const StoreDispatchCard = ({
 										disabled={isArchiving}
 										onClick={onArchive}
 										className="rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition cursor-pointer disabled:opacity-50"
-										title="Dispatch has audit observations; archive to preserve history"
 									>
 										Archive
 									</button>
 								)}
 
+								{/* Dedicated Edit Button */}
+								<button
+									type="button"
+									onClick={onEdit}
+									className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 transition cursor-pointer"
+									title="Quickly change cycle or dispatch details"
+								>
+									Edit
+								</button>
+
+								{/* Manage Checklist & Auditor Ranges */}
 								<button
 									type="button"
 									onClick={onManage}
 									className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 transition cursor-pointer"
+									title="Manage product checklist and auditor allocations"
 								>
 									Manage
 								</button>
