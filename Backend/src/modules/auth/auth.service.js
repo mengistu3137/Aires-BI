@@ -3,6 +3,54 @@ import ApiError from "../../utils/api-error.js";
 import { comparePassword, generateAuthPayload, sanitizeUser } from "./auth.helpers.js";
 import { signToken } from "../../utils/jwt.js";
 
+
+import { sanitizeUserRecord } from "../users/user.helpers.js";
+
+const cleanUser = (u) => {
+  if (typeof sanitizeUser === "function") return sanitizeUser(u);
+  if (typeof sanitizeUserRecord === "function") return sanitizeUserRecord(u);
+  const { passwordHash, ...safe } = u;
+  return safe;
+};
+
+export const impersonateUser = async (targetUserId, adminUser) => {
+  if (adminUser.role !== "SUPER_ADMIN" && adminUser.role !== "ADMIN") {
+    throw new ApiError(403, "Access forbidden: Only Aires Super Admin can sign in on behalf of users.");
+  }
+
+  if (targetUserId === adminUser.id) {
+    throw new ApiError(400, "Cannot impersonate your own active administrator account.");
+  }
+
+  const targetUser = await prisma.user.findUnique({
+    where: { id: targetUserId },
+  });
+
+  if (!targetUser) {
+    throw new ApiError(404, `Target user '${targetUserId}' not found.`);
+  }
+
+  if (!targetUser.active) {
+    throw new ApiError(400, `Cannot sign in as deactivated user [${targetUser.name}].`);
+  }
+
+  const token = signToken({
+    id: targetUser.id,
+    role: targetUser.role,
+    impersonatedBy: adminUser.id,
+  });
+
+  return {
+    token,
+    user: cleanUser(targetUser),
+    impersonator: {
+      id: adminUser.id,
+      name: adminUser.name,
+      role: adminUser.role,
+    },
+  };
+};
+
 const resolveLoginCandidates = (identifier) => {
   const clean = identifier.trim();
   const candidates = [clean];
@@ -78,48 +126,7 @@ export const getMe = async (userId) => {
   return sanitizeUser(user);
 };
 
-/**
- * Super Admin (Aires) generates an authorized session token on behalf of a target user.
- */
-export const impersonateUser = async (targetUserId, adminUser) => {
-  // Strict rule: Only Aires Super Admin can sign in as another user
-  if (adminUser.role !== "SUPER_ADMIN" && adminUser.role !== "ADMIN") {
-    throw new ApiError(403, "Access forbidden: Only Aires Super Admin can sign in on behalf of users.");
-  }
 
-  if (targetUserId === adminUser.id) {
-    throw new ApiError(400, "Cannot impersonate your own active administrator account.");
-  }
-
-  const targetUser = await prisma.user.findUnique({
-    where: { id: targetUserId },
-  });
-
-  if (!targetUser) {
-    throw new ApiError(404, `Target user '${targetUserId}' not found.`);
-  }
-
-  if (!targetUser.active) {
-    throw new ApiError(400, `Cannot sign in as deactivated user [${targetUser.name}].`);
-  }
-
-  // Issue standard token tagged with impersonation claims
-  const token = signToken({
-    id: targetUser.id,
-    role: targetUser.role,
-    impersonatedBy: adminUser.id,
-  });
-
-  return {
-    token,
-    user: sanitizeUser(targetUser),
-    impersonator: {
-      id: adminUser.id,
-      name: adminUser.name,
-      role: adminUser.role,
-    },
-  };
-};
 
 export const authService = {
   login,

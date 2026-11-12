@@ -14,7 +14,7 @@ import {
 import { queensPriceService } from "../queens-prices/queens-price.service.js";
 import { alertService } from "../alerts/alert.service.js";
 import ExcelJS from "exceljs";
-
+import { emitToRoles } from "../../config/socket.js";
 const ANALYSIS_INCLUDE_RELATIONS = {
   product: {
     select: {
@@ -50,6 +50,84 @@ const ANALYSIS_INCLUDE_RELATIONS = {
  * @param {Array<{ productId: string, surveyPeriodId: string }>} analyses
  * @returns {Promise<Map<string, Array<{ storeName: string, storeId: string, price: number, capturedAt: Date }>>>}
  */
+/**
+ * Queens Admin requests a price recalculation.
+ * Notifies Aires Operations (ADMIN & SUPER_ADMIN) in real-time via WebSocket.
+ */
+// Persistent in-memory store for pending client recalculation requests
+const pendingRecalculationStore = new Map(); // surveyPeriodId -> requestData
+
+/**
+ * Queens Admin requests a price recalculation.
+ * Stores the pending request and broadcasts in real-time via WebSocket.
+ */
+export const requestRecalculation = async ({
+  surveyPeriodId,
+  categoryStream = "ALL",
+  notes = null,
+  requestedBy,
+}) => {
+  const surveyPeriod = await prisma.surveyPeriod.findUnique({
+    where: { id: surveyPeriodId },
+    select: { id: true, name: true, status: true },
+  });
+
+  if (!surveyPeriod) {
+    throw new ApiError(404, `SurveyPeriod [${surveyPeriodId}] not found.`);
+  }
+
+  const notificationPayload = {
+    surveyPeriodId: surveyPeriod.id,
+    surveyPeriodName: surveyPeriod.name,
+    categoryStream,
+    notes: notes?.trim() || "Client requested price analysis refresh",
+    requestedBy: {
+      id: requestedBy.id,
+      name: requestedBy.name,
+      role: requestedBy.role,
+      email: requestedBy.email,
+    },
+    requestedAt: new Date().toISOString(),
+  };
+
+  // 1. Store in memory so it persists across page reloads and impersonation exits
+  pendingRecalculationStore.set(surveyPeriod.id, notificationPayload);
+
+  // 2. Broadcast real-time event to active Aires Admins and Super Admins
+  try {
+    emitToRoles(
+      ["SUPER_ADMIN", "ADMIN"],
+      "recalculation:requested",
+      notificationPayload,
+    );
+    console.log(
+      `🔔 [Recalculation Requested] ${requestedBy.name} for ${surveyPeriod.name}`,
+    );
+  } catch (err) {
+    console.warn("⚠️ WebSocket broadcast skipped:", err.message);
+  }
+
+  return {
+    success: true,
+    message: `Recalculation request for "${surveyPeriod.name}" sent to Aires Admin team.`,
+    data: notificationPayload,
+  };
+};
+
+/**
+ * Returns all active pending recalculation requests for administrators.
+ */
+export const getPendingRecalculationRequests = () => {
+  return Array.from(pendingRecalculationStore.values());
+};
+
+/**
+ * Dismisses a pending recalculation request (marked as read).
+ */
+export const dismissPendingRecalculationRequest = (surveyPeriodId) => {
+  const existed = pendingRecalculationStore.delete(surveyPeriodId);
+  return { success: true, dismissed: existed };
+};
 const fetchApprovedCompetitorPrices = async (analyses) => {
   const productIds = [...new Set(analyses.map((a) => a.productId))];
   const surveyPeriodId = analyses[0]?.surveyPeriodId;
@@ -576,7 +654,7 @@ export const recalculateSurveyPeriodAnalysis = async (input) => {
       });
     }
   }
-
+  pendingRecalculationStore.delete(surveyPeriodId);
   return {
     surveyPeriodId,
     categoryStream,
@@ -1372,4 +1450,7 @@ export const priceAnalysisService = {
   resolveBenchmarkForSurveyPeriod,
   generatePriceAnalysisExcel,
   getSurveyPeriodReadiness,
+  requestRecalculation,
+  getPendingRecalculationRequests,
+  dismissPendingRecalculationRequest,
 };

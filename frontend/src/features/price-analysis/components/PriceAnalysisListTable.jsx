@@ -8,10 +8,13 @@ import {
 import { PriceAnalysisActionBadge } from "./PriceAnalysisActionBadge.jsx";
 import { formatProductName } from "@/utils/formatters.js";
 import { useApplyRecommendedPrice } from "../hooks/usePriceAnalysisMutations.js";
-
+import { useAuth } from "@/hooks/useAuth.js";
+import { hasPermission, PERMISSIONS } from "@/permissions/permissions.js";
 export const PriceAnalysisListTable = ({ analyses = [] }) => {
 	const navigate = useNavigate();
 	const applyRecommended = useApplyRecommendedPrice();
+	const { role } = useAuth();
+	const canEditPrices = hasPermission(role, PERMISSIONS.EDIT_BENCHMARKS);
 
 	if (analyses.length === 0) {
 		return (
@@ -81,7 +84,9 @@ export const PriceAnalysisListTable = ({ analyses = [] }) => {
 									<PriceAnalysisActionBadge action={analysis.action} />
 								</td>
 								<td className="px-4 py-3 text-center">
-									{analysis.action !== "KEEP" && analysis.recommendedPrice ? (
+									{canEditPrices &&
+									analysis.action !== "KEEP" &&
+									analysis.recommendedPrice ? (
 										<button
 											type="button"
 											disabled={applyRecommended.isPending}
@@ -89,7 +94,7 @@ export const PriceAnalysisListTable = ({ analyses = [] }) => {
 											className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-[#A41821]/20 bg-red-50 px-2 py-1 text-[11px] font-bold text-[#A41821] transition hover:bg-[#A41821] hover:text-white active:scale-95 disabled:opacity-40 shadow-2xs font-mono"
 											title="1-Click apply recommended price to Queens benchmark"
 										>
-										 Set {formatPrice(analysis.recommendedPrice)}
+											Set {formatPrice(analysis.recommendedPrice)}
 										</button>
 									) : (
 										<span className="text-slate-400 font-mono text-xs">—</span>

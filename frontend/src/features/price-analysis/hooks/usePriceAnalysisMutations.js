@@ -4,6 +4,8 @@ import {
   calculateProductAnalysisRequest,
   recalculateSurveyPeriodRequest,
   applyRecommendedPriceRequest,
+  requestRecalculationRequest 
+
 } from "@/services/api/price-analysis.api.js";
 
 /**
@@ -172,5 +174,21 @@ export const useApplyRecommendedPrice = () => {
       );
     },
     meta: { skipGlobalToast: true },
+  });
+};
+
+
+export const useRequestRecalculation = () => {
+  return useMutation({
+    mutationFn: requestRecalculationRequest,
+    onSuccess: (res) => {
+      toast.success(res?.message || "Recalculation request sent to Aires Admin", {
+        icon: "📨",
+        duration: 4000,
+      });
+    },
+    onError: (err) => {
+      toast.error(err?.response?.data?.message || err?.message || "Failed to submit request");
+    },
   });
 };

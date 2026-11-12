@@ -9,6 +9,7 @@ import {
   createOrUpdateAnalysisSchema,
   recalculateSurveyPeriodSchema,
   listPriceAnalysesQuerySchema,
+  requestRecalculationSchema
 } from "./price-analysis.validation.js";
 
 const router = Router();
@@ -52,7 +53,24 @@ router.post(
   validate(createOrUpdateAnalysisSchema, "body"),
   priceAnalysisController.calculateProductAnalysis,
 );
+// Queens Admin submits request -> Real-time alert dispatched to Aires Admin
+router.post(
+  "/request-recalculation",
+  restrictTo("SUPER_ADMIN", "ADMIN", "MANAGER"),
+  validate(requestRecalculationSchema, "body"),
+  priceAnalysisController.requestRecalculation,
+);
+router.get(
+  "/recalculation/pending-requests",
+  restrictTo("SUPER_ADMIN", "ADMIN"),
+  priceAnalysisController.getPendingRecalculationRequests,
+);
 
+router.delete(
+  "/recalculation/pending-requests/:surveyPeriodId",
+  restrictTo("SUPER_ADMIN", "ADMIN"),
+  priceAnalysisController.dismissPendingRecalculationRequest,
+);
 router.post(
   "/recalculate",
   restrictTo("ADMIN", "MANAGER"),
