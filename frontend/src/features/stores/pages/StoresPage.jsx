@@ -17,16 +17,18 @@ const DEFAULT_FORM_STATE = {
 };
 
 export const StoresPage = () => {
-	// Query active physical stores from the backend
+	// Query all physical stores (both active and archived)
 	const {
-		stores,
+		stores = [],
 		isLoading,
 		createStore,
 		updateStore,
 		deleteStore,
 		isDeleting,
-	} = useStores({ active: "true" });
+	} = useStores();
 
+	// View mode: 'ACTIVE' or 'ARCHIVED'
+	const [activeTab, setActiveTab] = useState("ACTIVE");
 	const [selectedType, setSelectedType] = useState("ALL");
 	const [isModalOpen, setIsModalOpen] = useState(false);
 	const [editingStore, setEditingStore] = useState(null);
@@ -43,7 +45,7 @@ export const StoresPage = () => {
 		staleTime: 5 * 60 * 1000,
 	});
 
-	// Pre-select first real competitor when loaded
+	// Pre-select first competitor when loaded
 	useEffect(() => {
 		if (competitors.length > 0 && !formData.competitorId) {
 			setFormData((prev) => ({ ...prev, competitorId: competitors[0].id }));
@@ -75,6 +77,7 @@ export const StoresPage = () => {
 		setIsModalOpen(true);
 	};
 
+	// Toggle active/inactive state (Activate or Deactivate)
 	const handleToggleActive = async (store) => {
 		try {
 			await updateStore({
@@ -82,7 +85,7 @@ export const StoresPage = () => {
 				payload: { active: !store.active },
 			});
 		} catch {
-			// Error handled by mutation hook toast
+			// Handled by mutation hook toast
 		}
 	};
 
@@ -110,7 +113,7 @@ export const StoresPage = () => {
 			setEditingStore(null);
 			setFormData(DEFAULT_FORM_STATE);
 		} catch {
-			// Error handled by mutation hook toast
+			// Handled by mutation hook toast
 		}
 	};
 
@@ -120,18 +123,30 @@ export const StoresPage = () => {
 			await deleteStore(deleteCandidate.id);
 			setDeleteCandidate(null);
 		} catch {
-			// Error handled by mutation hook toast
+			// Handled by mutation hook toast
 		}
 	};
 
-	// ────────────────────────────────────────────────────────────
-	// STRICT ACTIVE FILTER: Only returns stores where active === true
-	// ────────────────────────────────────────────────────────────
+	// Separate active vs archived counts
+	const activeStoresCount = useMemo(
+		() => (stores || []).filter((s) => s.active !== false).length,
+		[stores],
+	);
+
+	const archivedStoresCount = useMemo(
+		() => (stores || []).filter((s) => s.active === false).length,
+		[stores],
+	);
+
+	// Filter stores by Tab (Active vs Archived) and Type (ALL, FMCG, FRESH)
 	const filteredStores = useMemo(() => {
-		const activeOnly = (stores || []).filter((s) => s.active !== false);
-		if (selectedType === "ALL") return activeOnly;
-		return activeOnly.filter((s) => s.type === selectedType);
-	}, [stores, selectedType]);
+		const byStatus = (stores || []).filter((s) =>
+			activeTab === "ACTIVE" ? s.active !== false : s.active === false,
+		);
+
+		if (selectedType === "ALL") return byStatus;
+		return byStatus.filter((s) => s.type === selectedType);
+	}, [stores, activeTab, selectedType]);
 
 	const tableColumns = [
 		{
@@ -199,7 +214,7 @@ export const StoresPage = () => {
 					className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${
 						row.active
 							? "bg-emerald-50 text-[#017C4D]"
-							: "bg-slate-100 text-slate-400"
+							: "bg-slate-100 text-slate-500 border border-slate-200"
 					}`}
 				>
 					<span
@@ -207,7 +222,7 @@ export const StoresPage = () => {
 							row.active ? "bg-[#017C4D]" : "bg-slate-400"
 						}`}
 					/>
-					{row.active ? "Active" : "Inactive"}
+					{row.active ? "Active" : "Archived"}
 				</span>
 			),
 		},
@@ -224,15 +239,29 @@ export const StoresPage = () => {
 					>
 						Edit
 					</button>
+
 					<span className="text-slate-300">|</span>
+
+					{/* Dynamic Activate / Deactivate Toggle */}
 					<button
 						type="button"
 						onClick={() => handleToggleActive(row)}
-						className="text-xs font-semibold text-slate-600 hover:text-slate-900 transition underline cursor-pointer"
+						className={`text-xs font-bold transition cursor-pointer ${
+							row.active
+								? "text-slate-600 hover:text-slate-900 underline"
+								: "text-[#017C4D] hover:underline"
+						}`}
+						title={
+							row.active
+								? "Deactivate and move to Archived tab"
+								: "Reactivate and restore to Active tab"
+						}
 					>
 						{row.active ? "Deactivate" : "Activate"}
 					</button>
+
 					<span className="text-slate-300">|</span>
+
 					<button
 						type="button"
 						onClick={() => setDeleteCandidate(row)}
@@ -271,13 +300,37 @@ export const StoresPage = () => {
 				</Can>
 			</div>
 
-			{/* Filter Tabs & DataTable */}
+			{/* Main Content Area */}
 			<div className="space-y-3">
-				<div className="flex items-center justify-between">
-					<h2 className="text-sm font-bold text-slate-800">
-						Active Store Anchors ({filteredStores.length})
-					</h2>
+				{/* Status Navigation Tabs (Active vs Archived) & Type Filters */}
+				<div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+					{/* Status Mode Tabs */}
+					<div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-slate-100 p-1 text-xs font-bold flex-none">
+						<button
+							type="button"
+							onClick={() => setActiveTab("ACTIVE")}
+							className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
+								activeTab === "ACTIVE"
+									? "bg-white text-slate-900 shadow-2xs"
+									: "text-slate-500 hover:text-slate-800"
+							}`}
+						>
+							Active Stores ({activeStoresCount})
+						</button>
+						<button
+							type="button"
+							onClick={() => setActiveTab("ARCHIVED")}
+							className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
+								activeTab === "ARCHIVED"
+									? "bg-white text-slate-900 shadow-2xs"
+									: "text-slate-500 hover:text-slate-800"
+							}`}
+						>
+							Archived ({archivedStoresCount})
+						</button>
+					</div>
 
+					{/* Store Type Filters */}
 					<div className="flex items-center gap-1.5">
 						{["ALL", "FMCG", "FRESH"].map((type) => (
 							<button
@@ -296,6 +349,7 @@ export const StoresPage = () => {
 					</div>
 				</div>
 
+				{/* DataTable */}
 				<DataTable
 					columns={tableColumns}
 					data={filteredStores}
@@ -305,14 +359,16 @@ export const StoresPage = () => {
 					emptyMessage={
 						isLoading
 							? "Loading physical stores..."
-							: "No active stores match the filter."
+							: activeTab === "ARCHIVED"
+								? "No archived stores found."
+								: "No active stores match the filter."
 					}
 				/>
 			</div>
 
 			{/* Register / Edit Store Modal */}
 			{isModalOpen && (
-				<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
+				<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4 animate-in fade-in">
 					<div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl border border-slate-100 space-y-4">
 						<div className="flex items-center justify-between border-b border-slate-100 pb-3">
 							<h2 className="text-base font-bold text-slate-900">
@@ -342,7 +398,7 @@ export const StoresPage = () => {
 									onChange={(e) =>
 										setFormData({ ...formData, competitorId: e.target.value })
 									}
-									className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] outline-hidden"
+									className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] outline-hidden cursor-pointer"
 								>
 									{competitors.map((c) => (
 										<option key={c.id} value={c.id}>
@@ -393,7 +449,7 @@ export const StoresPage = () => {
 										onChange={(e) =>
 											setFormData({ ...formData, type: e.target.value })
 										}
-										className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] outline-hidden"
+										className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] outline-hidden cursor-pointer"
 									>
 										<option value="FMCG">FMCG</option>
 										<option value="FRESH">FRESH</option>
@@ -477,7 +533,7 @@ export const StoresPage = () => {
 
 			{/* Delete Confirmation Modal */}
 			{deleteCandidate && (
-				<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
+				<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4 animate-in fade-in">
 					<div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl border border-slate-100 space-y-4">
 						<h3 className="text-base font-bold text-slate-900">
 							Confirm Deletion
@@ -486,8 +542,8 @@ export const StoresPage = () => {
 							Are you sure you want to remove{" "}
 							<strong className="text-slate-900">{deleteCandidate.name}</strong>
 							? If historical audits or assignments reference this location, the
-							store will be deactivated instead of deleted to protect audit
-							history integrity.
+							store will be deactivated and moved to the Archived tab instead of
+							deleted to protect audit history integrity.
 						</p>
 						<div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
 							<button

@@ -84,7 +84,6 @@ export const markReviewAuditSchema = z.object({
     .min(3, "Review note must be at least 3 characters")
     .max(1000, "Review note cannot exceed 1000 characters"),
 });
-
 export const listAuditsQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().positive().max(100).default(20),
@@ -95,8 +94,10 @@ export const listAuditsQuerySchema = z.object({
       "COMPLETED",
       "CANCELLED",
       "NEEDS_REVIEW",
+      "ARCHIVED", // ← Added to support the Archived audits filter
     ])
     .optional(),
+  includeArchived: z.string().optional(), // ← Added to permit the query parameter
   assignmentId: z.string().trim().optional(),
   storeId: z.string().trim().optional(),
   surveyPeriodId: z.string().trim().optional(),
