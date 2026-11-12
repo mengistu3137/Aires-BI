@@ -17,12 +17,20 @@ import { RecalculateConfirmModal } from "../components/RecalculateConfirmModal.j
 import { ExecutiveAiReportModal } from "../components/ExecutiveAiReportModal.jsx";
 import { exportPriceAnalysisExcelRequest } from "@/services/api/price-analysis.api.js";
 import { RapidPriceAdjustmentDrawer } from "../components/RapidPriceAdjustmentDrawer.jsx";
-
+import { hasPermission, PERMISSIONS } from "@/permissions/permissions.js";
+import { useRequestRecalculation } from "../hooks/usePriceAnalysisMutations.js";
 const PAGE_SIZE = 20;
 
 export const PriceAnalysisPage = () => {
 	const navigate = useNavigate();
-	const { isManager,isAdmin}=useAuth();
+	const { isManager, isAdmin, role } = useAuth();
+	
+	const canRunModels = hasPermission(role, PERMISSIONS.RUN_ANALYSIS_MODELS); // Aires Admin & Super Admin
+	const canRequestRecalc = hasPermission(
+		role,
+		PERMISSIONS.REQUEST_RECALCULATION,
+	); // Queens Admin
+	const requestRecalcMutation = useRequestRecalculation();
 	const [searchParams, setSearchParams] = useSearchParams();
 
 	const [search, setSearch] = useState("");
@@ -175,7 +183,7 @@ export const PriceAnalysisPage = () => {
 
 				<div className="flex flex-wrap items-center gap-2">
 					{/* Both Aires and Queens have full access to Executive AI Briefs */}
-				{/* 	{isManager && (
+					{/* 	{isManager && (
 						<button
 							type="button"
 							onClick={() => setShowAiReportModal(true)}
@@ -221,34 +229,38 @@ export const PriceAnalysisPage = () => {
 						</button>
 					)}
 
-					{/* Model Execution: Aires Admin runs calculation; Queens Admin requests calculation */}
-					{surveyPeriodId &&
-						(isAdmin ? (
-							<button
-								type="button"
-								onClick={() => setShowRecalcModal(true)}
-								className="inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-[#A41821] px-4 py-2.5 text-xs font-bold text-white shadow-xs transition hover:bg-[#7F1219] active:scale-95"
-							>
-								Recalculate Analysis
-							</button>
-						) : (
-							<button
-								type="button"
-								onClick={() => {
-									toast.success(
-										"Recalculation request submitted to Aires Operations",
-										{
-											icon: "📨",
-											duration: 3500,
-										},
-									);
-								}}
-								className="inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 text-xs font-bold text-[#FE7914] shadow-xs transition hover:bg-amber-100 active:scale-95"
-								title="Submit request to Aires to execute fresh price analysis"
-							>
-								<span>Request Recalculation 📨</span>
-							</button>
-						))}
+					{/* Recalculate Button: Adapts by role dynamically */}
+					{surveyPeriodId && (
+						<div>
+							{canRunModels ? (
+								// Aires Admin / Super Admin: runs calculation engine
+								<button
+									type="button"
+									onClick={() => setShowRecalcModal(true)}
+									className="inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-[#A41821] px-4 py-2.5 text-xs font-bold text-white shadow-xs transition hover:bg-[#7F1219] active:scale-95"
+								>
+									Recalculate analysis
+								</button>
+							) : canRequestRecalc ? (
+								// Queens Admin: sends request & notifies Aires Admin
+								<button
+									type="button"
+									disabled={requestRecalcMutation.isPending}
+									onClick={async () => {
+										await requestRecalcMutation.mutateAsync({ surveyPeriodId });
+									}}
+									className="inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-[#017C4D] bg-emerald-50 px-4 py-2.5 text-xs font-bold text-[#017C4D] shadow-xs transition hover:bg-emerald-100 active:scale-95 disabled:opacity-50"
+								>
+									<span>📨</span>
+									<span>
+										{requestRecalcMutation.isPending
+											? "Sending Request..."
+											: "Request Recalculation"}
+									</span>
+								</button>
+							) : null}
+						</div>
+					)}
 				</div>
 			</div>
 

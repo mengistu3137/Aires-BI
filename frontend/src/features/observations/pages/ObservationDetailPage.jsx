@@ -26,7 +26,7 @@ import {
 import { ObservationSyncBadge } from "../components/ObservationSyncBadge.jsx";
 import { ObservationReviewBadge } from "../components/ObservationReviewBadge.jsx";
 import { formatProductName } from "@/utils/formatters.js";
-
+import { hasPermission, PERMISSIONS } from "@/permissions/permissions.js";
 const rejectSchema = z.object({
 	reviewNote: z
 		.string()
@@ -36,6 +36,7 @@ const rejectSchema = z.object({
 });
 
 export const ObservationDetailPage = () => {
+	
 	const { observationId } = useParams();
 	const navigate = useNavigate();
 	const { isManager } = useAuth();
@@ -101,9 +102,12 @@ export const ObservationDetailPage = () => {
 	const [showRejectModal, setShowRejectModal] = useState(false);
 	const rejectForm = useForm({ resolver: zodResolver(rejectSchema) });
 
+	const { role } = useAuth();
+
 	const isPending = observation?.review?.status === "PENDING";
-	const canApprove = isManager && isPending && !isUnsynced;
-	const canReject = isManager && isPending && !isUnsynced;
+	const hasApprovalAccess = hasPermission(role, PERMISSIONS.FINAL_QC_APPROVAL);
+	const canApprove = hasApprovalAccess && isPending && !isUnsynced;
+	const canReject = hasApprovalAccess && isPending && !isUnsynced;
 
 	// Groq AI Anomaly Guardian
 	const { data: aiScreen, isLoading: isAILoading } = useObservationAI(
@@ -447,12 +451,7 @@ export const ObservationDetailPage = () => {
 					<div className="mx-4 mt-4 sm:mx-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs">
 						<div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/70 px-4 py-2.5">
 							<div className="flex items-center gap-2">
-								<span className="flex h-5 w-5 items-center justify-center rounded-lg bg-[#FE7914] text-[11px] font-black text-white">
-									⚡
-								</span>
-								<span className="text-xs font-black text-slate-800">
-									AI Anomaly Guardian
-								</span>
+							<span className="text-aires-orange">Insight</span>
 							</div>
 
 							{isAILoading ? (

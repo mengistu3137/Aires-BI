@@ -19,7 +19,7 @@ router.get("/me", authenticate, authController.getMe);
 router.post(
     "/impersonate/:userId",
     authenticate,
-    restrictTo("ADMIN"),
+    restrictTo("SUPER_ADMIN", "ADMIN"), // ← Allows both Aires Super Admin and Operations Admin
     authController.impersonate
 );
 

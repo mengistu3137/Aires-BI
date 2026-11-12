@@ -3,6 +3,11 @@ import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth.js";
 import { AiresLogo } from "@/components/AiresLogo.jsx";
 import { useLocationPermissionSync } from "@/hooks/useLocationPermissionSync.js";
+import { subscribeToRealtimeEvent } from "@/services/socket.js";
+import {
+	getPendingRecalculationsRequest,
+	dismissPendingRecalculationRequest,
+} from "@/services/api/price-analysis.api.js";
 import toast from "react-hot-toast";
 
 export const Header = ({ onToggleSidebar }) => {
@@ -18,15 +23,18 @@ export const Header = ({ onToggleSidebar }) => {
 		stopImpersonation,
 		logout,
 	} = useAuth();
+
 	const [isOnline, setIsOnline] = useState(
 		typeof navigator !== "undefined" ? navigator.onLine : true,
 	);
+
+	const [recalcRequest, setRecalcRequest] = useState(null);
 
 	useLocationPermissionSync();
 
 	useEffect(() => {
 		const handleOnline = () => setIsOnline(true);
-		const handleOffline = () => setIsOnline(false);
+		const handleOffline = () => setIsOffline(false);
 
 		window.addEventListener("online", handleOnline);
 		window.addEventListener("offline", handleOffline);
@@ -37,10 +45,68 @@ export const Header = ({ onToggleSidebar }) => {
 		};
 	}, []);
 
+	// Query persistent pending requests on mount / when returning as Admin
+	useEffect(() => {
+		if (isQueensAdmin || isAuditor) return;
+
+		let isMounted = true;
+		getPendingRecalculationsRequest()
+			.then((res) => {
+				if (!isMounted) return;
+				const requests = res?.data || [];
+				if (requests.length > 0) {
+					setRecalcRequest(requests[0]);
+				}
+			})
+			.catch(() => {});
+
+		// Also listen for real-time events while online
+		const unsubscribe = subscribeToRealtimeEvent(
+			"recalculation:requested",
+			(data) => {
+				if (isMounted) setRecalcRequest(data);
+			},
+		);
+
+		return () => {
+			isMounted = false;
+			if (typeof unsubscribe === "function") unsubscribe();
+		};
+	}, [isQueensAdmin, isAuditor, isImpersonating]);
+
 	const handleExitImpersonation = () => {
 		stopImpersonation();
 		toast.success("Returned to Super Admin session");
 		navigate("/users");
+	};
+
+	// Clicking banner: dismisses from server and navigates directly to the cycle
+	const handleClickRecalcNotification = async () => {
+		if (!recalcRequest) return;
+		const targetPeriodId = recalcRequest.surveyPeriodId;
+
+		setRecalcRequest(null);
+		try {
+			await dismissPendingRecalculationRequest(targetPeriodId);
+		} catch {
+			// silent fallback
+		}
+
+		navigate(`/price-analysis?surveyPeriodId=${targetPeriodId}`);
+	};
+
+	// Clicking ✕: dismisses from server and removes banner
+	const handleDismissRecalcNotification = async (e) => {
+		e.stopPropagation();
+		if (!recalcRequest) return;
+		const targetPeriodId = recalcRequest.surveyPeriodId;
+
+		setRecalcRequest(null);
+		try {
+			await dismissPendingRecalculationRequest(targetPeriodId);
+		} catch {
+			// silent fallback
+		}
 	};
 
 	const getRoleLabel = () => {
@@ -53,9 +119,7 @@ export const Header = ({ onToggleSidebar }) => {
 
 	return (
 		<>
-			{/* ──────────────────────────────────────────────────────── */}
-			{/* UNIVERSAL PERSISTENT EXIT IMPERSONATION BANNER           */}
-			{/* ──────────────────────────────────────────────────────── */}
+			{/* UNIVERSAL PERSISTENT EXIT IMPERSONATION BANNER */}
 			{isImpersonating && (
 				<div className="sticky top-0 z-50 flex h-10 w-full items-center justify-between border-b-2 border-amber-400 bg-amber-500 px-4 text-white shadow-md sm:px-6 animate-in slide-in-from-top-2">
 					<div className="flex items-center gap-2 text-xs font-bold truncate">
@@ -78,11 +142,47 @@ export const Header = ({ onToggleSidebar }) => {
 				</div>
 			)}
 
+			{/* PERSISTENT CLIENT RECALCULATION REQUEST BANNER */}
+			{recalcRequest && (
+				<div
+					onClick={handleClickRecalcNotification}
+					className="sticky top-0 z-40 flex min-h-10 w-full items-center justify-between border-b-2 border-emerald-400 bg-[#017C4D] px-4 py-1.5 text-white shadow-md sm:px-6 cursor-pointer hover:bg-[#01633D] transition animate-in slide-in-from-top-2"
+					title="Click to review and run recalculation"
+				>
+					<div className="flex items-center gap-2 text-xs font-bold truncate">
+						<span className="text-sm">🔔</span>
+						<span className="truncate">
+							Recalculation Request:{" "}
+							<strong>{recalcRequest.requestedBy?.name || "Client"}</strong>{" "}
+							(Queens Admin) requested Price Analysis refresh for{" "}
+							<u className="font-mono text-emerald-200">
+								{recalcRequest.surveyPeriodName || recalcRequest.surveyPeriodId}
+							</u>
+						</span>
+					</div>
+
+					<div className="flex items-center gap-2 flex-none ml-2">
+						<span className="rounded bg-white/20 px-2.5 py-1 text-[10px] font-bold text-white uppercase tracking-wider hover:bg-white/30 transition">
+							Review &amp; Run →
+						</span>
+						<button
+							type="button"
+							onClick={handleDismissRecalcNotification}
+							className="rounded-lg bg-black/30 hover:bg-black/50 p-1 text-white text-xs cursor-pointer transition"
+							title="Dismiss (Mark as read)"
+						>
+							✕
+						</button>
+					</div>
+				</div>
+			)}
+
 			{/* Main Header */}
 			<header
-				className={`sticky ${isImpersonating ? "top-10" : "top-0"} z-30 flex h-16 w-full items-center justify-between border-b border-slate-200 bg-white px-4 shadow-xs sm:px-6`}
+				className={`sticky ${
+					isImpersonating || recalcRequest ? "top-10" : "top-0"
+				} z-30 flex h-16 w-full items-center justify-between border-b border-slate-200 bg-white px-4 shadow-xs sm:px-6`}
 			>
-				{/* Left: Mobile Toggle & Logo */}
 				<div className="flex items-center gap-3">
 					{!isAuditor && (
 						<button
@@ -128,7 +228,6 @@ export const Header = ({ onToggleSidebar }) => {
 					</Link>
 				</div>
 
-				{/* Right: Network Status, User Profile & Logout */}
 				<div className="flex items-center gap-2.5 sm:gap-3">
 					<div className="flex items-center gap-2 pl-2 border-l border-slate-200">
 						<div
@@ -151,7 +250,6 @@ export const Header = ({ onToggleSidebar }) => {
 							</p>
 						</div>
 
-						{/* Network connectivity dot */}
 						<span
 							title={
 								isOnline

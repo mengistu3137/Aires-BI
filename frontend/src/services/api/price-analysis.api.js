@@ -1,5 +1,17 @@
 import { apiClient } from "../client.js";
+export const getPendingRecalculationsRequest = async () => {
+  const response = await apiClient.get("/price-analysis/recalculation/pending-requests");
+  return response.data;
+};
 
+export const dismissPendingRecalculationRequest = async (surveyPeriodId) => {
+  const response = await apiClient.delete(`/price-analysis/recalculation/pending-requests/${surveyPeriodId}`);
+  return response.data;
+};
+export const requestRecalculationRequest = async (data) => {
+  const response = await apiClient.post("/price-analysis/request-recalculation", data);
+  return response.data;
+};
 export const listPriceAnalysesRequest = async (params = {}) => {
   const response = await apiClient.get("/price-analysis", { params });
   return response.data;

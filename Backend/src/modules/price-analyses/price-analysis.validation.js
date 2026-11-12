@@ -51,3 +51,11 @@ export const listPriceAnalysesQuerySchema = z.object({
   from: z.string().optional(),
   to: z.string().optional(),
 });
+export const requestRecalculationSchema = z.object({
+  surveyPeriodId: z
+    .string({ required_error: "surveyPeriodId is required" })
+    .trim()
+    .min(1, "surveyPeriodId cannot be empty"),
+  categoryStream: z.enum(["ALL", "FRESH", "FMCG"]).default("ALL").optional(),
+  notes: z.string().trim().max(1000).optional(),
+});

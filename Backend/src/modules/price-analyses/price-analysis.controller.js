@@ -1,5 +1,42 @@
 import { priceAnalysisService } from "./price-analysis.service.js";
 
+export const getPendingRecalculationRequests = async (req, res, next) => {
+  try {
+    const data = priceAnalysisService.getPendingRecalculationRequests();
+    res.status(200).json({ status: "success", data });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const dismissPendingRecalculationRequest = async (req, res, next) => {
+  try {
+    const result = priceAnalysisService.dismissPendingRecalculationRequest(
+      req.params.surveyPeriodId,
+    );
+    res.status(200).json({ status: "success", data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+export const requestRecalculation = async (req, res, next) => {
+  try {
+    const result = await priceAnalysisService.requestRecalculation({
+      surveyPeriodId: req.body.surveyPeriodId,
+      categoryStream: req.body.categoryStream,
+      notes: req.body.notes,
+      requestedBy: req.user,
+    });
+
+    res.status(200).json({
+      status: "success",
+      message: result.message,
+      data: result.data,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
 export const calculateProductAnalysis = async (req, res, next) => {
   try {
     const analysis = await priceAnalysisService.calculateProductAnalysis({
@@ -131,5 +168,8 @@ export const priceAnalysisController = {
   getProductSurveyPeriodAnalysis,
   listPriceAnalyses,
   exportPriceAnalysisExcel,
-  getSurveyPeriodReadiness
+  getSurveyPeriodReadiness,
+  requestRecalculation,
+  getPendingRecalculationRequests,
+  dismissPendingRecalculationRequest,
 };
