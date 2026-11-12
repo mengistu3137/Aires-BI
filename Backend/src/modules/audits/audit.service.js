@@ -560,9 +560,9 @@ export const getCurrentAudit = async (user) => {
 };
 
 /**
- * List audits with pagination and ownership filters.
+ * List audits with pagination, active dispatch filtering, and ownership filters.
  */
-export const listAudits = async ({ user, query }) => {
+export const listAudits = async ({ user, query = {} }) => {
   const {
     page: rawPage = 1,
     limit: rawLimit = 20,
@@ -571,11 +571,11 @@ export const listAudits = async ({ user, query }) => {
     storeId,
     surveyPeriodId,
     auditorId,
+    includeArchived,
     from,
     to,
   } = query;
 
-  // Explicitly parse and sanitize pagination numbers to prevent PrismaClientValidationError
   const page = Math.max(1, parseInt(rawPage, 10) || 1);
   const limit = Math.min(100, Math.max(1, parseInt(rawLimit, 10) || 20));
 
@@ -588,8 +588,27 @@ export const listAudits = async ({ user, query }) => {
     where.auditorId = auditorId;
   }
 
-  if (status) {
-    where.status = status;
+  // Handle Archived vs Active filtering
+  if (status === "ARCHIVED") {
+    // Show only audits from archived dispatches
+    where.assignment = { status: "ARCHIVED" };
+  } else {
+    // Normal audit status filter if passed (NOT_STARTED, IN_PROGRESS, COMPLETED, etc.)
+    if (status) {
+      where.status = status;
+    }
+
+    // By default, exclude audits from archived dispatches and inactive stores
+    if (includeArchived !== "true" && includeArchived !== true) {
+      where.assignment = {
+        ...(where.assignment || {}),
+        status: { not: "ARCHIVED" },
+      };
+      where.store = {
+        ...(where.store || {}),
+        active: true,
+      };
+    }
   }
 
   if (assignmentId) {
@@ -625,7 +644,7 @@ export const listAudits = async ({ user, query }) => {
     prisma.audit.findMany({
       where,
       skip,
-      take: limit, // Explicit integer guarantees valid Prisma execution
+      take: limit,
       orderBy: { createdAt: "desc" },
       include: AUDIT_INCLUDE_RELATIONS,
     }),

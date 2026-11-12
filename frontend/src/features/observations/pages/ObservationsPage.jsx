@@ -56,13 +56,19 @@ export const ObservationsPage = () => {
 	const { stores = [], isLoading: storesLoading } = useStores();
 	const { data: periods = [] } = useSurveyPeriods();
 
+	// Fix 1: Filter to only Active stores (exclude archived/inactive stores)
+	const activeStores = useMemo(
+		() => (stores || []).filter((s) => s.active !== false),
+		[stores],
+	);
+
 	const selectedPeriod = periods.find(
 		(p) => String(p.id) === String(surveyPeriodId),
 	);
-	const selectedStore = stores.find((s) => String(s.id) === String(storeId));
+	const selectedStore = activeStores.find(
+		(s) => String(s.id) === String(storeId),
+	);
 
-	// No auto-fallback — when the user hasn't picked anything, the export
-	// menu defaults to "all stores" and "all survey periods".
 	const effectivePeriodId = surveyPeriodId || undefined;
 
 	const { download, downloading } = useReportDownload();
@@ -119,7 +125,7 @@ export const ObservationsPage = () => {
 						surveyPeriodId={effectivePeriodId}
 						periodLabel={selectedPeriod?.name || "All survey periods"}
 						scopeLabel={selectedStore ? selectedStore.name : "All competitors"}
-						availableStores={stores}
+						availableStores={activeStores}
 						availablePeriods={periods}
 						onDownload={handleExport}
 						downloading={downloading}
@@ -136,6 +142,7 @@ export const ObservationsPage = () => {
 			)}
 
 			<div className="grid grid-cols-1 gap-3 rounded-2xl border border-slate-200 bg-white p-3.5 shadow-xs sm:grid-cols-2">
+				{/* 1. Store Selection (Only Active Stores Displayed) */}
 				<div>
 					<label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-slate-400">
 						Store
@@ -145,12 +152,12 @@ export const ObservationsPage = () => {
 							value={storeId}
 							onChange={(e) => setFilter("storeId", e.target.value)}
 							disabled={storesLoading}
-							className="w-full appearance-none rounded-xl border border-slate-200 bg-slate-50/70 px-3.5 py-2.5 pr-9 text-xs font-semibold text-slate-800 focus:border-[#A41821] focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-[#A41821] disabled:opacity-50"
+							className="w-full appearance-none rounded-xl border border-slate-200 bg-slate-50/70 px-3.5 py-2.5 pr-9 text-xs font-semibold text-slate-800 focus:border-[#A41821] focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-[#A41821] disabled:opacity-50 cursor-pointer"
 						>
 							<option value="">
 								{storesLoading ? "Loading stores…" : "All stores"}
 							</option>
-							{stores.map((store) => (
+							{activeStores.map((store) => (
 								<option key={store.id} value={store.id}>
 									{store.name}
 									{store.area ? ` — ${store.area}` : ""}
@@ -174,6 +181,7 @@ export const ObservationsPage = () => {
 					</div>
 				</div>
 
+				{/* 2. Survey Period Selection (Collapsible Tree with Expanding Arrow) */}
 				<SurveyPeriodSelector
 					value={surveyPeriodId}
 					onChange={(value) => setFilter("surveyPeriodId", value)}
@@ -344,7 +352,7 @@ const FilterChip = ({ label, onRemove }) => (
 		<button
 			type="button"
 			onClick={onRemove}
-			className="rounded-full p-0.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+			className="rounded-full p-0.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700 cursor-pointer"
 			aria-label={`Remove ${label}`}
 		>
 			✕

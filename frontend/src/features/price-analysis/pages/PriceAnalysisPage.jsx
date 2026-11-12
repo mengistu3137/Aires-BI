@@ -175,7 +175,7 @@ export const PriceAnalysisPage = () => {
 
 				<div className="flex flex-wrap items-center gap-2">
 					{/* Both Aires and Queens have full access to Executive AI Briefs */}
-					{isManager && (
+				{/* 	{isManager && (
 						<button
 							type="button"
 							onClick={() => setShowAiReportModal(true)}
@@ -183,7 +183,7 @@ export const PriceAnalysisPage = () => {
 						>
 							<span>Executive AI Brief</span>
 						</button>
-					)}
+					)} */}
 
 					{/* Rapid Adjust visible to Aires Administrators */}
 					{isAdmin && flaggedAnalyses.length > 0 && (
