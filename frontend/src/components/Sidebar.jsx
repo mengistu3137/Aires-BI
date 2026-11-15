@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useAuth } from "@/hooks/useAuth.js";
 import { getNavigationForRole } from "@/app/config/navigation.js";
 import { usePeriods } from "@/features/survey/hooks/usePeriods.js";
@@ -6,6 +6,8 @@ import { PeriodManagementModal } from "@/features/survey/components/PeriodManage
 
 export const Sidebar = ({ activeTab, onSelectTab, isOpen, onClose }) => {
 	const { role, isManager } = useAuth();
+	
+	const [, setTick] = useState(0);
 	const { activePeriod } = usePeriods();
 	const [isPeriodModalOpen, setIsPeriodModalOpen] = useState(false);
 
@@ -16,6 +18,18 @@ export const Sidebar = ({ activeTab, onSelectTab, isOpen, onClose }) => {
 		if (onClose) onClose();
 	};
 
+
+	useEffect(() => {
+		const handleUpdate = () => setTick((t) => t + 1);
+		window.addEventListener("navigation_updated", handleUpdate);
+		window.addEventListener("permissions_updated", handleUpdate);
+		return () => {
+			window.removeEventListener("navigation_updated", handleUpdate);
+			window.removeEventListener("permissions_updated", handleUpdate);
+		};
+	}, []);
+
+	const navItems = getNavigationForRole(role);
 	return (
 		<>
 			{/* Mobile backdrop */}

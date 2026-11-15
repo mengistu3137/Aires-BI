@@ -387,37 +387,68 @@ export const completeAudit = async ({
 
   return formatAuditResponse(completedAudit);
 };
-/**
- * Update permitted mutable fields (only notes) while IN_PROGRESS.
- */
-export const updateAudit = async ({ auditId, user, notes }) => {
+export const updateAudit = async ({ auditId, user, notes, latitude, longitude, healToStore = false }) => {
   const audit = await prisma.audit.findUnique({
     where: { id: auditId },
+    include: { store: true },
   });
 
   if (!audit) {
     throw new ApiError(404, "Audit record not found");
   }
 
+  // Authorization: Admins, Managers, or the assigned Auditor can update
   if (user.role === "FIELD_AUDITOR" && audit.auditorId !== user.id) {
-    throw new ApiError(
-      403,
-      "Access forbidden: You cannot modify another auditor's visit",
-    );
+    throw new ApiError(403, "Access forbidden: You cannot modify another auditor's visit");
   }
 
-  if (audit.status !== "IN_PROGRESS") {
-    throw new ApiError(
-      409,
-      `Audit notes can only be updated while IN_PROGRESS. Current status: [${audit.status}]`,
-    );
+  const data = {};
+  if (notes !== undefined) data.notes = notes?.trim() || null;
+
+  // 1-Click Heal to Store GPS Coordinates (Heals "Outside Radius" to "GPS Verified")
+  if (healToStore && audit.store?.latitude && audit.store?.longitude) {
+    data.startLatitude = audit.store.latitude;
+    data.startLongitude = audit.store.longitude;
+    data.endLatitude = audit.store.latitude;
+    data.endLongitude = audit.store.longitude;
+    data.startAccuracyMeters = 5.0;
+    data.endAccuracyMeters = 5.0;
+    data.distanceFromStoreMeters = 0;
+    data.gpsValid = true;
+
+    const healTag = `[GPS Verified: Manually aligned to store anchor coordinates by ${user.name} (${user.role})]`;
+    data.notes = audit.notes ? `${audit.notes}\n${healTag}` : healTag;
+  } else if (latitude !== undefined && longitude !== undefined && latitude !== null && longitude !== null) {
+    // Manual Coordinate Adjustment
+    const lat = Number(latitude);
+    const lng = Number(longitude);
+    data.startLatitude = lat;
+    data.startLongitude = lng;
+    data.endLatitude = lat;
+    data.endLongitude = lng;
+    data.startAccuracyMeters = 10.0;
+    data.endAccuracyMeters = 10.0;
+
+    if (audit.store?.latitude && audit.store?.longitude) {
+      const dist = calculateDistanceMeters(
+        lat,
+        lng,
+        Number(audit.store.latitude),
+        Number(audit.store.longitude)
+      );
+      data.distanceFromStoreMeters = dist;
+      data.gpsValid = isWithinAuditRadius({ distanceMeters: dist, accuracyMeters: 10 });
+    } else {
+      data.gpsValid = true;
+    }
+
+    const editTag = `[GPS Manually Updated: Lat ${lat.toFixed(5)}, Lon ${lng.toFixed(5)} by ${user.name}]`;
+    data.notes = audit.notes ? `${audit.notes}\n${editTag}` : editTag;
   }
 
   const updatedAudit = await prisma.audit.update({
     where: { id: auditId },
-    data: {
-      notes: notes !== undefined ? notes?.trim() : audit.notes,
-    },
+    data,
     include: AUDIT_INCLUDE_RELATIONS,
   });
 

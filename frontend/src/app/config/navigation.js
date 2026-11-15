@@ -10,6 +10,7 @@ import {
   Bell,
   Users,
 } from "lucide-react";
+import { canRoleViewPage } from "@/permissions/permissions.js";
 
 export const NAVIGATION = [
   {
@@ -96,7 +97,8 @@ export const NAVIGATION = [
 
 export const getNavigationForRole = (role) => {
   if (!role) return [];
-  return NAVIGATION.filter((item) => item.roles.includes(role));
+  // Dynamically checks custom checkbox permissions saved in Privileges tab
+  return NAVIGATION.filter((item) => canRoleViewPage(role, item.id));
 };
 
 export const resolveActiveNavigationId = (pathname) => {

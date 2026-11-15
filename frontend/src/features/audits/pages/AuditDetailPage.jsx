@@ -24,7 +24,6 @@ import { useAuth } from "@/hooks/useAuth.js";
 import { ObservationEmptyState } from "@/features/observations/components/ObservationEmptyState.jsx";
 import { apiClient } from "@/services/client.js";
 
-// Resolve asset URL pointing authoritatively to the backend host
 const resolveAssetUrl = (url) => {
 	if (!url) return "";
 	if (url.startsWith("http://") || url.startsWith("https://")) return url;
@@ -57,9 +56,13 @@ export const AuditDetailPage = () => {
 	const [activeModal, setActiveModal] = useState(null);
 	const [selectedProofIndex, setSelectedProofIndex] = useState(null);
 
-	// GPS verification mode toggle
+	// GPS Verification Mode Toggle
 	const [enableGps, setEnableGps] = useState(true);
 	const [gpsErrorState, setGpsErrorState] = useState(null);
+
+	// Manual GPS Coordinates State (Persists across Start and Complete)
+	const [manualLat, setManualLat] = useState("");
+	const [manualLng, setManualLng] = useState("");
 
 	const completeForm = useForm({
 		defaultValues: { notes: "" },
@@ -70,6 +73,27 @@ export const AuditDetailPage = () => {
 		resolver: zodResolver(updateAuditSchema),
 		defaultValues: { notes: audit?.notes || "" },
 	});
+
+	// Pre-fill manual coordinates if store coordinates or start coordinates exist
+	useEffect(() => {
+		if (audit?.gps?.start?.latitude) {
+			setManualLat(String(audit.gps.start.latitude));
+			setManualLng(String(audit.gps.start.longitude));
+		} else if (audit?.store?.latitude) {
+			setManualLat(String(audit.store.latitude));
+			setManualLng(String(audit.store.longitude));
+		}
+	}, [audit]);
+
+	const handlePrefillStoreCoords = () => {
+		if (audit?.store?.latitude && audit?.store?.longitude) {
+			setManualLat(String(Number(audit.store.latitude).toFixed(6)));
+			setManualLng(String(Number(audit.store.longitude).toFixed(6)));
+			toast.success("Loaded store GPS coordinates");
+		} else {
+			toast.error("Store has no GPS coordinates registered");
+		}
+	};
 
 	const handleStart = async (forceBypass = false) => {
 		setGpsErrorState(null);
@@ -82,6 +106,13 @@ export const AuditDetailPage = () => {
 				setGpsErrorState(err.message || "GPS capture failed");
 				return;
 			}
+		} else if (!enableGps && manualLat && manualLng) {
+			// Use manually entered coordinates
+			coords = {
+				latitude: parseFloat(manualLat),
+				longitude: parseFloat(manualLng),
+				accuracyMeters: 10,
+			};
 		}
 
 		try {
@@ -91,14 +122,14 @@ export const AuditDetailPage = () => {
 					latitude: coords?.latitude ?? null,
 					longitude: coords?.longitude ?? null,
 					accuracyMeters: coords?.accuracyMeters ?? null,
-					gpsBypassed: forceBypass || !enableGps,
+					gpsBypassed: forceBypass || (!enableGps && !manualLat),
 				},
 			});
 			setActiveModal(null);
 			toast.success(
-				forceBypass || !enableGps
-					? "Visit started with photo-proof verification"
-					: "Visit started with GPS verification",
+				coords?.latitude
+					? "Visit started with verified GPS coordinates"
+					: "Visit started with photo-proof verification",
 			);
 		} catch (err) {
 			toast.error(err?.message || "Failed to start audit");
@@ -116,6 +147,21 @@ export const AuditDetailPage = () => {
 				setGpsErrorState(err.message || "GPS capture failed");
 				return;
 			}
+		} else if (!enableGps) {
+			// Auto-reuse manually captured location from Start Visit
+			if (manualLat && manualLng) {
+				coords = {
+					latitude: parseFloat(manualLat),
+					longitude: parseFloat(manualLng),
+					accuracyMeters: 10,
+				};
+			} else if (audit?.gps?.start?.latitude) {
+				coords = {
+					latitude: Number(audit.gps.start.latitude),
+					longitude: Number(audit.gps.start.longitude),
+					accuracyMeters: 10,
+				};
+			}
 		}
 
 		try {
@@ -126,20 +172,35 @@ export const AuditDetailPage = () => {
 					latitude: coords?.latitude ?? null,
 					longitude: coords?.longitude ?? null,
 					accuracyMeters: coords?.accuracyMeters ?? null,
-					gpsBypassed: forceBypass || !enableGps,
+					gpsBypassed: forceBypass || !coords?.latitude,
 					notes: notes?.trim() || undefined,
 				},
 			});
 
 			setActiveModal(null);
 			completeForm.reset({ notes: "" });
-			toast.success(
-				forceBypass || !enableGps
-					? "Visit completed with photo-proof verification"
-					: "Visit completed with GPS verification",
-			);
+			toast.success("Visit completed and verified");
 		} catch (err) {
 			toast.error(err?.message || "Failed to complete audit");
+		}
+	};
+
+	// 1-Click Heal Audit GPS Location (Heals "Outside Radius" to "GPS Verified")
+	const handleHealGpsLocation = async (useStoreAnchor = true) => {
+		try {
+			await updateAudit.mutateAsync({
+				auditId,
+				payload: useStoreAnchor
+					? { healToStore: true }
+					: {
+							latitude: parseFloat(manualLat),
+							longitude: parseFloat(manualLng),
+						},
+			});
+			setActiveModal(null);
+			toast.success("Audit location healed and marked GPS Verified!");
+		} catch (err) {
+			toast.error(err?.message || "Failed to update GPS location");
 		}
 	};
 
@@ -225,6 +286,7 @@ export const AuditDetailPage = () => {
 	const canViewObservations = isManager || isAdmin;
 
 	const hasPhotoProof = (audit.evidencePhotos?.length || 0) > 0;
+	const canHealGps = isAdmin || isManager;
 
 	return (
 		<div className="space-y-4">
@@ -385,7 +447,7 @@ export const AuditDetailPage = () => {
 				</div>
 			</div>
 
-			{/* Verification Status Banner */}
+			{/* Store Visit Verification & GPS Management Banner */}
 			<div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
 				<div className="flex items-start justify-between gap-3">
 					<div>
@@ -415,6 +477,18 @@ export const AuditDetailPage = () => {
 								<span className="h-1.5 w-1.5 rounded-full bg-[#FE7914]" />
 								Outside Radius
 							</span>
+						)}
+
+						{/* 1-Click Heal GPS Button for Management */}
+						{canHealGps && (
+							<button
+								type="button"
+								onClick={() => setActiveModal("healGps")}
+								className="rounded-md border border-slate-300 bg-white px-2 py-0.5 text-[10px] font-bold text-slate-700 hover:bg-slate-50 transition cursor-pointer"
+								title="Manually adjust or heal coordinates to verify this visit"
+							>
+								Heal GPS Location
+							</button>
 						)}
 					</div>
 				</div>
@@ -511,7 +585,7 @@ export const AuditDetailPage = () => {
 				)}
 			</div>
 
-			{/* Fullscreen Carousel Lightbox Modal with Swipe & Keyboard Support */}
+			{/* Fullscreen Carousel Lightbox Modal */}
 			{selectedProofIndex !== null &&
 				audit.evidencePhotos?.[selectedProofIndex] && (
 					<LightboxModal
@@ -523,7 +597,7 @@ export const AuditDetailPage = () => {
 					/>
 				)}
 
-			{/* Start Visit Modal with GPS Option */}
+			{/* ── Start Visit Modal with Manual GPS Expandable Card ── */}
 			{activeModal === "start" && (
 				<Modal title="Start Audit Visit" onClose={() => setActiveModal(null)}>
 					<div className="space-y-3">
@@ -551,6 +625,57 @@ export const AuditDetailPage = () => {
 								</span>
 							</div>
 						</label>
+
+						{/* Expandable Manual GPS Entry Card when GPS is Unchecked */}
+						{!enableGps && (
+							<div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-3 space-y-2.5 animate-in fade-in">
+								<div className="flex items-center justify-between">
+									<span className="text-[11px] font-bold text-emerald-900 uppercase tracking-wider">
+										Manual Location (Optional)
+									</span>
+									<button
+										type="button"
+										onClick={handlePrefillStoreCoords}
+										className="text-[10px] font-bold text-[#017C4D] hover:underline cursor-pointer"
+									>
+										Use Store GPS Anchor
+									</button>
+								</div>
+
+								<div className="grid grid-cols-2 gap-2 text-xs">
+									<div>
+										<label className="block text-[10px] font-bold text-slate-500 mb-0.5">
+											Latitude
+										</label>
+										<input
+											type="number"
+											step="0.000001"
+											placeholder="e.g. 9.03045"
+											value={manualLat}
+											onChange={(e) => setManualLat(e.target.value)}
+											className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 font-mono text-xs focus:border-[#017C4D] outline-hidden"
+										/>
+									</div>
+									<div>
+										<label className="block text-[10px] font-bold text-slate-500 mb-0.5">
+											Longitude
+										</label>
+										<input
+											type="number"
+											step="0.000001"
+											placeholder="e.g. 38.75210"
+											value={manualLng}
+											onChange={(e) => setManualLng(e.target.value)}
+											className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 font-mono text-xs focus:border-[#017C4D] outline-hidden"
+										/>
+									</div>
+								</div>
+								<p className="text-[10px] text-slate-500">
+									This location will be saved and automatically reused when you
+									complete the visit.
+								</p>
+							</div>
+						)}
 
 						{isCapturing && (
 							<div className="flex items-center gap-2 text-xs text-slate-500">
@@ -593,7 +718,7 @@ export const AuditDetailPage = () => {
 				</Modal>
 			)}
 
-			{/* Complete Visit Modal with GPS Option */}
+			{/* ── Complete Visit Modal (Reuses Start Location if Manual) ── */}
 			{activeModal === "complete" && (
 				<Modal
 					title="Complete Audit Visit"
@@ -625,10 +750,19 @@ export const AuditDetailPage = () => {
 									Capture End GPS Location
 								</span>
 								<span className="text-slate-500 text-[11px]">
-									Uncheck if completing offline or indoors
+									Uncheck to reuse visit start location or photo proof
 								</span>
 							</div>
 						</label>
+
+						{!enableGps && (manualLat || audit?.gps?.start?.latitude) && (
+							<div className="rounded-lg bg-emerald-50/70 border border-emerald-200 px-3 py-2 text-[11px] text-emerald-800 font-mono">
+								✓ Reusing visit coordinates: Lat{" "}
+								{Number(manualLat || audit?.gps?.start?.latitude).toFixed(5)},
+								Lon{" "}
+								{Number(manualLng || audit?.gps?.start?.longitude).toFixed(5)}
+							</div>
+						)}
 
 						<div>
 							<label className="text-xs font-semibold text-slate-600">
@@ -683,6 +817,99 @@ export const AuditDetailPage = () => {
 							</button>
 						</div>
 					</form>
+				</Modal>
+			)}
+
+			{/* ── 1-Click Heal / Update GPS Modal (Heals "Outside Radius") ── */}
+			{activeModal === "healGps" && (
+				<Modal
+					title="Heal & Update GPS Location"
+					onClose={() => setActiveModal(null)}
+				>
+					<div className="space-y-3.5 text-xs">
+						<p className="text-slate-600">
+							Adjust or synchronize physical GPS coordinates for this store
+							audit to mark the visit as <strong>GPS Verified</strong>.
+						</p>
+
+						{/* Store Anchor Quick Heal Button */}
+						{audit?.store?.latitude && (
+							<div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 space-y-2">
+								<div className="flex items-center justify-between">
+									<span className="font-bold text-[#017C4D] text-xs">
+										Physical Store GPS Anchor
+									</span>
+									<span className="font-mono text-[10px] text-slate-500">
+										Lat {Number(audit.store.latitude).toFixed(5)}, Lon{" "}
+										{Number(audit.store.longitude).toFixed(5)}
+									</span>
+								</div>
+								<p className="text-[11px] text-slate-600 leading-snug">
+									Align visit coordinates directly to the physical store anchor.
+									This recalculates distance to 0 m and marks status as{" "}
+									<strong>GPS Verified</strong>.
+								</p>
+								<button
+									type="button"
+									onClick={() => handleHealGpsLocation(true)}
+									className="w-full rounded-lg bg-[#017C4D] hover:bg-[#015E3A] py-2 text-xs font-bold text-white shadow-xs cursor-pointer transition"
+								>
+									Align to Store Anchor &amp; Mark Verified
+								</button>
+							</div>
+						)}
+
+						{/* Manual Coordinate Editing */}
+						<div className="space-y-2 pt-2 border-t border-slate-100">
+							<span className="font-bold text-slate-700 block">
+								Or Custom Coordinates
+							</span>
+							<div className="grid grid-cols-2 gap-2 font-mono">
+								<div>
+									<label className="block text-[10px] font-bold text-slate-400 mb-0.5">
+										Latitude
+									</label>
+									<input
+										type="number"
+										step="0.000001"
+										value={manualLat}
+										onChange={(e) => setManualLat(e.target.value)}
+										className="w-full rounded-lg border border-slate-300 p-2 text-xs font-bold text-slate-800 focus:border-[#A41821] outline-hidden"
+									/>
+								</div>
+								<div>
+									<label className="block text-[10px] font-bold text-slate-400 mb-0.5">
+										Longitude
+									</label>
+									<input
+										type="number"
+										step="0.000001"
+										value={manualLng}
+										onChange={(e) => setManualLng(e.target.value)}
+										className="w-full rounded-lg border border-slate-300 p-2 text-xs font-bold text-slate-800 focus:border-[#A41821] outline-hidden"
+									/>
+								</div>
+							</div>
+						</div>
+
+						<div className="mt-4 flex justify-end gap-2 pt-2 border-t border-slate-100">
+							<button
+								type="button"
+								onClick={() => setActiveModal(null)}
+								className="rounded-xl border border-slate-200 px-4 py-2 font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
+							>
+								Cancel
+							</button>
+							<button
+								type="button"
+								onClick={() => handleHealGpsLocation(false)}
+								disabled={!manualLat || !manualLng}
+								className="rounded-xl bg-[#A41821] hover:bg-[#7F1219] px-4 py-2 font-bold text-white shadow-xs cursor-pointer disabled:opacity-50"
+							>
+								Save Coordinates
+							</button>
+						</div>
+					</div>
 				</Modal>
 			)}
 
@@ -912,7 +1139,6 @@ const LightboxModal = ({
 	const current = photos[currentIndex];
 	const total = photos.length;
 
-	// ✅ Fixed syntax: wrapped in proper arrow function parentheses
 	const handleNext = useCallback(() => {
 		onIndexChange((prev) => (prev < total - 1 ? prev + 1 : 0));
 	}, [onIndexChange, total]);
@@ -921,7 +1147,6 @@ const LightboxModal = ({
 		onIndexChange((prev) => (prev > 0 ? prev - 1 : total - 1));
 	}, [onIndexChange, total]);
 
-	// Keyboard navigation (Arrow keys & Escape)
 	useEffect(() => {
 		const handleKeyDown = (e) => {
 			if (e.key === "ArrowRight") handleNext();
@@ -932,7 +1157,6 @@ const LightboxModal = ({
 		return () => window.removeEventListener("keydown", handleKeyDown);
 	}, [handleNext, handlePrev, onClose]);
 
-	// Prevent background scroll while lightbox is open
 	useEffect(() => {
 		document.body.style.overflow = "hidden";
 		return () => {
@@ -940,7 +1164,6 @@ const LightboxModal = ({
 		};
 	}, []);
 
-	// Touch Swipe Handlers for Mobile Devices
 	const onTouchStart = (e) => {
 		setTouchStartX(e.touches[0].clientX);
 	};
@@ -951,9 +1174,9 @@ const LightboxModal = ({
 		const deltaX = touchStartX - touchEndX;
 
 		if (deltaX > 50) {
-			handleNext(); // Swipe Left -> Next Image
+			handleNext();
 		} else if (deltaX < -50) {
-			handlePrev(); // Swipe Right -> Previous Image
+			handlePrev();
 		}
 		setTouchStartX(null);
 	};
@@ -962,7 +1185,7 @@ const LightboxModal = ({
 
 	return (
 		<div
-			className="fixed inset-0 z-60 flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-2 sm:p-4 select-none animate-in fade-in duration-150"
+			className="fixed inset-0 z-60 flex items-center justify-center bg-slate-955/90 backdrop-blur-md p-2 sm:p-4 select-none animate-in fade-in duration-150"
 			onClick={onClose}
 		>
 			<div
@@ -971,7 +1194,6 @@ const LightboxModal = ({
 				onTouchStart={onTouchStart}
 				onTouchEnd={onTouchEnd}
 			>
-				{/* Top Floating Header */}
 				<div className="flex items-center justify-between p-3.5 bg-gradient-to-b from-black/80 to-transparent z-10 text-white">
 					<div className="flex items-center gap-2">
 						<span className="rounded-md bg-white/20 px-2 py-0.5 font-mono text-[11px] font-bold">
@@ -992,7 +1214,6 @@ const LightboxModal = ({
 					</button>
 				</div>
 
-				{/* Center Main Image Canvas */}
 				<div className="relative flex-1 flex items-center justify-center min-h-[50vh] max-h-[72vh] p-2 bg-black">
 					<img
 						key={current.url}
@@ -1009,7 +1230,6 @@ const LightboxModal = ({
 						}}
 					/>
 
-					{/* Desktop Left/Right Navigation Chevrons */}
 					{total > 1 && (
 						<>
 							<button
@@ -1039,7 +1259,6 @@ const LightboxModal = ({
 					)}
 				</div>
 
-				{/* Bottom Metadata & Mobile Navigation Bar */}
 				<div className="p-3 bg-black/90 border-t border-white/10 text-white flex flex-col sm:flex-row items-center justify-between gap-2 text-xs">
 					<div className="text-center sm:text-left">
 						<span className="font-mono text-emerald-400 font-bold text-sm block">
@@ -1047,12 +1266,11 @@ const LightboxModal = ({
 								? `${Number(current.price).toFixed(2)} ETB`
 								: current.availability}
 						</span>
-						<span className="text-[10px] text-slate-400 font-mono">
+						<p className="text-[10px] text-slate-400 font-mono">
 							Captured {new Date(current.capturedAt).toLocaleString()}
-						</span>
+						</p>
 					</div>
 
-					{/* Mobile Step Buttons */}
 					{total > 1 && (
 						<div className="flex items-center gap-2 sm:hidden w-full justify-between pt-1">
 							<button
