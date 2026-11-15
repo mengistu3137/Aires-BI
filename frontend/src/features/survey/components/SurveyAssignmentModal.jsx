@@ -53,13 +53,22 @@ export const SurveyAssignmentModal = ({
 	storeId: initialStoreId = null,
 	surveyPeriodId: initialSurveyPeriodId = null,
 }) => {
-	const { stores = [], isLoading: storesLoading } = useStores();
+	// Query stores with active flag
+	const { stores = [], isLoading: storesLoading } = useStores({
+		active: "true",
+	});
 	const { users = [] } = useUsers();
 	const { products = [], isLoading: productsLoading } = useProducts();
 	const { activePeriod, periods = [] } = usePeriods();
 
 	const createBatch = useCreateBatchAssignment();
 	const updateAllocations = useUpdateStoreAllocations();
+
+	// Strict Active Stores filter (displays only active physical stores)
+	const activeStores = useMemo(
+		() => (stores || []).filter((s) => s.active !== false),
+		[stores],
+	);
 
 	const openPeriods = useMemo(
 		() => (periods || []).filter((p) => p.status === "OPEN"),
@@ -216,7 +225,8 @@ export const SurveyAssignmentModal = ({
 			initialSurveyPeriodId || activePeriod?.id || openPeriods[0]?.id || "";
 
 		setSurveyPeriodId(defaultCycleId);
-		setStoreId(initialStoreId || stores[0]?.id || "");
+		// Default to initial store or the first ACTIVE store (never inactive)
+		setStoreId(initialStoreId || activeStores[0]?.id || "");
 
 		// Clean new dispatch: start completely unselected
 		if (!initialStoreId) {
@@ -229,7 +239,7 @@ export const SurveyAssignmentModal = ({
 		openPeriods,
 		initialStoreId,
 		initialSurveyPeriodId,
-		stores,
+		activeStores,
 	]);
 
 	// Close dropdown when clicking outside
@@ -491,7 +501,6 @@ export const SurveyAssignmentModal = ({
 				initialStoreId && initialStoreId !== storeId
 					? initialStoreId
 					: undefined,
-			// Send previousSurveyPeriodId so the backend migrates the existing completed dispatch
 			previousSurveyPeriodId:
 				initialSurveyPeriodId && initialSurveyPeriodId !== surveyPeriodId
 					? initialSurveyPeriodId
@@ -512,7 +521,7 @@ export const SurveyAssignmentModal = ({
 
 	if (!isOpen) return null;
 
-	const selectedStore = stores.find((s) => s.id === storeId);
+	const selectedStore = activeStores.find((s) => s.id === storeId);
 	const selectedCycleObj = openPeriods.find((p) => p.id === surveyPeriodId);
 
 	return (
@@ -668,10 +677,10 @@ export const SurveyAssignmentModal = ({
 							)}
 						</div>
 
-						{/* Store Selector */}
+						{/* Store Selector: Displays only active stores */}
 						<div>
 							<label className="mb-1 block font-bold text-slate-700">
-								Target Store Location
+								Target Store Location (Active only)
 							</label>
 							<select
 								value={storeId}
@@ -679,11 +688,17 @@ export const SurveyAssignmentModal = ({
 								disabled={storesLoading || isLoadingExisting}
 								className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-800 outline-hidden focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] cursor-pointer disabled:bg-slate-100 disabled:cursor-not-allowed"
 							>
-								{stores.map((s) => (
-									<option key={s.id} value={s.id}>
-										{s.name} ({s.type})
+								{activeStores.length === 0 ? (
+									<option value="" disabled>
+										No active stores available
 									</option>
-								))}
+								) : (
+									activeStores.map((s) => (
+										<option key={s.id} value={s.id}>
+											{s.name} ({s.type})
+										</option>
+									))
+								)}
 							</select>
 						</div>
 					</div>
@@ -714,7 +729,6 @@ export const SurveyAssignmentModal = ({
 						</div>
 
 						{/* Survey Track Navigation Tabs */}
-						{/* AFTER (Hides horizontal scrollbar completely while staying touch/wheel scrollable) */}
 						<div className="flex items-center gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-slate-100 p-1 no-scrollbar">
 							<button
 								type="button"
