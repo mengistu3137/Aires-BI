@@ -81,7 +81,7 @@ export const PeriodManagementModal = ({ isOpen, onClose }) => {
 		}));
 	};
 
-	// Group daily cycles and segregate Active vs Archived weekly cycles
+// Group daily cycles and segregate Active vs Archived weekly cycles
 	const { activeWeeklyCycles, archivedWeeklyCycles, dailyByParent } =
 		useMemo(() => {
 			const active = [];
@@ -89,8 +89,8 @@ export const PeriodManagementModal = ({ isOpen, onClose }) => {
 			const dailyMap = {};
 
 			(periods || []).forEach((p) => {
-				const isDaily =
-					p.id.includes("-DAILY-") || p.name?.toLowerCase().includes("daily");
+				// Fixed: Only true daily cycles contain '-DAILY-' in their ID
+				const isDaily = p.id.includes("-DAILY-");
 
 				if (isDaily) {
 					const parentKey = p.id.split("-DAILY-")[0];

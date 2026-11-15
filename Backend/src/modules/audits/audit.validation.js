@@ -57,16 +57,6 @@ export const createAuditSchema = z.object({
 });
 
 
-export const updateAuditSchema = z
-  .object({
-    notes: z
-      .string()
-      .max(2000, "Notes cannot exceed 2000 characters")
-      .nullable()
-      .optional(),
-  })
-  .strict("Only notes can be updated through this endpoint");
-
 
 
 export const cancelAuditSchema = z.object({
@@ -112,4 +102,14 @@ export const listAuditsQuerySchema = z.object({
     .datetime({ offset: true })
     .or(z.string().regex(/^\d{4}-\d{2}-\d{2}$/))
     .optional(),
+});
+export const updateAuditSchema = z.object({
+  notes: z
+    .string()
+    .max(2000, "Notes cannot exceed 2000 characters")
+    .nullable()
+    .optional(),
+  latitude: coordinateLatitude,
+  longitude: coordinateLongitude,
+  healToStore: z.boolean().optional(),
 });

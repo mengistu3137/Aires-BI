@@ -40,16 +40,19 @@ export const startAudit = async (req, res, next) => {
 
 export const updateAudit = async (req, res, next) => {
   try {
-    const audit = await auditService.updateAudit({
+    const observation = await auditService.updateAudit({
       auditId: req.params.auditId,
       user: req.user,
       notes: req.body.notes,
+      latitude: req.body.latitude,
+      longitude: req.body.longitude,
+      healToStore: req.body.healToStore,
     });
 
     res.status(200).json({
       status: "success",
       message: "Audit visit updated successfully",
-      data: audit,
+      data: observation,
     });
   } catch (error) {
     next(error);
