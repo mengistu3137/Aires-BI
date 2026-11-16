@@ -5,6 +5,8 @@ import { apiClient } from "@/services/client.js";
 import { QueensPriceCreateEditForm } from "../components/QueensPriceCreateEditForm.jsx";
 import { useCreateQueensPrice } from "../hooks/useQueensPriceMutations.js";
 import { useProductQueensPriceHistory } from "../hooks/useProductQueensPriceHistory.js";
+import { useAuth } from "@/hooks/useAuth.js";
+import { hasPermission, PERMISSIONS } from "@/permissions/permissions.js";
 
 /**
  * Robust extractor to handle any Express API envelope:
@@ -57,6 +59,8 @@ export const CreateQueensPricePage = () => {
   );
 
   const existingPeriods = historyData?.prices || [];
+  const { user } = useAuth();
+  const canEditPrices = hasPermission(user?.role, PERMISSIONS.EDIT_BENCHMARKS);
 
   const handleSubmit = async (payload) => {
     setSubmitError(null);
@@ -70,6 +74,24 @@ export const CreateQueensPricePage = () => {
       );
     }
   };
+
+  if (!canEditPrices) {
+    return (
+      <div className="mx-auto max-w-lg rounded-2xl border border-slate-200 bg-white p-6 text-center">
+        <p className="text-sm font-bold text-slate-800">View only</p>
+        <p className="mt-1 text-xs text-slate-500">
+          Updating Queens benchmark prices is not enabled for this role.
+        </p>
+        <button
+          type="button"
+          onClick={() => navigate("/queens-prices")}
+          className="mt-4 rounded-xl bg-[#A41821] px-4 py-2 text-xs font-bold text-white"
+        >
+          Back to Queens prices
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-2xl space-y-4 pb-12">

@@ -6,10 +6,14 @@ import { useProductQueensPriceHistory } from "../hooks/useProductQueensPriceHist
 import { useCurrentQueensPrice } from "../hooks/useCurrentQueensPrice.js";
 import { QueensPriceCurrentSummary } from "../components/QueensPriceCurrentSummary.jsx";
 import { QueensPriceHistory } from "../components/QueensPriceHistory.jsx";
+import { useAuth } from "@/hooks/useAuth.js";
+import { hasPermission, PERMISSIONS } from "@/permissions/permissions.js";
 
 export const ProductQueensPricesPage = () => {
   const { productId } = useParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const canEditPrices = hasPermission(user?.role, PERMISSIONS.EDIT_BENCHMARKS);
 
   // 1. Authoritative product master data query
   const {
@@ -116,7 +120,11 @@ export const ProductQueensPricesPage = () => {
         product={product}
         currentPrice={currentPrice}
         historyCount={prices.length}
-        onAdd={() => navigate(`/queens-prices/new?productId=${productId}`)}
+        onAdd={
+          canEditPrices
+            ? () => navigate(`/queens-prices/new?productId=${productId}`)
+            : undefined
+        }
       />
 
       {/* Historical price timeline */}
@@ -126,7 +134,11 @@ export const ProductQueensPricesPage = () => {
           isLoading={false}
           isError={isHistoryError}
           error={historyError}
-          onAdd={() => navigate(`/queens-prices/new?productId=${productId}`)}
+          onAdd={
+            canEditPrices
+              ? () => navigate(`/queens-prices/new?productId=${productId}`)
+              : undefined
+          }
         />
       </div>
     </div>

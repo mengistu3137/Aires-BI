@@ -11,13 +11,15 @@ import {
 } from "../utils/queens-price.utils.js";
 import { QueensPriceStatusBadge } from "../components/QueensPriceStatusBadge.jsx";
 import { useAuth } from "@/hooks/useAuth.js";
+import { hasPermission, PERMISSIONS } from "@/permissions/permissions.js";
 import { formatProductName } from "@/utils/formatters.js";
 import toast from "react-hot-toast";
 
 export const QueensPriceDetailsPage = () => {
 	const { id } = useParams();
 	const navigate = useNavigate();
-	const { isManager } = useAuth();
+	const { user } = useAuth();
+	const canEditPrices = hasPermission(user?.role, PERMISSIONS.EDIT_BENCHMARKS);
 
 	const { data: queensPrice, isLoading, isError, error } = useQueensPrice(id);
 	const { products = [] } = useProducts();
@@ -261,7 +263,7 @@ export const QueensPriceDetailsPage = () => {
 
 					{/* Primary Actions */}
 					<div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-100">
-						{isManager && (
+						{canEditPrices && (
 							<button
 								type="button"
 								onClick={() => setIsQuickEntryOpen(true)}
@@ -271,7 +273,7 @@ export const QueensPriceDetailsPage = () => {
 							</button>
 						)}
 
-						{isManager && (
+						{canEditPrices && (
 							<button
 								type="button"
 								onClick={() => navigate(`/queens-prices/${id}/edit`)}

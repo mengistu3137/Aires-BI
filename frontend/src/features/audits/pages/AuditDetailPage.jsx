@@ -21,6 +21,7 @@ import {
 } from "../schemas/audit.schema.js";
 import { calculateAuditProgress } from "../utils/audit.utils.js";
 import { useAuth } from "@/hooks/useAuth.js";
+import { hasPermission, PERMISSIONS } from "@/permissions/permissions.js";
 import { ObservationEmptyState } from "@/features/observations/components/ObservationEmptyState.jsx";
 import { apiClient } from "@/services/client.js";
 
@@ -272,21 +273,27 @@ export const AuditDetailPage = () => {
 	const progress = calculateAuditProgress(audit);
 	const isAssignedAuditor = Boolean(user?.id && audit.auditor?.id === user.id);
 
+	const canReviewAudits = hasPermission(
+		user?.role,
+		PERMISSIONS.FINAL_QC_APPROVAL,
+	);
 	const canStart = audit.status === "NOT_STARTED" && isAssignedAuditor;
 	const canComplete = audit.status === "IN_PROGRESS" && isAssignedAuditor;
 	const canCancel =
 		["NOT_STARTED", "IN_PROGRESS"].includes(audit.status) &&
-		(isAssignedAuditor || isManager);
+		(isAssignedAuditor || canReviewAudits);
 	const canReview =
-		isManager && ["IN_PROGRESS", "COMPLETED"].includes(audit.status);
+		canReviewAudits && ["IN_PROGRESS", "COMPLETED"].includes(audit.status);
 	const canEditNotes = audit.status === "IN_PROGRESS" && isAssignedAuditor;
 
 	const canManageObservations =
-		isAssignedAuditor && audit.status === "IN_PROGRESS";
+		isAssignedAuditor &&
+		user?.role === "FIELD_AUDITOR" &&
+		audit.status === "IN_PROGRESS";
 	const canViewObservations = isManager || isAdmin;
 
 	const hasPhotoProof = (audit.evidencePhotos?.length || 0) > 0;
-	const canHealGps = isAdmin || isManager;
+	const canHealGps = canReviewAudits;
 
 	return (
 		<div className="space-y-4">

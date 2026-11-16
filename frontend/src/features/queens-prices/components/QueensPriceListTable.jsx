@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { formatDate, formatPrice } from "../utils/queens-price.utils.js";
 import { QueensPriceStatusBadge } from "./QueensPriceStatusBadge.jsx";
 import { formatProductName } from "@/utils/formatters.js";
+import { useAuth } from "@/hooks/useAuth.js";
+import { hasPermission, PERMISSIONS } from "@/permissions/permissions.js";
 
 const TRACK_BADGES = {
 	DAILY: "bg-emerald-50 text-[#017C4D] border-emerald-200",
@@ -13,6 +15,8 @@ const TRACK_BADGES = {
 
 export const QueensPriceListTable = ({ prices = [] }) => {
 	const navigate = useNavigate();
+	const { user } = useAuth();
+	const canEditPrices = hasPermission(user?.role, PERMISSIONS.EDIT_BENCHMARKS);
 
 	if (prices.length === 0) {
 		return (
@@ -137,7 +141,7 @@ export const QueensPriceListTable = ({ prices = [] }) => {
 
 									{/* Action */}
 									<td className="px-4 py-3 text-right">
-										{item.id ? (
+										{canEditPrices && item.id ? (
 											<button
 												type="button"
 												onClick={() => navigate(`/queens-prices/${item.id}`)}
@@ -145,7 +149,7 @@ export const QueensPriceListTable = ({ prices = [] }) => {
 											>
 												Update Price
 											</button>
-										) : (
+										) : canEditPrices ? (
 											<button
 												type="button"
 												onClick={() =>
@@ -156,6 +160,19 @@ export const QueensPriceListTable = ({ prices = [] }) => {
 												className="cursor-pointer font-bold text-[#017C4D] hover:underline"
 											>
 												+ Set Price
+											</button>
+										) : (
+											<button
+												type="button"
+												onClick={() =>
+													item.id
+														? navigate(`/queens-prices/${item.id}`)
+														: undefined
+												}
+												disabled={!item.id}
+												className="cursor-pointer font-bold text-slate-600 hover:underline disabled:cursor-default disabled:no-underline disabled:text-slate-400"
+											>
+												View
 											</button>
 										)}
 									</td>

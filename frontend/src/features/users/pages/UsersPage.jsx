@@ -24,13 +24,14 @@ const ACTION_DESCRIPTIONS = [
 	{
 		id: PERMISSIONS.FINAL_QC_APPROVAL,
 		label: "Approve & Reject Observations",
-		description: "Permits verifying or rejecting field auditor price captures.",
+		description:
+			"Permits marking a visit for review, and approving or rejecting field price captures. Leave unchecked for view-only visits.",
 	},
 	{
 		id: PERMISSIONS.EDIT_BENCHMARKS,
 		label: "Update Queens Benchmark Prices",
 		description:
-			"Permits changing benchmark product prices from price analysis.",
+			"Permits setting and updating Queens benchmark prices. Leave unchecked for view-only access.",
 	},
 	{
 		id: PERMISSIONS.DISPATCH_SURVEYS,

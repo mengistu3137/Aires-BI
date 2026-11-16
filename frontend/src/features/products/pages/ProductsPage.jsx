@@ -9,6 +9,7 @@ import { useProducts } from "../hooks/useProducts.js";
 import { parseItemMasterWorkbook } from "../utils/parseItemMaster.js";
 import { ProductFormModal } from "../components/ProductFormModal .jsx";
 import { useAuth } from "@/hooks/useAuth.js";
+import { hasPermission, PERMISSIONS } from "@/permissions/permissions.js";
 
 const TIER_FILTERS = [
 	{ label: "ALL", frequency: null },
@@ -49,7 +50,8 @@ export const ProductsPage = () => {
 		deleteProduct,
 		isDeleting,
 	} = useProducts();
-	const { isAdmin } = useAuth();
+	const { user, isAdmin } = useAuth();
+	const canEditPrices = hasPermission(user?.role, PERMISSIONS.EDIT_BENCHMARKS);
 	const [selectedTier, setSelectedTier] = useState("ALL");
 	const [activeProductForPrice, setActiveProductForPrice] = useState(null);
 	const [newPrice, setNewPrice] = useState("");
@@ -299,6 +301,7 @@ export const ProductsPage = () => {
 			render: (row) => (
 				<Can role={["ADMIN", "MANAGER"]}>
 					<div className="flex items-center justify-end gap-3">
+						{canEditPrices && (
 						<button
 							type="button"
 							onClick={() => {
@@ -309,6 +312,7 @@ export const ProductsPage = () => {
 						>
 							Update Price
 						</button>
+						)}
 						<button
 							type="button"
 							onClick={() => openEdit(row)}
