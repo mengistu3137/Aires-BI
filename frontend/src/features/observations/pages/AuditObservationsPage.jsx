@@ -37,7 +37,7 @@ const buildClientObservationId = (auditId, productId) =>
 export const AuditObservationsPage = () => {
 	const { auditId } = useParams();
 	const navigate = useNavigate();
-	const { user, isManager, isAdmin } = useAuth();
+	const { user } = useAuth();
 
 	const { data: audit, isLoading: auditLoading } = useAudit(auditId);
 	const { data, isLoading, isError, error } = useAuditObservations(auditId, {
@@ -50,7 +50,10 @@ export const AuditObservationsPage = () => {
 	const auditor = audit?.auditor;
 
 	const isAssignedAuditor = Boolean(user?.id && audit?.auditor?.id === user.id);
-	const isPrivileged = isManager || isAdmin;
+	const canRecordObservations =
+		user?.role === "FIELD_AUDITOR" &&
+		isAssignedAuditor &&
+		audit?.status === "IN_PROGRESS";
 
 	if (auditLoading || isLoading) {
 		return (
@@ -79,7 +82,7 @@ export const AuditObservationsPage = () => {
 		);
 	}
 
-	if (isAssignedAuditor) {
+	if (canRecordObservations) {
 		return (
 			<CollectionView
 				audit={audit}

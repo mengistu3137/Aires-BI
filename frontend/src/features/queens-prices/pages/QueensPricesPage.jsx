@@ -4,6 +4,8 @@ import { useQueensPrices } from "../hooks/useQueensPrices.js";
 import { QueensPriceFilters } from "../components/QueensPriceFilters.jsx";
 import { QueensPriceListTable } from "../components/QueensPriceListTable.jsx";
 import { QueensPriceEmptyState } from "../components/QueensPriceEmptyState.jsx";
+import { useAuth } from "@/hooks/useAuth.js";
+import { hasPermission, PERMISSIONS } from "@/permissions/permissions.js";
 
 // Track hierarchy order when viewing ALL
 const FREQ_ORDER = {
@@ -15,6 +17,8 @@ const FREQ_ORDER = {
 
 export const QueensPricesPage = () => {
 	const navigate = useNavigate();
+	const { user } = useAuth();
+	const canEditPrices = hasPermission(user?.role, PERMISSIONS.EDIT_BENCHMARKS);
 	const [page, setPage] = useState(1);
 	const [searchInput, setSearchInput] = useState("");
 	const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -90,6 +94,7 @@ export const QueensPricesPage = () => {
 						Bi-Yearly catalog tracks ordered by client Excel sequence.
 					</p>
 				</div>
+				{canEditPrices && (
 				<button
 					type="button"
 					onClick={() => navigate("/queens-prices/new")}
@@ -110,6 +115,7 @@ export const QueensPricesPage = () => {
 					</svg>
 					Add Queens Price
 				</button>
+				)}
 			</div>
 
 			{/* Filters with 4 Track Tabs */}
@@ -178,7 +184,7 @@ export const QueensPricesPage = () => {
 									>
 										Clear Search
 									</button>
-								) : (
+								) : canEditPrices ? (
 									<button
 										type="button"
 										onClick={() => navigate("/queens-prices/new")}
@@ -186,7 +192,7 @@ export const QueensPricesPage = () => {
 									>
 										Add Queens Price
 									</button>
-								)
+								) : null
 							}
 						/>
 					) : (

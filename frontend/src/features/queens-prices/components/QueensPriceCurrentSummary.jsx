@@ -1,6 +1,8 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
 import { formatDate, formatPrice } from "../utils/queens-price.utils.js";
+import { useAuth } from "@/hooks/useAuth.js";
+import { hasPermission, PERMISSIONS } from "@/permissions/permissions.js";
 
 /**
  * Compact current-price summary block.
@@ -14,6 +16,8 @@ export const QueensPriceCurrentSummary = ({
   className = "",
 }) => {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const canEditPrices = hasPermission(user?.role, PERMISSIONS.EDIT_BENCHMARKS);
 
   // Authoritative fallback navigation: guards against passing undefined string
   const handleAdd = () => {
@@ -77,6 +81,7 @@ export const QueensPriceCurrentSummary = ({
         </div>
 
         {/* Primary Action Button */}
+        {canEditPrices && (
         <div className="flex-none">
           <button
             type="button"
@@ -95,6 +100,7 @@ export const QueensPriceCurrentSummary = ({
             Add Queens Price
           </button>
         </div>
+        )}
       </div>
     </div>
   );

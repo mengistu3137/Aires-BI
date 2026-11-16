@@ -5,6 +5,8 @@ import { useQueensPrice } from "../hooks/useQueensPrice.js";
 import { useProductQueensPriceHistory } from "../hooks/useProductQueensPriceHistory.js";
 import { useUpdateQueensPrice } from "../hooks/useQueensPriceMutations.js";
 import { getQueensPriceStatus } from "../utils/queens-price.utils.js";
+import { useAuth } from "@/hooks/useAuth.js";
+import { hasPermission, PERMISSIONS } from "@/permissions/permissions.js";
 
 export const EditQueensPricePage = () => {
   const { id } = useParams();
@@ -22,6 +24,26 @@ export const EditQueensPricePage = () => {
   const existingPeriods = historyData?.prices || [];
 
   const updateMutation = useUpdateQueensPrice();
+  const { user } = useAuth();
+  const canEditPrices = hasPermission(user?.role, PERMISSIONS.EDIT_BENCHMARKS);
+
+  if (!canEditPrices) {
+    return (
+      <div className="mx-auto max-w-lg rounded-2xl border border-slate-200 bg-white p-6 text-center">
+        <p className="text-sm font-bold text-slate-800">View only</p>
+        <p className="mt-1 text-xs text-slate-500">
+          Updating Queens benchmark prices is not enabled for this role.
+        </p>
+        <button
+          type="button"
+          onClick={() => navigate("/queens-prices")}
+          className="mt-4 rounded-xl bg-[#A41821] px-4 py-2 text-xs font-bold text-white"
+        >
+          Back to Queens prices
+        </button>
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (

@@ -1295,7 +1295,7 @@ async function main() {
   const passwordHash = await bcrypt.hash(password, 10);
 
   const users = [
-    { id: UID.users.admin, name: "Abraham Shiferaw", email: "abraham.admin@aires.et", phone: "+251910009094", role: "ADMIN" },
+    { id: UID.users.admin, name: "Abraham Shiferaw", email: "abraham.admin@aires.et", phone: "+251910009094", role: "SUPER_ADMIN" },
     { id: UID.users.manager, name: "Endalkachew Girma", email: "endalkachew.manager@aires.et", phone: "+251911000002", role: "MANAGER" },
   ];
   if (SEED_DEMO_DATA) {
@@ -1488,7 +1488,7 @@ async function main() {
   console.log("════════════════════════════════════════════════════════");
   console.log(` Password (all users): ${password}`);
   console.log("════════════════════════════════════════════════════════");
-  console.log(" ADMIN     abraham.admin@aires.et");
+  console.log(" SUPER ADMIN  abraham.admin@aires.et");
   console.log(" MANAGER   endalkachew.manager@aires.et");
   if (SEED_DEMO_DATA) {
     console.log(" AUDITOR   selam.auditor@aires.et / dawit.auditor@aires.et");
