@@ -54,16 +54,36 @@ export default defineConfig({
       workbox: {
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
         runtimeCaching: [
+          // 1. SPECIFIC RULE FOR PRODUCTS: Give 3,424 items enough time to download on mobile
+          {
+            urlPattern: ({ url }) => url.pathname.startsWith("/api/v1/products"),
+            handler: "NetworkFirst",
+            options: {
+              cacheName: "aires-products-cache",
+              networkTimeoutSeconds: 20, // 20 seconds instead of 4 seconds
+              cacheableResponse: {
+                statuses: [0, 200], // Only cache valid successful responses, never errors
+              },
+              expiration: {
+                maxEntries: 10,
+                maxAgeSeconds: 60 * 60 * 24, // 24 hours
+              },
+            },
+          },
+          // 2. GENERAL RULE FOR ALL OTHER API ENDPOINTS (users, stores, etc.)
           {
             urlPattern: ({ url }) => url.pathname.startsWith("/api/v1/"),
             handler: "NetworkFirst",
             options: {
               cacheName: "aires-api-cache",
+              networkTimeoutSeconds: 10, // Bumped from 4s to 10s for mobile stability
+              cacheableResponse: {
+                statuses: [0, 200],
+              },
               expiration: {
                 maxEntries: 100,
                 maxAgeSeconds: 60 * 60 * 24, // 24 hours
               },
-              networkTimeoutSeconds: 4,
             },
           },
         ],
