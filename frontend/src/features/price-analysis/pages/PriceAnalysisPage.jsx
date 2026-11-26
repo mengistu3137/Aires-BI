@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
 import {
@@ -19,6 +19,7 @@ import { exportPriceAnalysisExcelRequest } from "@/services/api/price-analysis.a
 import { RapidPriceAdjustmentDrawer } from "../components/RapidPriceAdjustmentDrawer.jsx";
 import { hasPermission, PERMISSIONS } from "@/permissions/permissions.js";
 import { useRequestRecalculation } from "../hooks/usePriceAnalysisMutations.js";
+import { readPageFilter, writePageFilter } from "@/hooks/usePageFilter.js";
 const PAGE_SIZE = 20;
 
 export const PriceAnalysisPage = () => {
@@ -41,11 +42,22 @@ export const PriceAnalysisPage = () => {
 	const [isExporting, setIsExporting] = useState(false);
 
 	const surveyPeriodId = searchParams.get("surveyPeriodId") || "";
-	const action = searchParams.get("action") || "";
+	const action = searchParams.has("action")
+		? searchParams.get("action") || ""
+		: readPageFilter("price-analysis", "action", "");
 	const asOfDate = searchParams.get("asOfDate") || "";
 	const page = Math.max(1, Number(searchParams.get("page") || 1));
 
+	useEffect(() => {
+		if (searchParams.has("action")) {
+			writePageFilter("price-analysis", "action", searchParams.get("action") || "");
+		}
+	}, [searchParams]);
+
 	const setFilter = (key, value) => {
+		if (key === "action") {
+			writePageFilter("price-analysis", "action", value || "");
+		}
 		const next = new URLSearchParams(searchParams);
 		if (value === "" || value === null || value === undefined) {
 			next.delete(key);

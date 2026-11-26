@@ -16,19 +16,29 @@ export const setupInterceptors = (client) => {
   // 2. Response Interceptor: 401 Session Handling & Normalization
   client.interceptors.response.use(
     (response) => response,
-    (error) => {
+    async (error) => {
       if (error.response && error.response.status === 401) {
         // Automatically revoke session on token expiration
         useAuthStore.getState().clearAuth();
       }
 
+      let data = error.response?.data;
+      if (typeof Blob !== "undefined" && data instanceof Blob) {
+        try {
+          const text = await data.text();
+          data = text ? JSON.parse(text) : {};
+        } catch {
+          data = {};
+        }
+      }
+
       const normalizedError = {
         message:
-          error.response?.data?.message ||
+          data?.message ||
           error.message ||
           "An unexpected network error occurred",
         status: error.response?.status,
-        errors: error.response?.data?.errors || [],
+        errors: data?.errors || [],
       };
 
       return Promise.reject(normalizedError);

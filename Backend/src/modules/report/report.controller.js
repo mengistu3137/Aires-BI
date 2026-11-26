@@ -1,4 +1,5 @@
 import { observationReportService } from "./report.service.js";
+import { draftIntelligenceNotes, generateIntelligenceReportFile } from "./intelligence-report.service.js";
 
 const sendFile = (res, { buffer, filename, contentType }) => {
   res.setHeader("Content-Type", contentType);
@@ -100,10 +101,37 @@ export const downloadExcelReport = async (req, res, next) => {
   }
 };
 
+export const draftIntelligenceNotesHandler = async (req, res, next) => {
+  try {
+    const notes = await draftIntelligenceNotes({
+      surveyPeriodId: req.query?.surveyPeriodId,
+    });
+    res.status(200).json({ status: "success", data: notes });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const downloadIntelligenceReport = async (req, res, next) => {
+  try {
+    const format = req.body?.format === "docx" ? "docx" : "pdf";
+    const file = await generateIntelligenceReportFile({
+      surveyPeriodId: req.body?.surveyPeriodId,
+      notes: req.body?.notes || {},
+      format,
+    });
+    sendFile(res, file);
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const observationReportController = {
   getReportSummary,
   downloadPdfReport,
   downloadExcelReport,
   getAiSummary,
   downloadAiDocxReport,
+  downloadIntelligenceReport,
+  draftIntelligenceNotesHandler,
 };

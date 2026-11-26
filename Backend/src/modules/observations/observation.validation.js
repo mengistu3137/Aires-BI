@@ -35,6 +35,16 @@ export const createObservationSchema = z
       )
       .nullable()
       .optional(),
+    ererPrice: z
+      .number()
+      .positive("Erer price must be greater than zero")
+      .nullable()
+      .optional(),
+    valenciaPrice: z
+      .number()
+      .positive("Valencia price must be greater than zero")
+      .nullable()
+      .optional(),
     substituteProduct: z
       .string()
       .trim()
@@ -74,6 +84,16 @@ export const updateObservationSchema = z
         (v) => !Number.isNaN(v) && Number.isFinite(v),
         "Invalid price number",
       )
+      .nullable()
+      .optional(),
+    ererPrice: z
+      .number()
+      .positive("Erer price must be greater than zero")
+      .nullable()
+      .optional(),
+    valenciaPrice: z
+      .number()
+      .positive("Valencia price must be greater than zero")
       .nullable()
       .optional(),
     substituteProduct: z.string().trim().max(255).nullable().optional(),

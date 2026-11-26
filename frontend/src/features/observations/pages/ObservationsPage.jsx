@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useObservations } from "../hooks/useObservations.js";
 import { useAuth } from "@/hooks/useAuth.js";
@@ -13,6 +13,7 @@ import { useStores } from "@/features/survey/hooks/useStores.js";
 import { useSurveyPeriods } from "@/features/survey/hooks/useSurveyPeriods.js";
 import { useReportDownload } from "../hooks/useReportDownload.js";
 import { ReportExportMenu } from "../components/ReportExportMenu.jsx";
+import { readPageFilter, writePageFilter } from "@/hooks/usePageFilter.js";
 
 export const ObservationsPage = () => {
 	const navigate = useNavigate();
@@ -22,13 +23,37 @@ export const ObservationsPage = () => {
 
 	const [search, setSearch] = useState("");
 
-	const availability = searchParams.get("availability") || "";
-	const reviewStatus = searchParams.get("reviewStatus") || "";
+	const availability = searchParams.has("availability")
+		? searchParams.get("availability") || ""
+		: readPageFilter("observations", "availability", "");
+	const reviewStatus = searchParams.has("reviewStatus")
+		? searchParams.get("reviewStatus") || ""
+		: readPageFilter("observations", "reviewStatus", "");
 	const storeId = searchParams.get("storeId") || "";
 	const surveyPeriodId = searchParams.get("surveyPeriodId") || "";
 	const page = Number(searchParams.get("page") || 1);
 
+	useEffect(() => {
+		if (searchParams.has("availability")) {
+			writePageFilter(
+				"observations",
+				"availability",
+				searchParams.get("availability") || "",
+			);
+		}
+		if (searchParams.has("reviewStatus")) {
+			writePageFilter(
+				"observations",
+				"reviewStatus",
+				searchParams.get("reviewStatus") || "",
+			);
+		}
+	}, [searchParams]);
+
 	const setFilter = (key, value) => {
+		if (key === "availability" || key === "reviewStatus") {
+			writePageFilter("observations", key, value || "");
+		}
 		const next = new URLSearchParams(searchParams);
 		if (!value) next.delete(key);
 		else next.set(key, value);
@@ -105,6 +130,8 @@ export const ObservationsPage = () => {
 
 	const handleClearFilters = () => {
 		setSearch("");
+		writePageFilter("observations", "availability", "");
+		writePageFilter("observations", "reviewStatus", "");
 		setSearchParams({}, { replace: true });
 	};
 

@@ -10,6 +10,7 @@ import { parseItemMasterWorkbook } from "../utils/parseItemMaster.js";
 import { ProductFormModal } from "../components/ProductFormModal .jsx";
 import { useAuth } from "@/hooks/useAuth.js";
 import { hasPermission, PERMISSIONS } from "@/permissions/permissions.js";
+import { usePageFilter } from "@/hooks/usePageFilter.js";
 
 const TIER_FILTERS = [
 	{ label: "ALL", frequency: null },
@@ -52,7 +53,7 @@ export const ProductsPage = () => {
 	} = useProducts();
 	const { user, isAdmin } = useAuth();
 	const canEditPrices = hasPermission(user?.role, PERMISSIONS.EDIT_BENCHMARKS);
-	const [selectedTier, setSelectedTier] = useState("ALL");
+	const [selectedTier, setSelectedTier] = usePageFilter("products", "tier", "ALL");
 	const [activeProductForPrice, setActiveProductForPrice] = useState(null);
 	const [newPrice, setNewPrice] = useState("");
 	const [priceNotes, setPriceNotes] = useState("");
@@ -353,13 +354,12 @@ export const ProductsPage = () => {
 				</div>
 
 				<Can role={["ADMIN", "MANAGER"]}>
-					{isAdmin && (
-						<div className="flex items-center gap-2">
-							<button
-								type="button"
-								onClick={openCreate}
-								className="flex cursor-pointer items-center gap-2 rounded-xl bg-[#A41821] px-4 py-2.5 text-xs font-bold text-white shadow-xs transition hover:bg-[#7F1219]"
-							>
+					<div className="flex items-center gap-2">
+						<button
+							type="button"
+							onClick={openCreate}
+							className="flex cursor-pointer items-center gap-2 rounded-xl bg-[#A41821] px-4 py-2.5 text-xs font-bold text-white shadow-xs transition hover:bg-[#7F1219]"
+						>
 								<svg
 									className="h-4 w-4"
 									fill="none"
@@ -373,9 +373,11 @@ export const ProductsPage = () => {
 										d="M12 4v16m8-8H4"
 									/>
 								</svg>
-								New Product
-							</button>
+							New Product
+						</button>
 
+						{isAdmin && (
+							<>
 							<input
 								type="file"
 								ref={fileInputRef}
@@ -406,8 +408,9 @@ export const ProductsPage = () => {
 									{isImporting ? "Importing..." : "Import Item Master (Excel)"}
 								</span>
 							</button>
-						</div>
-					)}
+							</>
+						)}
+					</div>
 				</Can>
 			</div>
 

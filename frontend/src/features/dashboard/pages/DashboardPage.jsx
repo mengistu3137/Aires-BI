@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useDashboard } from "../hooks/useDashboard.js";
 import { useAuth } from "@/hooks/useAuth.js";
@@ -14,10 +14,13 @@ import { AlertSeverityCard } from "../components/AlertSeverityCard.jsx";
 import { RecentAlertsList } from "../components/RecentAlertsList.jsx";
 import { PriceIndexTrendCard } from "../components/PriceIndexTrendCard.jsx";
 import { DashboardSectionError } from "../components/DashboardSectionError.jsx";
+import { IntelligenceReportModal } from "../components/IntelligenceReportModal.jsx";
 
 export const DashboardPage = () => {
   const { role } = useAuth();
   const isAuditor = role === "FIELD_AUDITOR";
+  const isSuperAdmin = role === "SUPER_ADMIN";
+  const [reportOpen, setReportOpen] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
 
   const surveyPeriodId = searchParams.get("surveyPeriodId") || "";
@@ -40,6 +43,26 @@ export const DashboardPage = () => {
         <DashboardHeader roleScope={role} />
         <SurveyPeriodSelector value={surveyPeriodId} onChange={handlePeriodChange} />
       </div>
+
+      {isSuperAdmin && (
+        <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-xs sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-sm font-black text-slate-900">Competitor price intelligence report</h2>
+            <p className="mt-0.5 text-xs text-slate-500">
+              Build the benchmark dashboard from a survey period, add the field notes, preview it, then download PDF or Word.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setReportOpen(true)}
+            className="cursor-pointer rounded-xl bg-[#A41821] px-4 py-2.5 text-xs font-bold text-white"
+          >
+            Generate report
+          </button>
+        </div>
+      )}
+
+      {reportOpen && <IntelligenceReportModal onClose={() => setReportOpen(false)} />}
 
       {/* Loading */}
       {isLoading && (

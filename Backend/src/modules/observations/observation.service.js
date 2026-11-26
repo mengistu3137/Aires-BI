@@ -7,6 +7,13 @@ import {
   formatObservationResponse,
 } from "./observation.helper.js";
 
+const orangeBrandPrice = (product, value) => {
+  if (!/\borange\b/i.test(product?.name || "")) return null;
+  if (value === null || value === undefined || value === "") return null;
+  const amount = Number(value);
+  return Number.isFinite(amount) && amount > 0 ? amount : null;
+};
+
 const OBSERVATION_INCLUDE_RELATIONS = {
   product: {
     select: {
@@ -65,6 +72,8 @@ export const createObservation = async ({ auditId, user, data }) => {
     productId,
     availability,
     price = null,
+    ererPrice = null,
+    valenciaPrice = null,
     substituteProduct = null,
     observedUnit = null,
     packageSize = null,
@@ -173,6 +182,8 @@ export const createObservation = async ({ auditId, user, data }) => {
       auditorId: audit.auditorId,
       availability,
       price: finalPrice,
+      ererPrice: orangeBrandPrice(product, ererPrice),
+      valenciaPrice: orangeBrandPrice(product, valenciaPrice),
       substituteProduct: formattedSubstitute,
       observedUnit: observedUnit || product.unit,
       packageSize,
@@ -193,7 +204,7 @@ export const createObservation = async ({ auditId, user, data }) => {
 export const updateObservation = async ({ observationId, user, updates }) => {
   const observation = await prisma.priceObservation.findUnique({
     where: { id: observationId },
-    include: { audit: true },
+    include: { audit: true, product: { select: { name: true } } },
   });
 
   if (!observation) {
@@ -250,6 +261,18 @@ export const updateObservation = async ({ observationId, user, updates }) => {
     data: {
       availability: newAvailability,
       price: newPrice,
+      ...(updates.ererPrice !== undefined || updates.valenciaPrice !== undefined
+        ? {
+            ererPrice:
+              updates.ererPrice !== undefined
+                ? orangeBrandPrice(observation.product, updates.ererPrice)
+                : observation.ererPrice,
+            valenciaPrice:
+              updates.valenciaPrice !== undefined
+                ? orangeBrandPrice(observation.product, updates.valenciaPrice)
+                : observation.valenciaPrice,
+          }
+        : {}),
       substituteProduct: newSubstitute,
       observedUnit:
         updates.observedUnit !== undefined

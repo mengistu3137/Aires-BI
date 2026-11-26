@@ -76,6 +76,8 @@ export const formatQueuedObservation = (record) => {
     productId: record.productId,
     availability: record.availability,
     price: record.price,
+    ererPrice: record.ererPrice ?? null,
+    valenciaPrice: record.valenciaPrice ?? null,
     substituteProduct: record.substituteProduct || null,
     observedUnit: record.observedUnit || null,
     packageSize: record.packageSize || null,
@@ -274,6 +276,8 @@ export const syncObservation = async (observation) => {
       productId: observation.productId,
       availability: observation.availability,
       price: observation.price,
+      ererPrice: observation.ererPrice ?? null,
+      valenciaPrice: observation.valenciaPrice ?? null,
       substituteProduct: observation.substituteProduct || null,
       observedUnit: observation.observedUnit || null,
       packageSize: observation.packageSize || null,
@@ -287,7 +291,12 @@ export const syncObservation = async (observation) => {
       observation.operation === "UPDATE" && observation.serverObservationId
         ? await updateObservationRequest({
           observationId: observation.serverObservationId,
-          payload: { price: payload.price, availability: payload.availability },
+          payload: {
+            price: payload.price,
+            availability: payload.availability,
+            ererPrice: payload.ererPrice,
+            valenciaPrice: payload.valenciaPrice,
+          },
         })
         : await createObservationRequest({ auditId: observation.auditId, payload });
 

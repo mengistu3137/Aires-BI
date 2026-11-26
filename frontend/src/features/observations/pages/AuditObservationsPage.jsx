@@ -21,6 +21,7 @@ import { ObservationAvailabilityBadge } from "../components/ObservationAvailabil
 import { ObservationReviewBadge } from "../components/ObservationReviewBadge.jsx";
 import { ObservationSyncBadge } from "../components/ObservationSyncBadge.jsx";
 import { formatPrice, formatCapturedAt } from "../utils/observation.utils.js";
+import { formatOrangePriceLabel } from "../components/OrangeBrandFields.jsx";
 import {
 	enqueueObservation,
 	syncObservation,
@@ -905,6 +906,8 @@ const performSave = useCallback(
 		availability,
 		substituteProduct,
 		evidencePhotoUrl,
+		ererPrice = null,
+		valenciaPrice = null,
 	}) => {
 		const existing = observationsByProductRef.current[productId];
 		const currentProducts = productsRef.current;
@@ -930,6 +933,8 @@ const performSave = useCallback(
 				...existing,
 				availability,
 				price: finalPrice,
+				ererPrice,
+				valenciaPrice,
 				substituteProduct: substituteProduct?.trim() || null,
 				evidencePhotoUrl: finalEvidencePhotoUrl,
 				capturedAt: new Date().toISOString(),
@@ -943,6 +948,8 @@ const performSave = useCallback(
 					payload: {
 						price: finalPrice,
 						availability,
+						ererPrice,
+						valenciaPrice,
 						substituteProduct: substituteProduct?.trim() || null,
 						evidencePhotoUrl: finalEvidencePhotoUrl,
 					},
@@ -952,7 +959,7 @@ const performSave = useCallback(
 				}
 				toast.success(
 					availability === "AVAILABLE"
-						? `${productName}: ${Number(price).toFixed(2)} ETB`
+						? `${productName}: ${formatOrangePriceLabel({ ererPrice, valenciaPrice }) || `${Number(price).toFixed(2)} ETB`}`
 						: hasSub
 							? `${productName} (${availability.replace("_", " ")}): Substitute logged`
 							: `${productName}: ${availability.replace("_", " ")}`,
@@ -980,6 +987,8 @@ const performSave = useCallback(
 			productId,
 			availability,
 			price: finalPrice,
+			ererPrice,
+			valenciaPrice,
 			substituteProduct: substituteProduct?.trim() || null,
 			observedUnit: existing?.observedUnit || null,
 			packageSize: existing?.packageSize || null,
@@ -999,6 +1008,8 @@ const performSave = useCallback(
 			productId,
 			availability: payload.availability,
 			price: payload.price,
+			ererPrice: payload.ererPrice,
+			valenciaPrice: payload.valenciaPrice,
 			substituteProduct: payload.substituteProduct,
 			evidencePhotoUrl: payload.evidencePhotoUrl,
 			capturedAt: payload.capturedAt,
@@ -1026,7 +1037,7 @@ const performSave = useCallback(
 				invalidateDependentQueries();
 				toast.success(
 					availability === "AVAILABLE"
-						? `${productName}: ${Number(price).toFixed(2)} ETB`
+						? `${productName}: ${formatOrangePriceLabel({ ererPrice, valenciaPrice }) || `${Number(price).toFixed(2)} ETB`}`
 						: hasSub
 							? `${productName} (${availability.replace("_", " ")}): Substitute logged`
 							: `${productName}: ${availability.replace("_", " ")}`,
@@ -1052,6 +1063,8 @@ const performSave = useCallback(
 			availability,
 			substituteProduct,
 			evidencePhotoUrl,
+			ererPrice = null,
+			valenciaPrice = null,
 		}) => {
 			if (inFlightProductsRef.current.has(productId)) {
 				toast("Already saving…", { id: "obs-in-flight", duration: 800 });
@@ -1069,6 +1082,8 @@ const performSave = useCallback(
 						availability,
 						substituteProduct,
 						evidencePhotoUrl,
+						ererPrice,
+						valenciaPrice,
 					}),
 				)
 				.catch(() => {});
@@ -1089,12 +1104,14 @@ const performSave = useCallback(
 	);
 
 	const handleSavePrice = useCallback(
-		async ({ productId, price, availability, evidencePhotoUrl }) => {
+		async ({ productId, price, availability, evidencePhotoUrl, ererPrice = null, valenciaPrice = null }) => {
 			await persistObservation({
 				productId,
 				price,
 				availability,
 				evidencePhotoUrl,
+				ererPrice,
+				valenciaPrice,
 			});
 
 			if (autoAdvance) {
@@ -1398,8 +1415,8 @@ const handleTriggerUnavailableModal = useCallback(
 						/>
 						{obs.price !== null && obs.price !== undefined && (
 							<div>
-								<span className="font-mono text-xs font-black text-[#017C4D]">
-									{formatPrice(obs.price)}
+								<span className="whitespace-nowrap font-mono text-xs font-black text-[#017C4D]">
+									{formatOrangePriceLabel(obs) || formatPrice(obs.price)}
 								</span>
 								{hasSubstitute && (
 									<span className="block text-[8px] font-bold uppercase tracking-wider text-[#FE7914]">

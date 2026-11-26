@@ -99,6 +99,26 @@ export const downloadReportRequest = async (
   return { blob, filename };
 };
 
+export const draftIntelligenceNotesRequest = async (surveyPeriodId) => {
+  const response = await apiClient.get("/reports/intelligence/draft", {
+    params: { surveyPeriodId },
+    timeout: 90 * 1000,
+  });
+  return response.data?.data || response.data;
+};
+
+export const downloadIntelligenceReportRequest = async ({ surveyPeriodId, notes, format }) => {
+  const response = await apiClient.post(
+    "/reports/intelligence",
+    { surveyPeriodId, notes, format },
+    { responseType: "blob", timeout: 3 * 60 * 1000 },
+  );
+  const filename =
+    parseFilename(response.headers?.["content-disposition"]) ||
+    `Competitor_Price_Intelligence.${format === "docx" ? "docx" : "pdf"}`;
+  return { blob: response.data, filename };
+};
+
 export const readReportError = async (err) => {
   const data = err?.response?.data;
   if (data instanceof Blob) {
