@@ -244,6 +244,7 @@ export const IntelligenceReportModal = ({ onClose }) => {
 
 					<label className="block">
 						<span className="mb-1.5 block font-bold text-slate-700">Key market observations</span>
+						<span className="mb-1.5 block text-[11px] text-slate-500">Each line is a bullet. The words before the colon, and anything wrapped in **double asterisks**, print in bold.</span>
 						<textarea
 							rows={4}
 							value={observations}
