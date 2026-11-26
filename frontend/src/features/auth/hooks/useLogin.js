@@ -22,6 +22,12 @@ export const useLogin = (onNavigate) => {
         token: payload.token,
       });
 
+      if (payload.user.mustChangePassword) {
+        toast.success("Please set a new password before continuing");
+        if (onNavigate) onNavigate("/change-password");
+        return;
+      }
+
       toast.success(`Welcome back, ${payload.user.name}`);
 
       // Role-based routing

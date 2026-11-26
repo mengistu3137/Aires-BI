@@ -141,11 +141,13 @@ export const getById = async (id) => {
 };
 
 export const create = async (payload) => {
-  const existingPhone = await prisma.user.findUnique({
-    where: { phone: payload.phone },
-  });
-  if (existingPhone) {
-    throw new ApiError(409, `User with phone '${payload.phone}' already exists.`);
+  if (payload.phone) {
+    const existingPhone = await prisma.user.findUnique({
+      where: { phone: payload.phone },
+    });
+    if (existingPhone) {
+      throw new ApiError(409, `User with phone '${payload.phone}' already exists.`);
+    }
   }
 
   if (payload.email) {
@@ -172,6 +174,7 @@ export const create = async (payload) => {
       phone: cleanPhone,
       email: cleanEmail,
       passwordHash,
+      mustChangePassword: true,
     },
   });
 
@@ -226,6 +229,7 @@ export const update = async (id, payload) => {
 
   if (payload.password && payload.password.trim().length >= 6) {
     data.passwordHash = await bcrypt.hash(payload.password.trim(), 10);
+    data.mustChangePassword = true;
   }
   delete data.password;
 

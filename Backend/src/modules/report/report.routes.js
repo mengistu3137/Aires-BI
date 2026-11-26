@@ -45,6 +45,18 @@ router.get(
 );
 
 router.get(
+  "/intelligence/draft",
+  restrictTo("ADMIN", "MANAGER"),
+  observationReportController.draftIntelligenceNotesHandler,
+);
+
+router.post(
+  "/intelligence",
+  restrictTo("ADMIN", "MANAGER"),
+  observationReportController.downloadIntelligenceReport,
+);
+
+router.get(
   "/excel",
   restrictTo("ADMIN", "MANAGER"),
   validate(observationReportQuerySchema, "query"),

@@ -1,6 +1,7 @@
 import React from "react";
 import { createBrowserRouter, Navigate } from "react-router-dom";
 import { LoginPage } from "@/features/auth/pages/LoginPage.jsx";
+import { ChangePasswordPage } from "@/features/auth/pages/ChangePasswordPage.jsx";
 import { SurveyorHomePage } from "@/features/survey/pages/SurveyorHomePage.jsx";
 import { Survey } from "@/features/survey/pages/Survery.jsx";
 import { SurveyProgress } from "@/features/survey/pages/SurveyProgress.jsx";
@@ -38,10 +39,14 @@ import { AlertDetailPage } from "@/features/alerts/pages/AlertDetailPage.jsx";
 import { MainLayout } from "@/components/MainLayout.jsx";
 
 const ProtectedRoute = ({ children, allowedRoles }) => {
-	const { isAuthenticated, role, isSuperAdmin } = useAuth();
+	const { isAuthenticated, role, isSuperAdmin, user, isImpersonating } = useAuth();
 
 	if (!isAuthenticated) {
 		return <Navigate to="/login" replace />;
+	}
+
+	if (user?.mustChangePassword && !isImpersonating) {
+		return <Navigate to="/change-password" replace />;
 	}
 
 	// Aires Super Admin has universal access across all routes
@@ -75,6 +80,10 @@ export const router = createBrowserRouter([
 	{
 		path: "/login",
 		element: <LoginPage />,
+	},
+	{
+		path: "/change-password",
+		element: <ChangePasswordPage />,
 	},
 	{
 		path: "/",

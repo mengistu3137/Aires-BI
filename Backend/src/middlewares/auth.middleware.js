@@ -33,6 +33,7 @@ export const authenticate = async (req, res, next) => {
         phone: true,
         role: true,
         active: true,
+        mustChangePassword: true,
       },
     });
 
@@ -48,7 +49,31 @@ export const authenticate = async (req, res, next) => {
       );
     }
 
-    req.user = user;
+    req.user = {
+      ...user,
+      impersonatedBy: decoded.impersonatedBy || null,
+    };
+
+    const requestPath = req.originalUrl.split("?")[0];
+    const allowedDuringPasswordChange = [
+      "/api/v1/auth/change-password",
+      "/api/v1/auth/logout",
+      "/api/v1/auth/me",
+    ];
+
+    if (
+      user.mustChangePassword &&
+      !decoded.impersonatedBy &&
+      !allowedDuringPasswordChange.includes(requestPath)
+    ) {
+      return next(
+        new ApiError(
+          403,
+          "Change the password issued for this account before continuing.",
+        ),
+      );
+    }
+
     next();
   } catch (error) {
     next(error);

@@ -1,7 +1,6 @@
 // frontend/src/features/products/ProductsPage.jsx
 import React, { useState, useRef, useMemo } from "react";
 import { DataTable } from "@/components/DataTable.jsx";
-import { Can } from "@/components/Can.jsx";
 import { ConfirmDialog } from "@/components/ConfirmDialog.jsx";
 import toast from "react-hot-toast";
 import { formatProductName } from "@/utils/formatters.js";
@@ -10,6 +9,7 @@ import { parseItemMasterWorkbook } from "../utils/parseItemMaster.js";
 import { ProductFormModal } from "../components/ProductFormModal .jsx";
 import { useAuth } from "@/hooks/useAuth.js";
 import { hasPermission, PERMISSIONS } from "@/permissions/permissions.js";
+import { usePageFilter } from "@/hooks/usePageFilter.js";
 
 const TIER_FILTERS = [
 	{ label: "ALL", frequency: null },
@@ -52,7 +52,9 @@ export const ProductsPage = () => {
 	} = useProducts();
 	const { user, isAdmin } = useAuth();
 	const canEditPrices = hasPermission(user?.role, PERMISSIONS.EDIT_BENCHMARKS);
-	const [selectedTier, setSelectedTier] = useState("ALL");
+	const canCreateProduct = hasPermission(user?.role, PERMISSIONS.CREATE_PRODUCT);
+	const canEditProduct = hasPermission(user?.role, PERMISSIONS.EDIT_PRODUCT);
+	const [selectedTier, setSelectedTier] = usePageFilter("products", "tier", "ALL");
 	const [activeProductForPrice, setActiveProductForPrice] = useState(null);
 	const [newPrice, setNewPrice] = useState("");
 	const [priceNotes, setPriceNotes] = useState("");
@@ -298,8 +300,8 @@ export const ProductsPage = () => {
 			header: "Action",
 			key: "actions",
 			align: "right",
-			render: (row) => (
-				<Can role={["ADMIN", "MANAGER"]}>
+			render: (row) =>
+				canEditPrices || canEditProduct || isAdmin ? (
 					<div className="flex items-center justify-end gap-3">
 						{canEditPrices && (
 						<button
@@ -313,6 +315,7 @@ export const ProductsPage = () => {
 							Update Price
 						</button>
 						)}
+						{canEditProduct && (
 						<button
 							type="button"
 							onClick={() => openEdit(row)}
@@ -320,7 +323,8 @@ export const ProductsPage = () => {
 						>
 							Edit
 						</button>
-						<Can role={["ADMIN"]}>
+						)}
+						{isAdmin && (
 							<button
 								type="button"
 								onClick={() => {
@@ -332,10 +336,11 @@ export const ProductsPage = () => {
 							>
 								Delete
 							</button>
-						</Can>
+						)}
 					</div>
-				</Can>
-			),
+				) : (
+					<span className="text-slate-300">—</span>
+				),
 		},
 	];
 
@@ -352,14 +357,14 @@ export const ProductsPage = () => {
 					</p>
 				</div>
 
-				<Can role={["ADMIN", "MANAGER"]}>
-					{isAdmin && (
-						<div className="flex items-center gap-2">
-							<button
-								type="button"
-								onClick={openCreate}
-								className="flex cursor-pointer items-center gap-2 rounded-xl bg-[#A41821] px-4 py-2.5 text-xs font-bold text-white shadow-xs transition hover:bg-[#7F1219]"
-							>
+				{(canCreateProduct || isAdmin) && (
+					<div className="flex items-center gap-2">
+						{canCreateProduct && (
+						<button
+							type="button"
+							onClick={openCreate}
+							className="flex cursor-pointer items-center gap-2 rounded-xl bg-[#A41821] px-4 py-2.5 text-xs font-bold text-white shadow-xs transition hover:bg-[#7F1219]"
+						>
 								<svg
 									className="h-4 w-4"
 									fill="none"
@@ -373,9 +378,12 @@ export const ProductsPage = () => {
 										d="M12 4v16m8-8H4"
 									/>
 								</svg>
-								New Product
-							</button>
+							New Product
+						</button>
+						)}
 
+						{isAdmin && (
+							<>
 							<input
 								type="file"
 								ref={fileInputRef}
@@ -406,9 +414,10 @@ export const ProductsPage = () => {
 									{isImporting ? "Importing..." : "Import Item Master (Excel)"}
 								</span>
 							</button>
-						</div>
-					)}
-				</Can>
+							</>
+						)}
+					</div>
+				)}
 			</div>
 
 			{/* Tier filter pills & table */}

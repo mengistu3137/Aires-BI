@@ -12,6 +12,9 @@ export const PERMISSIONS = {
     // Operations
     MANAGE_AUDITORS: "MANAGE_AUDITORS",
     EDIT_BENCHMARKS: "EDIT_BENCHMARKS", // Set / update Queens benchmark prices
+    GENERATE_INTELLIGENCE_REPORT: "GENERATE_INTELLIGENCE_REPORT",
+    CREATE_PRODUCT: "CREATE_PRODUCT",
+    EDIT_PRODUCT: "EDIT_PRODUCT",
 
     // Client Admin (Queens Admin) & Shared Analytics
     VIEW_DASHBOARD: "VIEW_DASHBOARD",
@@ -37,6 +40,9 @@ export const DEFAULT_ROLE_PERMISSIONS = {
         PERMISSIONS.RUN_ANALYSIS_MODELS,
         PERMISSIONS.MANAGE_AUDITORS,
         PERMISSIONS.EDIT_BENCHMARKS,
+        PERMISSIONS.GENERATE_INTELLIGENCE_REPORT,
+        PERMISSIONS.CREATE_PRODUCT,
+        PERMISSIONS.EDIT_PRODUCT,
         PERMISSIONS.VIEW_DASHBOARD,
         PERMISSIONS.VIEW_FIELD_PROGRESS,
         PERMISSIONS.FLAG_OBSERVATION_REVIEW,
@@ -54,6 +60,8 @@ export const DEFAULT_ROLE_PERMISSIONS = {
         PERMISSIONS.RUN_ANALYSIS_MODELS,
         PERMISSIONS.MANAGE_AUDITORS,
         PERMISSIONS.EDIT_BENCHMARKS,
+        PERMISSIONS.CREATE_PRODUCT,
+        PERMISSIONS.EDIT_PRODUCT,
         PERMISSIONS.VIEW_DASHBOARD,
         PERMISSIONS.VIEW_FIELD_PROGRESS,
         PERMISSIONS.FLAG_OBSERVATION_REVIEW,
@@ -72,6 +80,8 @@ export const DEFAULT_ROLE_PERMISSIONS = {
         PERMISSIONS.EXPORT_DATA,
         PERMISSIONS.DECIDE_PRICE_ACTIONS,
         PERMISSIONS.CREATE_CLIENT_USERS,
+        PERMISSIONS.CREATE_PRODUCT,
+        PERMISSIONS.EDIT_PRODUCT,
         PERMISSIONS.VIEW_ASSIGNMENT,
     ],
     FIELD_AUDITOR: [
@@ -81,11 +91,37 @@ export const DEFAULT_ROLE_PERMISSIONS = {
 };
 
 const STORAGE_KEY = "aires_custom_role_permissions";
+const SCHEMA_KEY = "aires_permissions_schema";
+const SCHEMA_VERSION = 2;
+const INTRODUCED_PRIVILEGES = [
+    PERMISSIONS.GENERATE_INTELLIGENCE_REPORT,
+    PERMISSIONS.CREATE_PRODUCT,
+    PERMISSIONS.EDIT_PRODUCT,
+];
+
+const applyNewPrivilegeDefaults = (stored) => {
+    const version = Number(localStorage.getItem(SCHEMA_KEY) || "1");
+    if (version >= SCHEMA_VERSION || !stored || typeof stored !== "object") return stored;
+
+    const next = { ...stored };
+    for (const role of Object.keys(DEFAULT_ROLE_PERMISSIONS)) {
+        if (!Array.isArray(next[role])) continue;
+        const additions = INTRODUCED_PRIVILEGES.filter(
+            (permission) =>
+                DEFAULT_ROLE_PERMISSIONS[role].includes(permission) && !next[role].includes(permission),
+        );
+        if (additions.length) next[role] = [...next[role], ...additions];
+    }
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    localStorage.setItem(SCHEMA_KEY, String(SCHEMA_VERSION));
+    return next;
+};
 
 export const getStoredPermissions = () => {
     try {
         const stored = localStorage.getItem(STORAGE_KEY);
-        if (stored) return JSON.parse(stored);
+        if (stored) return applyNewPrivilegeDefaults(JSON.parse(stored));
     } catch {
         // fallback
     }
@@ -99,6 +135,7 @@ export const saveStoredPermissions = (newPermissions) => {
 
 export const hasPermission = (role, permission) => {
     if (!role || !permission) return false;
+    if (role === "SUPER_ADMIN") return true;
     const permissionsMap = getStoredPermissions();
     const allowed = permissionsMap[role] || DEFAULT_ROLE_PERMISSIONS[role] || [];
     return allowed.includes(permission);

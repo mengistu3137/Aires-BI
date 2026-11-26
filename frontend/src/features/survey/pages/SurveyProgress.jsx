@@ -14,6 +14,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog.jsx";
 import { apiClient } from "@/services/client.js";
 import toast from "react-hot-toast";
 import { EditDispatchModal } from "../components/EditDispatchModal.jsx";
+import { readPageFilter, usePageFilter, writePageFilter } from "@/hooks/usePageFilter.js";
 
 const STATUS_FILTERS = [
 	{ value: "", label: "Active Dispatches" },
@@ -58,7 +59,9 @@ export const SurveyProgress = () => {
 	const [searchParams, setSearchParams] = useSearchParams();
 
 	const page = Math.max(1, Number(searchParams.get("page") || 1));
-	const statusFromUrl = searchParams.get("status") || "";
+	const statusFromUrl = searchParams.has("status")
+		? searchParams.get("status") || ""
+		: readPageFilter("progress", "status", "");
 
 	const setPage = (next) => {
 		const nextParams = new URLSearchParams(searchParams);
@@ -67,7 +70,14 @@ export const SurveyProgress = () => {
 		setSearchParams(nextParams, { replace: true });
 	};
 
+	useEffect(() => {
+		if (searchParams.has("status")) {
+			writePageFilter("progress", "status", searchParams.get("status") || "");
+		}
+	}, [searchParams]);
+
 	const setStatusFilter = (value) => {
+		writePageFilter("progress", "status", value);
 		const nextParams = new URLSearchParams(searchParams);
 		if (!value) nextParams.delete("status");
 		else nextParams.set("status", value);
@@ -86,7 +96,11 @@ export const SurveyProgress = () => {
 	const deleteAssignment = useDeleteAssignment();
 	const archiveDispatch = useArchiveStoreDispatch();
 
-	const [viewMode, setViewMode] = useState("STORE_DISPATCH");
+	const [viewMode, setViewMode] = usePageFilter(
+		"progress",
+		"view",
+		"STORE_DISPATCH",
+	);
 	const [isAssignmentModalOpen, setIsAssignmentModalOpen] = useState(false);
 	const [isPeriodModalOpen, setIsPeriodModalOpen] = useState(false);
 

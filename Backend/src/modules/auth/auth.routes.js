@@ -1,7 +1,7 @@
 import { Router } from "express";
 import * as authController from "./auth.controller.js";
 import { validate } from "../../middlewares/validate.middleware.js";
-import { loginSchema } from "./auth.validation.js";
+import { loginSchema, updatePasswordSchema } from "./auth.validation.js";
 import { authenticate, restrictTo } from "../../middlewares/auth.middleware.js";
 
 const router = Router();
@@ -14,6 +14,14 @@ router.post("/logout", authenticate, authController.logout);
 
 // GET /me
 router.get("/me", authenticate, authController.getMe);
+
+// POST /change-password — required on the first sign-in with an issued password
+router.post(
+  "/change-password",
+  authenticate,
+  validate(updatePasswordSchema),
+  authController.changePassword,
+);
 
 // POST /impersonate/:userId (Super Admin only)
 router.post(

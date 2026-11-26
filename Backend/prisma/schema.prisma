@@ -96,6 +96,7 @@ model User {
   email        String? @unique
   phone        String? @unique
   passwordHash String?
+  mustChangePassword Boolean @default(false)
   role         Role    @default(FIELD_AUDITOR)
   active       Boolean @default(true)
   locationPermission String? @default("NOT_REQUESTED")
@@ -350,6 +351,8 @@ model PriceObservation {
   availability        ProductAvailability @default(AVAILABLE)
 
   price               Decimal?            @db.Decimal(12, 2)
+  ererPrice           Decimal?            @db.Decimal(12, 2)
+  valenciaPrice       Decimal?            @db.Decimal(12, 2)
   substituteProduct   String?             // "Substitute Product (Taken action)"
 
   observedUnit        String?

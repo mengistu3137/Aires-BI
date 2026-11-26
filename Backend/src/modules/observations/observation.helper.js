@@ -114,6 +114,12 @@ export const formatObservationResponse = (obs) => {
     availability: obs.availability,
     price:
       obs.price !== null && obs.price !== undefined ? Number(obs.price) : null,
+    ererPrice:
+      obs.ererPrice !== null && obs.ererPrice !== undefined ? Number(obs.ererPrice) : null,
+    valenciaPrice:
+      obs.valenciaPrice !== null && obs.valenciaPrice !== undefined
+        ? Number(obs.valenciaPrice)
+        : null,
     substituteProduct: obs.substituteProduct || null,
     observedUnit: obs.observedUnit,
     packageSize: obs.packageSize,

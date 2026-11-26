@@ -22,6 +22,11 @@ export const Can = ({ permission, role, children, fallback = null }) => {
 		return fallback;
 	}
 
+	// Super Admin inherits every role gate, matching the API.
+	if (currentRole === "SUPER_ADMIN") {
+		return <>{children}</>;
+	}
+
 	// 1. Role-based check
 	if (role) {
 		const rolesArray = Array.isArray(role) ? role : [role];

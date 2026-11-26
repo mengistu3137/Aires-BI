@@ -35,7 +35,7 @@ const handleIdentifierChange = (value) => {
 
 export const LoginPage = () => {
 	const navigate = useNavigate();
-	const { isAuthenticated, role } = useAuth();
+	const { isAuthenticated, role, user } = useAuth();
 	const loginMutation = useLogin(navigate);
 
 	const [identifier, setIdentifier] = useState("");
@@ -55,13 +55,15 @@ export const LoginPage = () => {
 	// If already authenticated, redirect immediately based on role
 	useEffect(() => {
 		if (isAuthenticated) {
-			if (role === "FIELD_AUDITOR") {
+			if (user?.mustChangePassword) {
+				navigate("/change-password", { replace: true });
+			} else if (role === "FIELD_AUDITOR") {
 				navigate("/audits", { replace: true });
 			} else {
 				navigate("/dashboard", { replace: true });
 			}
 		}
-	}, [isAuthenticated, role, navigate]);
+	}, [isAuthenticated, role, user, navigate]);
 
 	const handleSubmit = async (e) => {
 		e.preventDefault();

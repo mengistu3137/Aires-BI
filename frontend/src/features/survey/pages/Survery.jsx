@@ -28,6 +28,7 @@ import { RapidPriceInput } from "../components/RapidPriceInput.jsx";
 import { SyncStatusBanner } from "../components/SyncStatusBanner.jsx";
 import { ObservationAuditDrawer } from "../components/ObservationAuditDrawer.jsx";
 import { formatProductName } from "@/utils/formatters.js";
+import { formatOrangePriceLabel } from "@/features/observations/components/OrangeBrandFields.jsx";
 import toast from "react-hot-toast";
 
 export const Survey = () => {
@@ -327,6 +328,8 @@ export const Survey = () => {
 					productId: payload.productId,
 					availability: payload.availability,
 					price: finalPrice,
+					ererPrice: payload.ererPrice ?? null,
+					valenciaPrice: payload.valenciaPrice ?? null,
 					substituteProduct: payload.substituteProduct?.trim() || null,
 					evidencePhotoUrl: payload.evidencePhotoUrl || null, // ← Propagate uploaded proof URL
 					capturedAt: new Date().toISOString(),
@@ -692,7 +695,7 @@ export const Survey = () => {
 											<div>
 												{observation.availability === "AVAILABLE" ? (
 													<span className="font-mono text-sm font-black text-[#017C4D]">
-														{Number(observation.price).toFixed(2)} ETB
+														{formatOrangePriceLabel(observation) || `${Number(observation.price).toFixed(2)} ETB`}
 													</span>
 												) : (
 													<div className="flex flex-col items-end gap-0.5">

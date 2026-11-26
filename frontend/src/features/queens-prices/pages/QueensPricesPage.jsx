@@ -6,6 +6,7 @@ import { QueensPriceListTable } from "../components/QueensPriceListTable.jsx";
 import { QueensPriceEmptyState } from "../components/QueensPriceEmptyState.jsx";
 import { useAuth } from "@/hooks/useAuth.js";
 import { hasPermission, PERMISSIONS } from "@/permissions/permissions.js";
+import { usePageFilter } from "@/hooks/usePageFilter.js";
 
 // Track hierarchy order when viewing ALL
 const FREQ_ORDER = {
@@ -19,11 +20,19 @@ export const QueensPricesPage = () => {
 	const navigate = useNavigate();
 	const { user } = useAuth();
 	const canEditPrices = hasPermission(user?.role, PERMISSIONS.EDIT_BENCHMARKS);
-	const [page, setPage] = useState(1);
+	const [page, setPage] = usePageFilter("queens-prices", "page", 1);
 	const [searchInput, setSearchInput] = useState("");
 	const [debouncedSearch, setDebouncedSearch] = useState("");
-	const [activeFrequency, setActiveFrequency] = useState("ALL");
-	const [currentOnly, setCurrentOnly] = useState(false);
+	const [activeFrequency, setActiveFrequency] = usePageFilter(
+		"queens-prices",
+		"frequency",
+		"ALL",
+	);
+	const [currentOnly, setCurrentOnly] = usePageFilter(
+		"queens-prices",
+		"currentOnly",
+		false,
+	);
 
 	useEffect(() => {
 		const handler = setTimeout(() => {

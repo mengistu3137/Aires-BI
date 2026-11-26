@@ -22,6 +22,24 @@ const PAGE_SIZE = 20;
 
 const ACTION_DESCRIPTIONS = [
 	{
+		id: PERMISSIONS.GENERATE_INTELLIGENCE_REPORT,
+		label: "Generate Competitor Price Report",
+		description:
+			"Permits building the competitor price intelligence report from the dashboard, previewing it, and downloading PDF or Word. Leave unchecked to hide the report.",
+	},
+	{
+		id: PERMISSIONS.CREATE_PRODUCT,
+		label: "Add New Product",
+		description:
+			"Permits adding a product to the master catalog. Leave unchecked for a view-only catalog.",
+	},
+	{
+		id: PERMISSIONS.EDIT_PRODUCT,
+		label: "Edit Product",
+		description:
+			"Permits changing an existing product's details. Leave unchecked to keep catalog details view-only.",
+	},
+	{
 		id: PERMISSIONS.FINAL_QC_APPROVAL,
 		label: "Approve & Reject Observations",
 		description:
@@ -831,6 +849,9 @@ export const UsersPage = () => {
 										{showCreatePassword ? "Hide" : "Show"}
 									</button>
 								</div>
+								<p className="mt-1 text-[11px] leading-relaxed text-slate-500">
+									They will be asked to replace this password the first time they sign in.
+								</p>
 							</div>
 
 							<div>
@@ -978,6 +999,9 @@ export const UsersPage = () => {
 										{showEditPassword ? "Hide" : "Show"}
 									</button>
 								</div>
+								<p className="mt-1 text-[11px] leading-relaxed text-slate-500">
+									If you enter a password here, they will be asked to replace it the next time they sign in.
+								</p>
 							</div>
 
 							<div>

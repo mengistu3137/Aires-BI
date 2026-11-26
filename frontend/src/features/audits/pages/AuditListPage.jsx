@@ -1,9 +1,10 @@
-import React, { useState, useMemo } from "react";
+import React, { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAudits } from "../hooks/useAudits.js";
 import { AuditCard } from "../components/AuditCard.jsx";
 import { AuditEmptyState } from "../components/AuditEmptyState.jsx";
 import { AuditSummaryBar } from "../components/AuditSummaryBar.jsx";
+import { usePageFilter } from "@/hooks/usePageFilter.js";
 
 const STATUS_FILTERS = [
 	{ value: "", label: "Active Dispatches" },
@@ -16,8 +17,8 @@ const STATUS_FILTERS = [
 
 export const AuditListPage = () => {
 	const navigate = useNavigate();
-	const [statusFilter, setStatusFilter] = useState("");
-	const [page, setPage] = useState(1);
+	const [statusFilter, setStatusFilter] = usePageFilter("audits", "status", "");
+	const [page, setPage] = usePageFilter("audits", "page", 1);
 
 	// Queries active dispatches by default; passes status=ARCHIVED when viewing archived visits
 	const queryParams = useMemo(() => {

@@ -1,7 +1,12 @@
 // frontend/src/features/products/components/ProductFormModal.jsx
 import React, { useEffect, useState } from "react";
 
-const FREQUENCIES = ["DAILY", "WEEKLY", "MONTHLY", "BI_YEARLY"];
+const FREQUENCIES = [
+	{ value: "DAILY", label: "Daily Fresh" },
+	{ value: "WEEKLY", label: "Weekly Ultra" },
+	{ value: "MONTHLY", label: "Monthly Sensitive" },
+	{ value: "BI_YEARLY", label: "Bi-Yearly" },
+];
 
 const EMPTY = {
 	id: "",
@@ -11,6 +16,7 @@ const EMPTY = {
 	category: "",
 	unit: "pcs",
 	frequency: "WEEKLY",
+	sortOrder: "",
 	description: "",
 	initialQueensPrice: "",
 	active: true,
@@ -36,6 +42,7 @@ export const ProductFormModal = ({
 				category: product.category ?? "",
 				unit: product.unit ?? "pcs",
 				frequency: product.frequency ?? "WEEKLY",
+				sortOrder: product.sortOrder > 0 ? String(product.sortOrder) : "",
 				description: product.description ?? "",
 				initialQueensPrice: "",
 				active: product.active ?? true,
@@ -53,6 +60,8 @@ export const ProductFormModal = ({
 	const handleSubmit = (e) => {
 		e.preventDefault();
 
+		const sortText = String(form.sortOrder).trim();
+		const sortOrder = Number(sortText);
 		const base = {
 			name: form.name.trim(),
 			description: form.description.trim() || null,
@@ -60,10 +69,12 @@ export const ProductFormModal = ({
 			unit: form.unit.trim() || "pcs",
 			frequency: form.frequency,
 			active: form.active,
+			...(sortText !== "" && Number.isInteger(sortOrder) && sortOrder >= 0
+				? { sortOrder }
+				: {}),
 		};
 
 		if (isEdit) {
-			// Only send fields that updateProductSchema accepts
 			const payload = { ...base };
 			if (form.barcode.trim()) payload.barcode = form.barcode.trim();
 			if (form.sku.trim()) payload.sku = form.sku.trim();
@@ -71,25 +82,31 @@ export const ProductFormModal = ({
 			return;
 		}
 
-		// Create — schema requires id + initialQueensPrice > 0
 		const priceNum = Number(form.initialQueensPrice);
+		if (!Number.isFinite(priceNum) || priceNum <= 0) return;
 		onSubmit({
 			...base,
 			id: form.id.trim(),
 			barcode: form.barcode.trim() || null,
 			sku: form.sku.trim() || null,
-			initialQueensPrice:
-				Number.isFinite(priceNum) && priceNum > 0 ? priceNum : 0.01,
+			initialQueensPrice: priceNum,
 		});
 	};
 
 	return (
 		<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4">
-			<div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl border border-slate-100 space-y-4">
-				<div className="flex items-center justify-between border-b border-slate-100 pb-3">
-					<h3 className="text-base font-black text-slate-900">
-						{isEdit ? "Edit Product" : "New Product"}
-					</h3>
+			<div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl border border-slate-100 space-y-4">
+				<div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-3">
+					<div>
+						<h3 className="text-base font-black text-slate-900">
+							{isEdit ? "Edit Product" : "Add Product"}
+						</h3>
+						<p className="mt-0.5 text-[11px] font-medium text-slate-500">
+							{isEdit
+								? "Update the catalog record. The item code stays the same."
+								: "Adds the item to the catalog and sets its first Queens benchmark price."}
+						</p>
+					</div>
 					<button
 						type="button"
 						onClick={onClose}
@@ -102,7 +119,7 @@ export const ProductFormModal = ({
 				<form onSubmit={handleSubmit} className="space-y-3 text-xs">
 					<div>
 						<label className="block font-semibold text-slate-700 mb-1">
-							Item Code / Barcode <span className="text-[#A41821]">*</span>
+							Item code <span className="text-[#A41821]">*</span>
 						</label>
 						<input
 							required
@@ -112,6 +129,9 @@ export const ProductFormModal = ({
 							placeholder="e.g. 6291105766388 or VEG-01"
 							className="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono text-sm disabled:bg-slate-100 disabled:text-slate-500"
 						/>
+						<p className="mt-1 text-[10px] text-slate-400">
+							Catalog id. Barcode can be the same value, or left blank.
+						</p>
 					</div>
 
 					<div>
@@ -160,8 +180,8 @@ export const ProductFormModal = ({
 							className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm bg-white"
 						>
 							{FREQUENCIES.map((f) => (
-								<option key={f} value={f}>
-									{f}
+								<option key={f.value} value={f.value}>
+									{f.label}
 								</option>
 							))}
 						</select>
@@ -190,10 +210,25 @@ export const ProductFormModal = ({
 						</div>
 					</div>
 
+					<div>
+						<label className="block font-semibold text-slate-700 mb-1">
+							Catalog sequence
+						</label>
+						<input
+							type="number"
+							min="0"
+							step="1"
+							value={form.sortOrder}
+							onChange={set("sortOrder")}
+							placeholder="Optional. Lower numbers appear first."
+							className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm font-mono"
+						/>
+					</div>
+
 					{!isEdit && (
 						<div>
 							<label className="block font-semibold text-slate-700 mb-1">
-								Initial Queens Benchmark Price (ETB){" "}
+								Initial Queens benchmark price (ETB){" "}
 								<span className="text-[#A41821]">*</span>
 							</label>
 							<input
@@ -247,7 +282,7 @@ export const ProductFormModal = ({
 								? "Saving..."
 								: isEdit
 									? "Save Changes"
-									: "Create Product"}
+									: "Add Product"}
 						</button>
 					</div>
 				</form>

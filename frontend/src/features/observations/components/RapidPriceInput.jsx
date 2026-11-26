@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { formatProductName } from "@/utils/formatters.js";
+import { isOrangeProduct, optionalBrandPrice, OrangeBrandFields, shelfPriceFromBrands } from "./OrangeBrandFields.jsx";
 import { apiClient } from "@/services/client.js";
 import toast from "react-hot-toast";
 
@@ -17,6 +18,8 @@ export const RapidPriceInput = ({
 	isSaving = false,
 }) => {
 	const [price, setPrice] = useState("");
+	const [ererPrice, setErerPrice] = useState("");
+	const [valenciaPrice, setValenciaPrice] = useState("");
 	const [substituteProduct, setSubstituteProduct] = useState("");
 	const [substitutePrice, setSubstitutePrice] = useState("");
 	const [unavailableMode, setUnavailableMode] = useState(null);
@@ -33,6 +36,7 @@ export const RapidPriceInput = ({
 	const [activeZoomUrl, setActiveZoomUrl] = useState(null);
 
 	const inputRef = useRef(null);
+	const ererRef = useRef(null);
 	const substituteInputRef = useRef(null);
 	const photoInputRef = useRef(null);
 
@@ -139,6 +143,16 @@ export const RapidPriceInput = ({
 	useEffect(() => {
 		if (selectedProduct) {
 			setPrice("");
+			setErerPrice(
+				selectedProduct?._existingObservation?.ererPrice
+					? String(selectedProduct._existingObservation.ererPrice)
+					: "",
+			);
+			setValenciaPrice(
+				selectedProduct?._existingObservation?.valenciaPrice
+					? String(selectedProduct._existingObservation.valenciaPrice)
+					: "",
+			);
 			setSubstituteProduct("");
 			setSubstitutePrice("");
 			setUnavailableMode(null);
@@ -156,10 +170,8 @@ export const RapidPriceInput = ({
 			setActiveZoomUrl(null);
 
 			const timer = setTimeout(() => {
-				if (inputRef.current) {
-					inputRef.current.focus();
-					inputRef.current.select();
-				}
+				inputRef.current?.focus();
+				inputRef.current?.select();
 			}, 50);
 			return () => clearTimeout(timer);
 		}
@@ -176,14 +188,24 @@ export const RapidPriceInput = ({
 
 	if (!selectedProduct) return null;
 
+	const orangeItem = isOrangeProduct(selectedProduct);
+	const enteredShelf = parseFloat(price);
+	const hasShelfPrice = !Number.isNaN(enteredShelf) && enteredShelf > 0;
+	const orangeShelfPrice = shelfPriceFromBrands(ererPrice, valenciaPrice);
+	const canSavePrice = hasShelfPrice || (orangeItem && orangeShelfPrice !== null);
+
 	const handlePriceSubmit = async (e) => {
 		e.preventDefault();
 		e.stopPropagation();
 		setError("");
 
-		const numeric = parseFloat(price);
-		if (isNaN(numeric) || numeric <= 0) {
-			setError("Please enter a valid price greater than 0");
+		const numeric = hasShelfPrice ? enteredShelf : orangeShelfPrice;
+		if (numeric === null || Number.isNaN(numeric) || numeric <= 0) {
+			setError(
+				orangeItem
+					? "Enter the shelf price, or at least one of Erer and Valencia."
+					: "Please enter a valid price greater than 0",
+			);
 			inputRef.current?.focus();
 			return;
 		}
@@ -195,6 +217,8 @@ export const RapidPriceInput = ({
 				price: numeric,
 				availability: "AVAILABLE",
 				evidencePhotoUrl,
+				ererPrice: orangeItem ? optionalBrandPrice(ererPrice) : null,
+				valenciaPrice: orangeItem ? optionalBrandPrice(valenciaPrice) : null,
 			});
 		} catch {
 			// Toast handled in uploadStagedPhotos
@@ -544,6 +568,22 @@ export const RapidPriceInput = ({
 									ETB
 								</span>
 							</div>
+							{orangeItem && (
+								<OrangeBrandFields
+									ererPrice={ererPrice}
+									valenciaPrice={valenciaPrice}
+									onErer={(value) => {
+										setErerPrice(value);
+										setError("");
+									}}
+									onValencia={(value) => {
+										setValenciaPrice(value);
+										setError("");
+									}}
+									disabled={isSaving || isUploadingPhotos}
+									ererRef={ererRef}
+								/>
+							)}
 							{error && (
 								<p className="text-xs font-semibold text-[#A41821] mt-1">
 									{error}
@@ -606,7 +646,7 @@ export const RapidPriceInput = ({
 
 						<button
 							type="submit"
-							disabled={isSaving || !price || isUploadingPhotos}
+							disabled={isSaving || !canSavePrice || isUploadingPhotos}
 							className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl bg-[#A41821] hover:bg-[#7F1219] py-3.5 text-sm font-bold text-white shadow-xs transition active:scale-[0.99] disabled:opacity-40 cursor-pointer"
 						>
 							<span>

@@ -4,6 +4,7 @@ import { apiClient } from "@/services/client.js";
 import { useStores } from "@/features/survey/hooks/useStores.js";
 import { DataTable } from "@/components/DataTable.jsx";
 import { Can } from "@/components/Can.jsx";
+import { usePageFilter } from "@/hooks/usePageFilter.js";
 
 const DEFAULT_FORM_STATE = {
 	competitorId: "",
@@ -28,8 +29,8 @@ export const StoresPage = () => {
 	} = useStores();
 
 	// View mode: 'ACTIVE' or 'ARCHIVED'
-	const [activeTab, setActiveTab] = useState("ACTIVE");
-	const [selectedType, setSelectedType] = useState("ALL");
+	const [activeTab, setActiveTab] = usePageFilter("stores", "status", "ACTIVE");
+	const [selectedType, setSelectedType] = usePageFilter("stores", "type", "ALL");
 	const [isModalOpen, setIsModalOpen] = useState(false);
 	const [editingStore, setEditingStore] = useState(null);
 	const [deleteCandidate, setDeleteCandidate] = useState(null);
