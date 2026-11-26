@@ -1,7 +1,6 @@
 // frontend/src/features/products/ProductsPage.jsx
 import React, { useState, useRef, useMemo } from "react";
 import { DataTable } from "@/components/DataTable.jsx";
-import { Can } from "@/components/Can.jsx";
 import { ConfirmDialog } from "@/components/ConfirmDialog.jsx";
 import toast from "react-hot-toast";
 import { formatProductName } from "@/utils/formatters.js";
@@ -53,6 +52,8 @@ export const ProductsPage = () => {
 	} = useProducts();
 	const { user, isAdmin } = useAuth();
 	const canEditPrices = hasPermission(user?.role, PERMISSIONS.EDIT_BENCHMARKS);
+	const canCreateProduct = hasPermission(user?.role, PERMISSIONS.CREATE_PRODUCT);
+	const canEditProduct = hasPermission(user?.role, PERMISSIONS.EDIT_PRODUCT);
 	const [selectedTier, setSelectedTier] = usePageFilter("products", "tier", "ALL");
 	const [activeProductForPrice, setActiveProductForPrice] = useState(null);
 	const [newPrice, setNewPrice] = useState("");
@@ -299,8 +300,8 @@ export const ProductsPage = () => {
 			header: "Action",
 			key: "actions",
 			align: "right",
-			render: (row) => (
-				<Can role={["ADMIN", "MANAGER"]}>
+			render: (row) =>
+				canEditPrices || canEditProduct || isAdmin ? (
 					<div className="flex items-center justify-end gap-3">
 						{canEditPrices && (
 						<button
@@ -314,6 +315,7 @@ export const ProductsPage = () => {
 							Update Price
 						</button>
 						)}
+						{canEditProduct && (
 						<button
 							type="button"
 							onClick={() => openEdit(row)}
@@ -321,7 +323,8 @@ export const ProductsPage = () => {
 						>
 							Edit
 						</button>
-						<Can role={["ADMIN"]}>
+						)}
+						{isAdmin && (
 							<button
 								type="button"
 								onClick={() => {
@@ -333,10 +336,11 @@ export const ProductsPage = () => {
 							>
 								Delete
 							</button>
-						</Can>
+						)}
 					</div>
-				</Can>
-			),
+				) : (
+					<span className="text-slate-300">—</span>
+				),
 		},
 	];
 
@@ -353,8 +357,9 @@ export const ProductsPage = () => {
 					</p>
 				</div>
 
-				<Can role={["ADMIN", "MANAGER"]}>
+				{(canCreateProduct || isAdmin) && (
 					<div className="flex items-center gap-2">
+						{canCreateProduct && (
 						<button
 							type="button"
 							onClick={openCreate}
@@ -375,6 +380,7 @@ export const ProductsPage = () => {
 								</svg>
 							New Product
 						</button>
+						)}
 
 						{isAdmin && (
 							<>
@@ -411,7 +417,7 @@ export const ProductsPage = () => {
 							</>
 						)}
 					</div>
-				</Can>
+				)}
 			</div>
 
 			{/* Tier filter pills & table */}

@@ -46,13 +46,13 @@ router.get(
 
 router.get(
   "/intelligence/draft",
-  restrictTo("SUPER_ADMIN"),
+  restrictTo("ADMIN", "MANAGER"),
   observationReportController.draftIntelligenceNotesHandler,
 );
 
 router.post(
   "/intelligence",
-  restrictTo("SUPER_ADMIN"),
+  restrictTo("ADMIN", "MANAGER"),
   observationReportController.downloadIntelligenceReport,
 );
 

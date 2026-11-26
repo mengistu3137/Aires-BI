@@ -15,11 +15,12 @@ import { RecentAlertsList } from "../components/RecentAlertsList.jsx";
 import { PriceIndexTrendCard } from "../components/PriceIndexTrendCard.jsx";
 import { DashboardSectionError } from "../components/DashboardSectionError.jsx";
 import { IntelligenceReportModal } from "../components/IntelligenceReportModal.jsx";
+import { hasPermission, PERMISSIONS } from "@/permissions/permissions.js";
 
 export const DashboardPage = () => {
   const { role } = useAuth();
   const isAuditor = role === "FIELD_AUDITOR";
-  const isSuperAdmin = role === "SUPER_ADMIN";
+  const canGenerateReport = hasPermission(role, PERMISSIONS.GENERATE_INTELLIGENCE_REPORT);
   const [reportOpen, setReportOpen] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -44,7 +45,7 @@ export const DashboardPage = () => {
         <SurveyPeriodSelector value={surveyPeriodId} onChange={handlePeriodChange} />
       </div>
 
-      {isSuperAdmin && (
+      {canGenerateReport && (
         <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-xs sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-sm font-black text-slate-900">Competitor price intelligence report</h2>
