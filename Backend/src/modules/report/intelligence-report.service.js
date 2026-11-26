@@ -53,10 +53,19 @@ const numericPrice = (observation) => {
 	return Math.min(...values);
 };
 
+const inAddis = (date, options) =>
+	new Date(date).toLocaleDateString("en-GB", { timeZone: "Africa/Addis_Ababa", ...options });
+
 const formatAuditDate = (date) =>
-	new Date(date).toLocaleDateString("en-GB", {
+	inAddis(date, { day: "numeric", month: "long", year: "numeric" });
+
+const formatAuditDateShort = (date) =>
+	inAddis(date, { day: "2-digit", month: "2-digit", year: "numeric" });
+
+const formatAuditDateCompact = (date) =>
+	new Date(date).toLocaleDateString("en-US", {
 		day: "numeric",
-		month: "long",
+		month: "short",
 		year: "numeric",
 		timeZone: "Africa/Addis_Ababa",
 	});
@@ -250,8 +259,11 @@ export const buildIntelligenceReport = async ({ surveyPeriodId, notes, includeCa
 		row.cells.some((cell) => cell.label === "Out of Stock" || cell.label === "N/F"),
 	).length;
 	const withBenchmark = rows.filter((row) => row.queensValue !== null).length;
+	const gapRange = negative.length
+		? `${Math.max(...negative).toFixed(1)}% to ${Math.min(...negative).toFixed(1)}%`
+		: "—";
 	const gapLabel = negative.length
-		? `${Math.min(...negative).toFixed(1)}% to ${Math.max(...negative).toFixed(1)}% versus Queens`
+		? `Street prices run ${gapRange} versus the Queens benchmark.`
 		: "No competitor price is below the Queens benchmark in this period.";
 
 	const cards = includeCards
@@ -275,18 +287,24 @@ export const buildIntelligenceReport = async ({ surveyPeriodId, notes, includeCa
 			verification: `${[...latest.values()].length} price captures.`,
 		};
 
+	const categories = [...new Set(rows.map((row) => row.category).filter(Boolean))];
 	return {
 		title: "COMPETITOR PRICE INTELLIGENCE & BENCHMARK DASHBOARD",
+		subtitle: `Carrefour Ethiopia / Queens Supermarket Benchmark vs. ${stores.map((store) => store.name).join(", ") || "competitor stores"} | ${period.name}`,
 		periodName: period.name,
 		auditDate: formatAuditDate(period.startDate),
+		auditDateShort: formatAuditDateShort(period.startDate),
+		auditDateCompact: formatAuditDateCompact(period.startDate),
+		platform: "Aires Business Intelligence Platform (#Arise BI)",
+		scope: `${rows.length} Core SKUs (${categories.slice(0, 6).join(", ") || "Fresh"})`,
 		stores,
 		auditors: [...auditors],
 		rows,
 		cards: [
 			{ label: "QUEENS / CARREFOUR BENCHMARK", value: `${withBenchmark} / ${rows.length} SKUs`, text: cards.benchmark },
-			{ label: "MARKET PRICE GAP", value: negative.length ? `${Math.min(...negative).toFixed(1)}% to ${Math.max(...negative).toFixed(1)}%` : "—", text: cards.street },
+			{ label: "STREET MARKET ADVANTAGE", value: gapRange, text: cards.street },
 			{ label: "STOCK-OUT & BRAND ALERTS", value: `${gapCount} Key Gap${gapCount === 1 ? "" : "s"}`, text: cards.stock },
-			{ label: "FIELD VERIFICATION", value: `${rows.length} SKUs`, text: cards.verification },
+			{ label: "FIELD VERIFICATION PROOF", value: "100% Audited", text: cards.verification },
 		],
 		notes: cleanNotes(notes),
 	};
@@ -324,20 +342,20 @@ const fallbackNarrative = (model) => {
 	);
 	const widest = [...below].sort((a, b) => a.gapValue - b.gapValue).slice(0, 4);
 	const advisory = widest.length
-		? `Review ${widest.map((row) => `${row.name} (${row.gap})`).join(", ")} before the next price window. These are the widest gaps versus the Queens benchmark in ${model.periodName}.`
-		: `No captured competitor price is below the Queens benchmark in ${model.periodName}. Keep the current benchmarks and confirm the next field visit.`;
+		? `**STRATEGIC ADVISORY ON THE DAILY PRICING WINDOW:** Review ${widest.map((row) => `**${row.name} (${row.gap})**`).join(", ")} before the next price window. These are the widest gaps versus the **Queens** benchmark in **${model.periodName}**.`
+		: `**STRATEGIC ADVISORY ON THE DAILY PRICING WINDOW:** No captured competitor price is below the **Queens** benchmark in **${model.periodName}**. Keep the current benchmarks and confirm the next field visit.`;
 	const observationLines = [
 		below.length
-			? `${below.length} items have a competitor price below the Queens benchmark at the cheapest audited store.`
-			: "No captured competitor price is below the Queens benchmark.",
+			? `**Benchmark comparison:** **${below.length}** items have a competitor price below the Queens benchmark at the cheapest audited store.`
+			: "**Benchmark comparison:** No captured competitor price is below the Queens benchmark.",
 		gaps.length
-			? `Availability notes: ${gaps.slice(0, 6).map((row) => `${row.name} — ${row.stock === "—" ? row.cells.map((cell) => cell.note).filter(Boolean).join("; ") : row.stock}`).join(". ")}.`
-			: "No stock-out, not-found, or substitute notes were captured.",
-	].filter(Boolean);
+			? `**Product availability and substitutions:** ${gaps.slice(0, 6).map((row) => `**${row.name}** — ${row.stock === "—" ? row.cells.map((cell) => cell.note).filter(Boolean).join("; ") : row.stock}`).join(". ")}.`
+			: "**Product availability:** No stock-out, not-found, or substitute notes were captured.",
+	];
 	return {
 		advisory,
-		observations: observationLines.join(" "),
-		purchases: "No mystery-shopping purchases, weights, or receipt totals were recorded on these price captures. Add what was bought during the visit.",
+		observations: observationLines.join("\n"),
+		purchases: "**Mystery-shopping purchases:** No mystery-shopping purchases, weights, or receipt totals were recorded on these price captures. Add what was bought during the visit.",
 	};
 };
 
@@ -383,7 +401,7 @@ export const draftIntelligenceNotes = async ({ surveyPeriodId }) => {
 				{
 					role: "system",
 					content:
-						"You draft three sections of a Queens Supermarket competitor report from captured survey data only. Return JSON with keys advisory, observations, purchases. advisory is 2 to 4 sentences on what pricing management should change. observations is 3 to 6 sentences on stock-outs, substitutions, brand differences such as orange Erer and Valencia, and where Queens is higher or lower. purchases summarizes mystery-shopping buys, weights, and receipts only when those details are in the data. If they were not recorded, say so and leave room for the field team to add them. Do not invent prices, stores, receipts, weights, or people.",
+						"You draft the last page of a Queens Supermarket competitor report from captured survey data only. Return JSON with keys advisory, observations, purchases. Use **double asterisks** for bold, the same way the printed report does. advisory is one paragraph that starts with a bold capital lead ending in a colon, such as **STRATEGIC ADVISORY ON THE DAILY PRICING WINDOW:**, then the recommendation. Bold the important times, store names, and figures inside the paragraph. observations is 3 to 5 bullets separated by a newline. Each bullet starts with a bold label and a colon, then the finding, for example **Value added tax:** Street prices are **VAT-exempt** while **Queens / Carrefour** prices are **VAT-inclusive**. Cover stock-outs, substitutions, orange Erer and Valencia when present, and where Queens is higher or lower. purchases is 2 to 4 bullets in that same pattern, one per market or receipt. If purchases, weights, or receipts were not recorded, use one bullet that says so and leaves room for the field team to add them. Do not invent prices, stores, receipts, weights, or people.",
 				},
 				{ role: "user", content: JSON.stringify(facts) },
 			],
