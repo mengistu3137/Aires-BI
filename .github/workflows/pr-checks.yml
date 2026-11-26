@@ -78,9 +78,26 @@ jobs:
     defaults:
       run:
         working-directory: Backend
+
+    # Ephemeral PostgreSQL database used to verify migrations
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: airesbi_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
     env:
-      # Dummy PostgreSQL URL: allows Prisma to validate the schema without connecting to a live DB
       DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/airesbi_ci?schema=public"
+
     steps:
       - uses: actions/checkout@v4
 
@@ -99,11 +116,19 @@ jobs:
           find . -name "*.js" -not -path "./node_modules/*" -not -path "./uploads/*" -print0 \
             | xargs -0 -n1 node --check
 
-      - name: Validate Prisma schema
+      - name: Validate Prisma schema & verify migrations
         if: needs.changes.outputs.prisma == 'true' || needs.changes.outputs.backend == 'true'
         run: |
           npx prisma validate
           npx prisma generate
+          
+          echo "🔍 Checking if schema.prisma is in sync with migrations..."
+          # If schema.prisma has changes not recorded in migrations/, this fails with code 2!
+          npx prisma migrate diff \
+            --exit-code \
+            --from-migrations ./prisma/migrations \
+            --to-schema-datamodel ./prisma/schema.prisma \
+            --shadow-database-url "$DATABASE_URL"
 
       - name: Lint
         run: npm run lint --if-present
@@ -142,4 +167,4 @@ jobs:
             echo "❌ One or more checks failed."
             exit 1
           fi
-          echo "✅ All checks passed."
+          echo "✅ All checks passed."x
