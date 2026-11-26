@@ -1,6 +1,6 @@
 import prisma from "../../config/db.js";
 import ApiError from "../../utils/api-error.js";
-import { comparePassword, generateAuthPayload, sanitizeUser } from "./auth.helpers.js";
+import { comparePassword, generateAuthPayload, hashPassword, sanitizeUser } from "./auth.helpers.js";
 import { signToken } from "../../utils/jwt.js";
 
 
@@ -114,6 +114,37 @@ export const logout = async (userId) => {
   return { success: true };
 };
 
+export const changePassword = async (userId, { currentPassword, newPassword }) => {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+  });
+
+  if (!user) {
+    throw new ApiError(404, "User not found.");
+  }
+
+  const currentMatches = await comparePassword(currentPassword, user.passwordHash);
+  if (!currentMatches) {
+    throw new ApiError(401, "The current password is incorrect.");
+  }
+
+  const samePassword = await comparePassword(newPassword, user.passwordHash);
+  if (samePassword) {
+    throw new ApiError(400, "Choose a password that is different from the one you were given.");
+  }
+
+  const passwordHash = await hashPassword(newPassword);
+  const updated = await prisma.user.update({
+    where: { id: userId },
+    data: {
+      passwordHash,
+      mustChangePassword: false,
+    },
+  });
+
+  return sanitizeUser(updated);
+};
+
 export const getMe = async (userId) => {
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -132,5 +163,6 @@ export const authService = {
   login,
   logout,
   getMe,
+  changePassword,
   impersonateUser,
 };

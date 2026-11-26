@@ -10,6 +10,14 @@ export const getCurrentUserRequest = async () => {
   return response.data;
 };
 
+export const changePasswordRequest = async ({ currentPassword, newPassword }) => {
+  const response = await apiClient.post("/auth/change-password", {
+    currentPassword,
+    newPassword,
+  });
+  return response.data;
+};
+
 /**
  * Super Admin generates session token on behalf of a target user
  */

@@ -37,6 +37,19 @@ export const getMe = async (req, res, next) => {
   }
 };
 
+export const changePassword = async (req, res, next) => {
+  try {
+    const user = await authService.changePassword(req.user.id, req.body);
+    res.status(200).json({
+      status: "success",
+      message: "Password updated",
+      data: { user },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const impersonate = async (req, res, next) => {
   try {
     const data = await authService.impersonateUser(req.params.userId, req.user);
@@ -54,5 +67,6 @@ export const authController = {
   login,
   logout,
   getMe,
+  changePassword,
   impersonate,
 };

@@ -96,6 +96,7 @@ model User {
   email        String? @unique
   phone        String? @unique
   passwordHash String?
+  mustChangePassword Boolean @default(false)
   role         Role    @default(FIELD_AUDITOR)
   active       Boolean @default(true)
   locationPermission String? @default("NOT_REQUESTED")

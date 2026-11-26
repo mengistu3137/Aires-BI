@@ -849,6 +849,9 @@ export const UsersPage = () => {
 										{showCreatePassword ? "Hide" : "Show"}
 									</button>
 								</div>
+								<p className="mt-1 text-[11px] leading-relaxed text-slate-500">
+									They will be asked to replace this password the first time they sign in.
+								</p>
 							</div>
 
 							<div>
@@ -996,6 +999,9 @@ export const UsersPage = () => {
 										{showEditPassword ? "Hide" : "Show"}
 									</button>
 								</div>
+								<p className="mt-1 text-[11px] leading-relaxed text-slate-500">
+									If you enter a password here, they will be asked to replace it the next time they sign in.
+								</p>
 							</div>
 
 							<div>
