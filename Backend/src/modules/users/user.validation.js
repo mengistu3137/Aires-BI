@@ -1,6 +1,14 @@
 import { z } from "zod";
 
-export const ROLES = ["SUPER_ADMIN", "ADMIN", "MANAGER", "FIELD_AUDITOR"];
+export const ROLES = [
+  "SUPER_ADMIN",
+  "ADMIN",
+  "AIRES_ANALYST",
+  "FIELD_AUDITOR",
+  "QUEENS_GM",
+  "MANAGER",
+  "QUEENS_ANALYST",
+];
 
 export const createUserSchema = z
   .object({

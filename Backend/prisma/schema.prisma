@@ -13,8 +13,11 @@ datasource db {
 enum Role {
   SUPER_ADMIN
   ADMIN
-  MANAGER
+  AIRES_ANALYST
   FIELD_AUDITOR
+  QUEENS_GM
+  MANAGER
+  QUEENS_ANALYST
 }
 
 enum StoreType {
@@ -100,6 +103,7 @@ model User {
   role         Role    @default(FIELD_AUDITOR)
   active       Boolean @default(true)
   locationPermission String? @default("NOT_REQUESTED")
+  loginSessions   LoginSession[]
   assignments     SurveyAssignment[] @relation("AssignedAuditor")
   createdAudits   Audit[]            @relation("AuditCreatedBy")
   observations    PriceObservation[] @relation("ObservedBy")
@@ -111,6 +115,27 @@ model User {
 
   @@index([role, active])
   @@index([active])
+}
+
+model LoginSession {
+  id              String    @id @default(uuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  loginAt         DateTime  @default(now())
+  logoutAt        DateTime?
+  lastSeenAt      DateTime  @default(now())
+  durationSeconds Int?
+  ipAddress       String?
+  location        String?
+  userAgent       String?
+  osName          String?
+  osVersion       String?
+  deviceType      String?
+  browserName     String?
+  browserVersion  String?
+
+  @@index([userId, loginAt])
+  @@index([loginAt])
 }
 
 model Product {

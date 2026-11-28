@@ -18,6 +18,48 @@ import {
 } from "@/permissions/permissions.js";
 import { NAVIGATION } from "@/app/config/navigation.js";
 
+const RoleSelectOptions = ({ includeSuperAdmin }) => (
+	<>
+		<optgroup label="Aires">
+			<option value="ADMIN">Aires Admin</option>
+			<option value="AIRES_ANALYST">Aires Analyst</option>
+			<option value="FIELD_AUDITOR">Field Auditor</option>
+			{includeSuperAdmin ? <option value="SUPER_ADMIN">Aires Super Admin</option> : null}
+		</optgroup>
+		<optgroup label="Queens">
+			<option value="QUEENS_GM">General Manager</option>
+			<option value="MANAGER">Queens Admin</option>
+			<option value="QUEENS_ANALYST">Queens Analyst</option>
+		</optgroup>
+	</>
+);
+
+const PRIVILEGE_GROUPS = [
+	{
+		label: "Aires",
+		roles: [
+			{ id: "ADMIN", label: "Aires Admin" },
+			{ id: "AIRES_ANALYST", label: "Aires Analyst" },
+			{ id: "FIELD_AUDITOR", label: "Field Auditor" },
+		],
+	},
+	{
+		label: "Queens",
+		roles: [
+			{ id: "QUEENS_GM", label: "General Manager" },
+			{ id: "MANAGER", label: "Queens Admin" },
+			{ id: "QUEENS_ANALYST", label: "Queens Analyst" },
+		],
+	},
+];
+
+const roleLabel = (role) => {
+	const match = PRIVILEGE_GROUPS.flatMap((group) => group.roles).find((item) => item.id === role);
+	if (match) return match.label;
+	if (role === "SUPER_ADMIN") return "Super Admin";
+	return role;
+};
+
 const PAGE_SIZE = 20;
 
 const ACTION_DESCRIPTIONS = [
@@ -355,11 +397,17 @@ export const UsersPage = () => {
 			return { label: "Aires Super Admin", style: "bg-[#A41821] text-white" };
 		if (r === "ADMIN")
 			return { label: "Aires Admin", style: "bg-slate-800 text-white" };
+		if (r === "AIRES_ANALYST")
+			return { label: "Aires Analyst", style: "bg-slate-100 text-slate-800 border border-slate-200" };
+		if (r === "QUEENS_GM")
+			return { label: "General Manager", style: "bg-emerald-700 text-white" };
 		if (r === "MANAGER")
 			return {
 				label: "Queens Admin",
 				style: "bg-emerald-50 text-[#017C4D] border border-emerald-200",
 			};
+		if (r === "QUEENS_ANALYST")
+			return { label: "Queens Analyst", style: "bg-emerald-50 text-emerald-800 border border-emerald-100" };
 		return {
 			label: "Field Auditor",
 			style: "bg-blue-50 text-blue-700 border border-blue-200",
@@ -868,14 +916,7 @@ export const UsersPage = () => {
 									}
 									className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm text-slate-800 focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] outline-hidden cursor-pointer"
 								>
-									<option value="FIELD_AUDITOR">Field Auditor</option>
-									<option value="MANAGER">Queens Admin (Client Admin)</option>
-									<option value="ADMIN">Aires Admin (Operations)</option>
-									{isSuperAdmin && (
-										<option value="SUPER_ADMIN">
-											Aires Super Admin (Full Control)
-										</option>
-									)}
+									<RoleSelectOptions includeSuperAdmin={isSuperAdmin} />
 								</select>
 							</div>
 
@@ -1015,14 +1056,7 @@ export const UsersPage = () => {
 									}
 									className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm text-slate-800 focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821] outline-hidden cursor-pointer"
 								>
-									<option value="FIELD_AUDITOR">Field Auditor</option>
-									<option value="MANAGER">Queens Admin (Client Admin)</option>
-									<option value="ADMIN">Aires Admin (Operations)</option>
-									{isSuperAdmin && (
-										<option value="SUPER_ADMIN">
-											Aires Super Admin (Full Control)
-										</option>
-									)}
+									<RoleSelectOptions includeSuperAdmin={isSuperAdmin} />
 								</select>
 							</div>
 
@@ -1083,7 +1117,7 @@ export const UsersPage = () => {
 };
 
 export const PrivilegesManagementTab = () => {
-	const [selectedRole, setSelectedRole] = useState("MANAGER");
+	const [selectedRole, setSelectedRole] = useState("SUPER_ADMIN");
 	const [currentPermissions, setCurrentPermissions] = useState(
 		getStoredPermissions(),
 	);
@@ -1098,7 +1132,10 @@ export const PrivilegesManagementTab = () => {
 
 	const rolePermissionsList = currentPermissions[selectedRole] || [];
 
+	const locked = selectedRole === "SUPER_ADMIN";
+
 	const handleToggleActionPermission = (permId) => {
+		if (locked) return;
 		const updatedList = rolePermissionsList.includes(permId)
 			? rolePermissionsList.filter((p) => p !== permId)
 			: [...rolePermissionsList, permId];
@@ -1110,17 +1147,18 @@ export const PrivilegesManagementTab = () => {
 
 		setCurrentPermissions(newMatrix);
 		saveStoredPermissions(newMatrix);
-		toast.success(`Updated action permissions for ${selectedRole}`);
+		toast.success(`Updated action permissions for ${roleLabel(selectedRole)}`);
 	};
 
 	const handleTogglePageAccess = (pageId) => {
+		if (locked) return;
 		const updated = allowedPages.includes(pageId)
 			? allowedPages.filter((id) => id !== pageId)
 			: [...allowedPages, pageId];
 
 		setAllowedPages(updated);
 		saveRolePageAccess(selectedRole, updated);
-		toast.success(`Updated page navigation for ${selectedRole}`);
+		toast.success(`Updated page navigation for ${roleLabel(selectedRole)}`);
 	};
 
 	const handleResetDefaults = () => {
@@ -1144,36 +1182,30 @@ export const PrivilegesManagementTab = () => {
 					</p>
 				</div>
 
-				<div className="flex items-center gap-2">
-					<div className="flex rounded-xl bg-slate-100 p-1 text-xs font-bold">
-						<button
-							type="button"
-							onClick={() => setSelectedRole("MANAGER")}
-							className={`rounded-lg px-3 py-1.5 transition cursor-pointer ${
-								selectedRole === "MANAGER"
-									? "bg-[#017C4D] text-white shadow-2xs"
-									: "text-slate-600 hover:text-slate-900"
-							}`}
+				<div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+					<label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+						Filter by role
+						<select
+							value={selectedRole}
+							onChange={(event) => setSelectedRole(event.target.value)}
+							className="min-w-48 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-800 outline-hidden focus:border-[#A41821] focus:ring-1 focus:ring-[#A41821]"
 						>
-							Queens Admin 
-						</button>
-						<button
-							type="button"
-							onClick={() => setSelectedRole("ADMIN")}
-							className={`rounded-lg px-3 py-1.5 transition cursor-pointer ${
-								selectedRole === "ADMIN"
-									? "bg-slate-900 text-white shadow-2xs"
-									: "text-slate-600 hover:text-slate-900"
-							}`}
-						>
-							Aires Admin 
-						</button>
-					</div>
-
+							<option value="SUPER_ADMIN">Super Admin</option>
+							{PRIVILEGE_GROUPS.map((group) => (
+								<optgroup key={group.label} label={group.label}>
+									{group.roles.map((role) => (
+										<option key={role.id} value={role.id}>
+											{role.label}
+										</option>
+									))}
+								</optgroup>
+							))}
+						</select>
+					</label>
 					<button
 						type="button"
 						onClick={handleResetDefaults}
-						className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
+						className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
 					>
 						Reset Defaults
 					</button>
@@ -1187,13 +1219,14 @@ export const PrivilegesManagementTab = () => {
 						1. Page Navigation Privileges (Sidebar Access)
 					</h3>
 					<p className="text-xs text-slate-500">
-						Unchecking a page removes it from the sidebar and prevents
-						navigation.
+						{locked
+							? "Super Admin always has every page and every action. This level cannot be reduced."
+							: "Unchecking a page removes it from the sidebar and prevents navigation."}
 					</p>
 				</div>
 
 				<div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
-					{NAVIGATION.map((nav) => {
+					{NAVIGATION.filter((nav) => nav.id !== "login-audit" || locked).map((nav) => {
 						const isChecked = allowedPages.includes(nav.id);
 
 						return (
@@ -1208,9 +1241,10 @@ export const PrivilegesManagementTab = () => {
 								<div className="flex items-center gap-2.5">
 									<input
 										type="checkbox"
-										checked={isChecked}
+										checked={locked || isChecked}
+										disabled={locked}
 										onChange={() => handleTogglePageAccess(nav.id)}
-										className="h-4 w-4 rounded border-slate-300 accent-[#017C4D] cursor-pointer"
+										className="h-4 w-4 rounded border-slate-300 accent-[#017C4D] cursor-pointer disabled:cursor-not-allowed"
 									/>
 									<span className="font-bold">{nav.label}</span>
 								</div>
@@ -1249,9 +1283,10 @@ export const PrivilegesManagementTab = () => {
 							>
 								<input
 									type="checkbox"
-									checked={isAllowed}
+									checked={locked || isAllowed}
+									disabled={locked}
 									onChange={() => handleToggleActionPermission(action.id)}
-									className="mt-0.5 h-4 w-4 rounded border-slate-300 accent-[#017C4D] cursor-pointer"
+									className="mt-0.5 h-4 w-4 rounded border-slate-300 accent-[#017C4D] cursor-pointer disabled:cursor-not-allowed"
 								/>
 								<div>
 									<p className="font-bold text-slate-900">{action.label}</p>

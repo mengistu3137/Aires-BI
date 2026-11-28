@@ -19,7 +19,7 @@ export const NAVIGATION = [
     path: "/dashboard",
     icon: LayoutDashboard,
     iconSize: 18,
-    roles: ["SUPER_ADMIN", "ADMIN", "MANAGER"],
+    roles: ["SUPER_ADMIN", "ADMIN", "AIRES_ANALYST", "MANAGER", "QUEENS_GM", "QUEENS_ANALYST"],
   },
   {
     id: "progress",
@@ -27,7 +27,7 @@ export const NAVIGATION = [
     path: "/progress",
     icon: TrendingUp,
     iconSize: 18,
-    roles: ["SUPER_ADMIN", "ADMIN", "MANAGER"],
+    roles: ["SUPER_ADMIN", "ADMIN", "AIRES_ANALYST", "MANAGER", "QUEENS_GM", "QUEENS_ANALYST"],
   },
   {
     id: "products",
@@ -35,7 +35,7 @@ export const NAVIGATION = [
     path: "/products",
     icon: Package,
     iconSize: 18,
-    roles: ["SUPER_ADMIN", "ADMIN", "MANAGER"],
+    roles: ["SUPER_ADMIN", "ADMIN", "AIRES_ANALYST", "MANAGER", "QUEENS_GM", "QUEENS_ANALYST"],
   },
   {
     id: "stores",
@@ -43,7 +43,7 @@ export const NAVIGATION = [
     path: "/stores",
     icon: Store,
     iconSize: 18,
-    roles: ["SUPER_ADMIN", "ADMIN", "MANAGER"],
+    roles: ["SUPER_ADMIN", "ADMIN", "AIRES_ANALYST", "MANAGER", "QUEENS_GM", "QUEENS_ANALYST"],
   },
   {
     id: "audits",
@@ -51,7 +51,7 @@ export const NAVIGATION = [
     path: "/audits",
     icon: ShieldCheck,
     iconSize: 18,
-    roles: ["SUPER_ADMIN", "ADMIN", "MANAGER", "FIELD_AUDITOR"],
+    roles: ["SUPER_ADMIN", "ADMIN", "AIRES_ANALYST", "FIELD_AUDITOR", "MANAGER", "QUEENS_GM", "QUEENS_ANALYST"],
   },
   {
     id: "observations",
@@ -59,7 +59,7 @@ export const NAVIGATION = [
     path: "/observations",
     icon: Eye,
     iconSize: 18,
-    roles: ["SUPER_ADMIN", "ADMIN", "MANAGER"],
+    roles: ["SUPER_ADMIN", "ADMIN", "AIRES_ANALYST", "MANAGER", "QUEENS_GM", "QUEENS_ANALYST"],
   },
   {
     id: "queens-prices",
@@ -67,7 +67,7 @@ export const NAVIGATION = [
     path: "/queens-prices",
     icon: Crown,
     iconSize: 18,
-    roles: ["SUPER_ADMIN", "ADMIN", "MANAGER"],
+    roles: ["SUPER_ADMIN", "ADMIN", "AIRES_ANALYST", "MANAGER", "QUEENS_GM", "QUEENS_ANALYST"],
   },
   {
     id: "price-analysis",
@@ -75,7 +75,7 @@ export const NAVIGATION = [
     path: "/price-analysis",
     icon: BarChart3,
     iconSize: 18,
-    roles: ["SUPER_ADMIN", "ADMIN", "MANAGER"],
+    roles: ["SUPER_ADMIN", "ADMIN", "AIRES_ANALYST", "MANAGER", "QUEENS_GM", "QUEENS_ANALYST"],
   },
   {
     id: "alerts",
@@ -83,7 +83,7 @@ export const NAVIGATION = [
     path: "/alerts",
     icon: Bell,
     iconSize: 18,
-    roles: ["SUPER_ADMIN", "ADMIN", "MANAGER"],
+    roles: ["SUPER_ADMIN", "ADMIN", "AIRES_ANALYST", "MANAGER", "QUEENS_GM", "QUEENS_ANALYST"],
   },
   {
     id: "users",

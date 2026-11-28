@@ -38,6 +38,9 @@ import { AlertsPage } from "@/features/alerts/pages/AlertsPage.jsx";
 import { AlertDetailPage } from "@/features/alerts/pages/AlertDetailPage.jsx";
 import { MainLayout } from "@/components/MainLayout.jsx";
 
+const OFFICE = ["SUPER_ADMIN", "ADMIN", "AIRES_ANALYST", "MANAGER", "QUEENS_GM", "QUEENS_ANALYST"];
+const WITH_FIELD = [...OFFICE, "FIELD_AUDITOR"];
+
 const ProtectedRoute = ({ children, allowedRoles }) => {
 	const { isAuthenticated, role, isSuperAdmin, user, isImpersonating } = useAuth();
 
@@ -103,7 +106,7 @@ export const router = createBrowserRouter([
 				path: "dashboard",
 				element: (
 					<ProtectedRoute
-						allowedRoles={["SUPER_ADMIN", "ADMIN", "MANAGER", "FIELD_AUDITOR"]}
+						allowedRoles={WITH_FIELD}
 					>
 						<DashboardPage />
 					</ProtectedRoute>
@@ -112,7 +115,7 @@ export const router = createBrowserRouter([
 			{
 				path: "bi-dashboard",
 				element: (
-					<ProtectedRoute allowedRoles={["SUPER_ADMIN", "ADMIN", "MANAGER"]}>
+					<ProtectedRoute allowedRoles={OFFICE}>
 						<Dashboard />
 					</ProtectedRoute>
 				),
@@ -123,7 +126,7 @@ export const router = createBrowserRouter([
 				path: "survey",
 				element: (
 					<ProtectedRoute
-						allowedRoles={["SUPER_ADMIN", "ADMIN", "MANAGER", "FIELD_AUDITOR"]}
+						allowedRoles={WITH_FIELD}
 					>
 						<SurveyorHomePage />
 					</ProtectedRoute>
@@ -133,7 +136,7 @@ export const router = createBrowserRouter([
 				path: "survey/audit/:assignmentId",
 				element: (
 					<ProtectedRoute
-						allowedRoles={["SUPER_ADMIN", "ADMIN", "MANAGER", "FIELD_AUDITOR"]}
+						allowedRoles={WITH_FIELD}
 					>
 						<Survey />
 					</ProtectedRoute>
@@ -142,7 +145,7 @@ export const router = createBrowserRouter([
 			{
 				path: "progress",
 				element: (
-					<ProtectedRoute allowedRoles={["SUPER_ADMIN", "ADMIN", "MANAGER"]}>
+					<ProtectedRoute allowedRoles={OFFICE}>
 						<SurveyProgress />
 					</ProtectedRoute>
 				),
@@ -152,7 +155,7 @@ export const router = createBrowserRouter([
 			{
 				path: "products",
 				element: (
-					<ProtectedRoute allowedRoles={["SUPER_ADMIN", "ADMIN", "MANAGER"]}>
+					<ProtectedRoute allowedRoles={OFFICE}>
 						<ProductsPage />
 					</ProtectedRoute>
 				),
@@ -160,7 +163,7 @@ export const router = createBrowserRouter([
 			{
 				path: "stores",
 				element: (
-					<ProtectedRoute allowedRoles={["SUPER_ADMIN", "ADMIN", "MANAGER"]}>
+					<ProtectedRoute allowedRoles={OFFICE}>
 						<StoresPage />
 					</ProtectedRoute>
 				),
@@ -171,7 +174,7 @@ export const router = createBrowserRouter([
 				path: "audits",
 				element: (
 					<ProtectedRoute
-						allowedRoles={["SUPER_ADMIN", "ADMIN", "MANAGER", "FIELD_AUDITOR"]}
+						allowedRoles={WITH_FIELD}
 					>
 						<AuditListPage />
 					</ProtectedRoute>
@@ -181,7 +184,7 @@ export const router = createBrowserRouter([
 				path: "audits/history",
 				element: (
 					<ProtectedRoute
-						allowedRoles={["SUPER_ADMIN", "ADMIN", "MANAGER", "FIELD_AUDITOR"]}
+						allowedRoles={WITH_FIELD}
 					>
 						<AuditHistoryPage />
 					</ProtectedRoute>
@@ -191,7 +194,7 @@ export const router = createBrowserRouter([
 				path: "audits/:auditId",
 				element: (
 					<ProtectedRoute
-						allowedRoles={["SUPER_ADMIN", "ADMIN", "MANAGER", "FIELD_AUDITOR"]}
+						allowedRoles={WITH_FIELD}
 					>
 						<AuditDetailPage />
 					</ProtectedRoute>
@@ -201,7 +204,7 @@ export const router = createBrowserRouter([
 				path: "audits/:auditId/observations",
 				element: (
 					<ProtectedRoute
-						allowedRoles={["SUPER_ADMIN", "ADMIN", "MANAGER", "FIELD_AUDITOR"]}
+						allowedRoles={WITH_FIELD}
 					>
 						<AuditObservationsPage />
 					</ProtectedRoute>
@@ -211,7 +214,7 @@ export const router = createBrowserRouter([
 				path: "observations",
 				element: (
 					<ProtectedRoute
-						allowedRoles={["SUPER_ADMIN", "ADMIN", "MANAGER", "FIELD_AUDITOR"]}
+						allowedRoles={WITH_FIELD}
 					>
 						<ObservationsPage />
 					</ProtectedRoute>
@@ -221,7 +224,7 @@ export const router = createBrowserRouter([
 				path: "observations/:observationId",
 				element: (
 					<ProtectedRoute
-						allowedRoles={["SUPER_ADMIN", "ADMIN", "MANAGER", "FIELD_AUDITOR"]}
+						allowedRoles={WITH_FIELD}
 					>
 						<ObservationDetailPage />
 					</ProtectedRoute>
@@ -232,7 +235,7 @@ export const router = createBrowserRouter([
 			{
 				path: "queens-prices",
 				element: (
-					<ProtectedRoute allowedRoles={["SUPER_ADMIN", "ADMIN", "MANAGER"]}>
+					<ProtectedRoute allowedRoles={OFFICE}>
 						<QueensPricesPage />
 					</ProtectedRoute>
 				),
@@ -240,7 +243,7 @@ export const router = createBrowserRouter([
 			{
 				path: "queens-prices/new",
 				element: (
-					<ProtectedRoute allowedRoles={["SUPER_ADMIN", "ADMIN", "MANAGER"]}>
+					<ProtectedRoute allowedRoles={OFFICE}>
 						<CreateQueensPricePage />
 					</ProtectedRoute>
 				),
@@ -248,7 +251,7 @@ export const router = createBrowserRouter([
 			{
 				path: "queens-prices/:id",
 				element: (
-					<ProtectedRoute allowedRoles={["SUPER_ADMIN", "ADMIN", "MANAGER"]}>
+					<ProtectedRoute allowedRoles={OFFICE}>
 						<QueensPriceDetailsPage />
 					</ProtectedRoute>
 				),
@@ -256,7 +259,7 @@ export const router = createBrowserRouter([
 			{
 				path: "queens-prices/:id/edit",
 				element: (
-					<ProtectedRoute allowedRoles={["SUPER_ADMIN", "ADMIN", "MANAGER"]}>
+					<ProtectedRoute allowedRoles={OFFICE}>
 						<EditQueensPricePage />
 					</ProtectedRoute>
 				),
@@ -264,7 +267,7 @@ export const router = createBrowserRouter([
 			{
 				path: "products/:productId/queens-prices",
 				element: (
-					<ProtectedRoute allowedRoles={["SUPER_ADMIN", "ADMIN", "MANAGER"]}>
+					<ProtectedRoute allowedRoles={OFFICE}>
 						<ProductQueensPricesPage />
 					</ProtectedRoute>
 				),
@@ -274,7 +277,7 @@ export const router = createBrowserRouter([
 			{
 				path: "price-analysis",
 				element: (
-					<ProtectedRoute allowedRoles={["SUPER_ADMIN", "ADMIN", "MANAGER"]}>
+					<ProtectedRoute allowedRoles={OFFICE}>
 						<PriceAnalysisPage />
 					</ProtectedRoute>
 				),
@@ -282,7 +285,7 @@ export const router = createBrowserRouter([
 			{
 				path: "price-analysis/:id",
 				element: (
-					<ProtectedRoute allowedRoles={["SUPER_ADMIN", "ADMIN", "MANAGER"]}>
+					<ProtectedRoute allowedRoles={OFFICE}>
 						<PriceAnalysisDetailPage />
 					</ProtectedRoute>
 				),
@@ -291,7 +294,7 @@ export const router = createBrowserRouter([
 			{
 				path: "alerts",
 				element: (
-					<ProtectedRoute allowedRoles={["SUPER_ADMIN", "ADMIN", "MANAGER"]}>
+					<ProtectedRoute allowedRoles={OFFICE}>
 						<AlertsPage />
 					</ProtectedRoute>
 				),
@@ -299,7 +302,7 @@ export const router = createBrowserRouter([
 			{
 				path: "alerts/:id",
 				element: (
-					<ProtectedRoute allowedRoles={["SUPER_ADMIN", "ADMIN", "MANAGER"]}>
+					<ProtectedRoute allowedRoles={OFFICE}>
 						<AlertDetailPage />
 					</ProtectedRoute>
 				),

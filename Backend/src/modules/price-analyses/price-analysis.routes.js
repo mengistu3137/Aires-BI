@@ -25,7 +25,7 @@ router.get(
 
 router.get(
   "/export/excel",
-  restrictTo("ADMIN", "MANAGER"),
+  restrictTo("ADMIN", "AIRES_ANALYST", "MANAGER", "QUEENS_GM", "QUEENS_ANALYST"),
   priceAnalysisController.exportPriceAnalysisExcel,
 );
 router.get(
@@ -49,14 +49,14 @@ router.get(
 // 2. Calculation & Action Directives
 router.post(
   "/calculate",
-  restrictTo("ADMIN", "MANAGER"),
+  restrictTo("ADMIN", "AIRES_ANALYST", "MANAGER"),
   validate(createOrUpdateAnalysisSchema, "body"),
   priceAnalysisController.calculateProductAnalysis,
 );
 // Queens Admin submits request -> Real-time alert dispatched to Aires Admin
 router.post(
   "/request-recalculation",
-  restrictTo("SUPER_ADMIN", "ADMIN", "MANAGER"),
+  restrictTo("SUPER_ADMIN", "ADMIN", "AIRES_ANALYST", "MANAGER"),
   validate(requestRecalculationSchema, "body"),
   priceAnalysisController.requestRecalculation,
 );
@@ -73,7 +73,7 @@ router.delete(
 );
 router.post(
   "/recalculate",
-  restrictTo("ADMIN", "MANAGER"),
+  restrictTo("ADMIN", "AIRES_ANALYST", "MANAGER"),
   validate(recalculateSurveyPeriodSchema, "body"),
   priceAnalysisController.recalculateSurveyPeriodAnalysis,
 );
@@ -81,7 +81,7 @@ router.post(
 // 1-Click Recommended Price Adjustment
 router.post(
   "/apply-recommendation/:id",
-  restrictTo("ADMIN", "MANAGER"),
+  restrictTo("ADMIN", "MANAGER", "QUEENS_GM"),
   validate(priceAnalysisIdParamSchema, "params"),
   priceAnalysisController.applyRecommendedPrice,
 );

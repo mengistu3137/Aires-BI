@@ -26,6 +26,7 @@ export const PriceAnalysisPage = () => {
 	const navigate = useNavigate();
 	const { isManager, isAdmin, role } = useAuth();
 	
+	const canExport = hasPermission(role, PERMISSIONS.EXPORT_DATA);
 	const canRunModels = hasPermission(role, PERMISSIONS.RUN_ANALYSIS_MODELS); // Aires Admin & Super Admin
 	const canRequestRecalc = hasPermission(
 		role,
@@ -217,7 +218,7 @@ export const PriceAnalysisPage = () => {
 					)}
 
 					{/* Excel Export available to Queens Admin and Aires */}
-					{isManager && (
+					{canExport && (
 						<button
 							type="button"
 							onClick={handleExport}

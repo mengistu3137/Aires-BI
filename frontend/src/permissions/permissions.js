@@ -60,6 +60,7 @@ export const DEFAULT_ROLE_PERMISSIONS = {
         PERMISSIONS.RUN_ANALYSIS_MODELS,
         PERMISSIONS.MANAGE_AUDITORS,
         PERMISSIONS.EDIT_BENCHMARKS,
+        PERMISSIONS.GENERATE_INTELLIGENCE_REPORT,
         PERMISSIONS.CREATE_PRODUCT,
         PERMISSIONS.EDIT_PRODUCT,
         PERMISSIONS.VIEW_DASHBOARD,
@@ -70,6 +71,14 @@ export const DEFAULT_ROLE_PERMISSIONS = {
         PERMISSIONS.DECIDE_PRICE_ACTIONS,
         PERMISSIONS.VIEW_ASSIGNMENT,
         PERMISSIONS.SUBMIT_SURVEY,
+    ],
+    AIRES_ANALYST: [
+        PERMISSIONS.VIEW_DASHBOARD,
+        PERMISSIONS.VIEW_FIELD_PROGRESS,
+        PERMISSIONS.RUN_ANALYSIS_MODELS,
+        PERMISSIONS.GENERATE_INTELLIGENCE_REPORT,
+        PERMISSIONS.EXPORT_DATA,
+        PERMISSIONS.REQUEST_RECALCULATION,
     ],
     MANAGER: [
         // Queens Admin: Strictly analytical and review by default
@@ -82,7 +91,24 @@ export const DEFAULT_ROLE_PERMISSIONS = {
         PERMISSIONS.CREATE_CLIENT_USERS,
         PERMISSIONS.CREATE_PRODUCT,
         PERMISSIONS.EDIT_PRODUCT,
+        PERMISSIONS.EDIT_BENCHMARKS,
+        PERMISSIONS.FINAL_QC_APPROVAL,
+        PERMISSIONS.RUN_ANALYSIS_MODELS,
+        PERMISSIONS.GENERATE_INTELLIGENCE_REPORT,
         PERMISSIONS.VIEW_ASSIGNMENT,
+    ],
+    QUEENS_GM: [
+        PERMISSIONS.VIEW_DASHBOARD,
+        PERMISSIONS.VIEW_FIELD_PROGRESS,
+        PERMISSIONS.GENERATE_INTELLIGENCE_REPORT,
+        PERMISSIONS.EXPORT_DATA,
+        PERMISSIONS.DECIDE_PRICE_ACTIONS,
+    ],
+    QUEENS_ANALYST: [
+        PERMISSIONS.VIEW_DASHBOARD,
+        PERMISSIONS.VIEW_FIELD_PROGRESS,
+        PERMISSIONS.GENERATE_INTELLIGENCE_REPORT,
+        PERMISSIONS.EXPORT_DATA,
     ],
     FIELD_AUDITOR: [
         PERMISSIONS.VIEW_ASSIGNMENT,
@@ -92,11 +118,14 @@ export const DEFAULT_ROLE_PERMISSIONS = {
 
 const STORAGE_KEY = "aires_custom_role_permissions";
 const SCHEMA_KEY = "aires_permissions_schema";
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 const INTRODUCED_PRIVILEGES = [
     PERMISSIONS.GENERATE_INTELLIGENCE_REPORT,
     PERMISSIONS.CREATE_PRODUCT,
     PERMISSIONS.EDIT_PRODUCT,
+    PERMISSIONS.EDIT_BENCHMARKS,
+    PERMISSIONS.FINAL_QC_APPROVAL,
+    PERMISSIONS.RUN_ANALYSIS_MODELS,
 ];
 
 const applyNewPrivilegeDefaults = (stored) => {
@@ -121,7 +150,19 @@ const applyNewPrivilegeDefaults = (stored) => {
 export const getStoredPermissions = () => {
     try {
         const stored = localStorage.getItem(STORAGE_KEY);
-        if (stored) return applyNewPrivilegeDefaults(JSON.parse(stored));
+        if (stored) {
+            const parsed = applyNewPrivilegeDefaults(JSON.parse(stored));
+            const next = { ...parsed };
+            let changed = false;
+            for (const role of Object.keys(DEFAULT_ROLE_PERMISSIONS)) {
+                if (!Array.isArray(next[role])) {
+                    next[role] = [...DEFAULT_ROLE_PERMISSIONS[role]];
+                    changed = true;
+                }
+            }
+            if (changed) localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+            return next;
+        }
     } catch {
         // fallback
     }
@@ -144,6 +185,7 @@ export const hasPermission = (role, permission) => {
 // Check if a role has access to view a specific sidebar page
 export const canRoleViewPage = (role, pageId) => {
     if (!role || !pageId) return false;
+    if (role === "SUPER_ADMIN") return true;
     const customPagesKey = "aires_custom_role_pages";
     try {
         const stored = localStorage.getItem(customPagesKey);

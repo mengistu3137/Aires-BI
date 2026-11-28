@@ -290,7 +290,7 @@ export const AuditDetailPage = () => {
 		isAssignedAuditor &&
 		user?.role === "FIELD_AUDITOR" &&
 		audit.status === "IN_PROGRESS";
-	const canViewObservations = isManager || isAdmin;
+	const canViewObservations = user?.role !== "FIELD_AUDITOR";
 
 	const hasPhotoProof = (audit.evidencePhotos?.length || 0) > 0;
 	const canHealGps = canReviewAudits;

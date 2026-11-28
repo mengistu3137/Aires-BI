@@ -110,11 +110,14 @@ export const Header = ({ onToggleSidebar }) => {
 	};
 
 	const getRoleLabel = () => {
-		if (isAuditor) return "Field Auditor";
-		if (isQueensAdmin) return "Queens Admin";
 		if (isSuperAdmin) return "Aires Super Admin";
 		if (role === "ADMIN") return "Aires Admin";
-		return role?.replace("_", " ") || "Staff";
+		if (role === "AIRES_ANALYST") return "Aires Analyst";
+		if (isAuditor) return "Field Auditor";
+		if (role === "QUEENS_GM") return "General Manager";
+		if (isQueensAdmin) return "Queens Admin";
+		if (role === "QUEENS_ANALYST") return "Queens Analyst";
+		return "Staff";
 	};
 
 	return (
