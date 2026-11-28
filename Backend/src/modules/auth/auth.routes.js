@@ -23,6 +23,13 @@ router.post(
   authController.changePassword,
 );
 
+router.get(
+  "/login-audit",
+  authenticate,
+  restrictTo("SUPER_ADMIN"),
+  authController.listLoginAudit,
+);
+
 // POST /impersonate/:userId (Super Admin only)
 router.post(
     "/impersonate/:userId",

@@ -9,6 +9,7 @@ import {
   BarChart3,
   Bell,
   Users,
+  ClipboardList,
 } from "lucide-react";
 import { canRoleViewPage } from "@/permissions/permissions.js";
 
@@ -92,6 +93,14 @@ export const NAVIGATION = [
     icon: Users,
     iconSize: 18,
     roles: ["SUPER_ADMIN", "ADMIN"],
+  },
+  {
+    id: "login-audit",
+    label: "Login Audit",
+    path: "/login-audit",
+    icon: ClipboardList,
+    iconSize: 18,
+    roles: ["SUPER_ADMIN"],
   },
 ];
 

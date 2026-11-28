@@ -185,6 +185,7 @@ export const hasPermission = (role, permission) => {
 // Check if a role has access to view a specific sidebar page
 export const canRoleViewPage = (role, pageId) => {
     if (!role || !pageId) return false;
+    if (pageId === "login-audit") return role === "SUPER_ADMIN";
     if (role === "SUPER_ADMIN") return true;
     const customPagesKey = "aires_custom_role_pages";
     try {

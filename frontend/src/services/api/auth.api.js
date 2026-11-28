@@ -10,6 +10,11 @@ export const getCurrentUserRequest = async () => {
   return response.data;
 };
 
+export const getLoginAuditRequest = async ({ page = 1, limit = 20 } = {}) => {
+  const response = await apiClient.get("/auth/login-audit", { params: { page, limit } });
+  return response.data;
+};
+
 export const changePasswordRequest = async ({ currentPassword, newPassword }) => {
   const response = await apiClient.post("/auth/change-password", {
     currentPassword,

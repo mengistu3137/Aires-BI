@@ -27,6 +27,7 @@ import reportRoutes from "./modules/report/report.routes.js";
 import aiRoutes from "./modules/ai/ai.routes.js";
 import { fileURLToPath } from "url";
 const app = express();
+app.set("trust proxy", 1);
 
 // Security and utility middleware
 app.use(helmet());

@@ -6,6 +6,7 @@ import { SurveyorHomePage } from "@/features/survey/pages/SurveyorHomePage.jsx";
 import { Survey } from "@/features/survey/pages/Survery.jsx";
 import { SurveyProgress } from "@/features/survey/pages/SurveyProgress.jsx";
 import { UsersPage } from "@/features/users/pages/UsersPage.jsx";
+import { LoginAuditPage } from "@/features/users/pages/LoginAuditPage.jsx";
 import { StoresPage } from "@/features/stores/pages/StoresPage.jsx";
 import { ProductsPage } from "@/features/products/pages/ProductsPage.jsx";
 import { useAuth } from "@/hooks/useAuth.js";
@@ -313,6 +314,14 @@ export const router = createBrowserRouter([
 				element: (
 					<ProtectedRoute allowedRoles={["SUPER_ADMIN", "ADMIN"]}>
 						<UsersPage />
+					</ProtectedRoute>
+				),
+			},
+			{
+				path: "login-audit",
+				element: (
+					<ProtectedRoute allowedRoles={["SUPER_ADMIN"]}>
+						<LoginAuditPage />
 					</ProtectedRoute>
 				),
 			},

@@ -1,8 +1,10 @@
 import { authService } from "./auth.service.js";
+import { describeClient } from "./client-info.js";
 
 export const login = async (req, res, next) => {
   try {
-    const data = await authService.login(req.body);
+    const client = await describeClient(req);
+    const data = await authService.login(req.body, client);
     res.status(200).json({
       status: "success",
       message: "Login successful",
@@ -15,7 +17,7 @@ export const login = async (req, res, next) => {
 
 export const logout = async (req, res, next) => {
   try {
-    await authService.logout(req.user.id);
+    await authService.logout(req.user.id, req.user.sessionId);
     res.status(200).json({
       status: "success",
       message: "Logout successful. Session cleared.",
@@ -50,6 +52,18 @@ export const changePassword = async (req, res, next) => {
   }
 };
 
+export const listLoginAudit = async (req, res, next) => {
+  try {
+    const data = await authService.listLoginAudit(req.query);
+    res.status(200).json({
+      status: "success",
+      data,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const impersonate = async (req, res, next) => {
   try {
     const data = await authService.impersonateUser(req.params.userId, req.user);
@@ -68,5 +82,6 @@ export const authController = {
   logout,
   getMe,
   changePassword,
+  listLoginAudit,
   impersonate,
 };

@@ -1,6 +1,7 @@
 import prisma from "../config/db.js";
 import ApiError from "../utils/api-error.js";
 import { verifyToken } from "../utils/jwt.js";
+import { touchLoginSession } from "../modules/auth/login-session.service.js";
 
 /**
  * Protect routes by verifying JWT Bearer token and checking active status
@@ -51,8 +52,10 @@ export const authenticate = async (req, res, next) => {
 
     req.user = {
       ...user,
+      sessionId: decoded.impersonatedBy ? null : decoded.sessionId || null,
       impersonatedBy: decoded.impersonatedBy || null,
     };
+    touchLoginSession(req.user.sessionId);
 
     const requestPath = req.originalUrl.split("?")[0];
     const allowedDuringPasswordChange = [

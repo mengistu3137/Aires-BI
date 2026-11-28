@@ -14,10 +14,11 @@ export const sanitizeUser = (user) => {
   return safeUser;
 };
 
-export const generateAuthPayload = (user) => {
+export const generateAuthPayload = (user, sessionId) => {
   const token = signToken({
     id: user.id,
     role: user.role,
+    sessionId: sessionId || null,
   });
 
   return {

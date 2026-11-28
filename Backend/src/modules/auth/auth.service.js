@@ -1,6 +1,7 @@
 import prisma from "../../config/db.js";
 import ApiError from "../../utils/api-error.js";
 import { comparePassword, generateAuthPayload, hashPassword, sanitizeUser } from "./auth.helpers.js";
+import { closeLoginSession, listLoginAudit, openLoginSession } from "./login-session.service.js";
 import { signToken } from "../../utils/jwt.js";
 
 
@@ -73,7 +74,7 @@ const resolveLoginCandidates = (identifier) => {
   return { emailCandidate: clean.toLowerCase(), phoneCandidates: candidates };
 };
 
-export const login = async ({ identifier, password }) => {
+export const login = async ({ identifier, password }, client = {}) => {
   const { emailCandidate, phoneCandidates } = resolveLoginCandidates(identifier);
 
   const user = await prisma.user.findFirst({
@@ -98,10 +99,11 @@ export const login = async ({ identifier, password }) => {
     throw new ApiError(401, "Invalid credentials. Incorrect password.");
   }
 
-  return generateAuthPayload(user);
+  const session = await openLoginSession(user.id, client);
+  return generateAuthPayload(user, session.id);
 };
 
-export const logout = async (userId) => {
+export const logout = async (userId, sessionId) => {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: { id: true, active: true },
@@ -111,6 +113,7 @@ export const logout = async (userId) => {
     throw new ApiError(404, "User not found.");
   }
 
+  await closeLoginSession(sessionId);
   return { success: true };
 };
 
@@ -165,4 +168,5 @@ export const authService = {
   getMe,
   changePassword,
   impersonateUser,
+  listLoginAudit,
 };
